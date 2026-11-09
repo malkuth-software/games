@@ -46,14 +46,14 @@ const char* kind_line(Smarts s) {
 
 SheepView::SheepView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt) {
     cab_front_ = !opt_.hosted;
-    set_focusable(true);
+    focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     {
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
         set_authored_surface_material(none);
     }
-    set_accessible_name("Pen the Sheep. Put up fences on the meadow to pen the sheep in before it reaches the edge.");
+    accessible_name = "Pen the Sheep. Put up fences on the meadow to pen the sheep in before it reaches the edge.";
     if (load()) start_meadow(true);
     else new_meadow();
     if (const char* sc = std::getenv("SH_SCRIPT"); sc && opt_.dev) {
@@ -81,7 +81,7 @@ void SheepView::on_attached_to_window() {
     (*timer_).start();
 }
 
-void SheepView::on_detaching_from_window(gf::Window&) noexcept {
+void SheepView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
     try { persist(); } catch (...) {}
     if (timer_) (*timer_).stop();
     timer_.reset();
@@ -310,7 +310,7 @@ bool SheepView::load() {
 
 // ------------------------------------------------------------------ the frame
 void SheepView::play(const std::string& name, float gain, float rate) {
-    audio_sfx(name, gain, rate, (opt_.hosted || sound_) && cab_sound_ && cab_front_ && visible());
+    audio_sfx(name, gain, rate, (opt_.hosted || sound_) && cab_sound_ && cab_front_ && visible.read());
 }
 
 void SheepView::run_script() {
@@ -453,7 +453,7 @@ void SheepView::animate(double dt) {
 }
 
 void SheepView::tick() {
-    if (!visible() || !cab_front_) { last_t_ = std::chrono::steady_clock::now(); return; }
+    if (!visible.read() || !cab_front_) { last_t_ = std::chrono::steady_clock::now(); return; }
     const auto now = std::chrono::steady_clock::now();
     const double dt = std::clamp(std::chrono::duration<double>(now - last_t_).count(), 0.0, .25);
     last_t_ = now;
@@ -468,7 +468,7 @@ void SheepView::tick() {
         const bool on = (opt_.hosted || music_) && cab_music_ && cab_front_;
         // Four tracks in turn, meadow by meadow: "Pasture Haze", "Long Grass", "Cloud Choir", "Morning Bells".
         static const char* const tracks[4] = {"sh_music_bells", "sh_music", "sh_music_grass", "sh_music_choir"};
-        audio_music(visible() && cab_front_ ? tracks[seed_ % 4] : "", on);
+        audio_music(visible.read() && cab_front_ ? tracks[seed_ % 4] : "", on);
     }
     audio_tick(dt);
     save_t_ += dt;
@@ -478,7 +478,7 @@ void SheepView::tick() {
     static const bool capturing = opt_.dev && std::getenv("SH_PRINT_WID");
     const bool hidden = win && (*win).occluded() && !capturing;
     const bool front = !win || (*win).active();
-    const bool shown = visible();
+    const bool shown = visible.read();
     const auto pace = std::chrono::milliseconds(hidden || !shown || !cab_front_ ? 500 : front ? 33 : 100);
     if (timer_ && (*timer_).interval() != pace) (*timer_).set_interval(pace);
 
@@ -526,7 +526,7 @@ void SheepView::on_pointer(gf::PointerEvent& e) {
         hover_ = hit();
         st_.hover = hover_.empty() && on_board ? pas_.pick(mouse_x_, mouse_y_) : -1;
         st_.hover_ok = st_.hover >= 0 && m_.can_place(st_.hover);
-        set_cursor(!hover_.empty() || st_.hover_ok ? gf::CursorKind::hand : gf::CursorKind::arrow);
+        cursor = !hover_.empty() || st_.hover_ok ? gf::CursorKind::hand : gf::CursorKind::arrow;
     }
     if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
         activate();

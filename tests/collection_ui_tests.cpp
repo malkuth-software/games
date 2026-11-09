@@ -291,26 +291,26 @@ int main() {
         assert(shelf && capsule && !eggy && !cards);
         // The shell's own five, and the business card, hidden until help opens it; no game yet.
         const std::shared_ptr<gf::Control> business_card = child(*collection, "collection.business-card");
-        assert(business_card && !(*business_card).visible());
+        assert(business_card && !(*business_card).visible.read());
         assert((*collection).children().size() == 6);
-        assert((*shelf).visible() && !(*capsule).visible());
+        assert((*shelf).visible.read() && !(*capsule).visible.read());
         // PlaySuite lists all thirteen games in one place, with no categories.
         for (Entry entry : entries)
             assert(button(*shelf, "shelf.box." + std::to_string(static_cast<int>(entry))) &&
-                   (*button(*shelf, "shelf.box." + std::to_string(static_cast<int>(entry)))).visible());
+                   (*button(*shelf, "shelf.box." + std::to_string(static_cast<int>(entry)))).visible.read());
         assert(!button(*shelf, "collection.category.0"));
         assert(!std::filesystem::exists(scratch / "eggy-v1.txt"));
         const std::string eggy_box = "shelf.box." + std::to_string(static_cast<int>(Entry::eggy));
         assert((*button(*shelf, eggy_box)).perform_click()); // one click opens the box
-        assert((*button(*shelf, eggy_box)).selected());
+        assert((*button(*shelf, eggy_box)).selected.read());
         eggy = child(*collection, "collection.eggy");
         assert(eggy);
         window.perform_layout();
-        assert(!(*shelf).visible() && (*eggy).visible() && (*capsule).visible());
+        assert(!(*shelf).visible.read() && (*eggy).visible.read() && (*capsule).visible.read());
         assert(!std::filesystem::exists(scratch / "eggy-v1.txt"));
         click(window, *eggy, {200, 200}); // Begin the first climb, using nested coordinates.
         assert((*button(*capsule, "capsule.back")).perform_click());
-        assert((*shelf).visible() && !(*eggy).visible() && !(*capsule).visible());
+        assert((*shelf).visible.read() && !(*eggy).visible.read() && !(*capsule).visible.read());
         eggy::SaveData restored;
         assert(eggy::load_save(scratch / "eggy-v1.txt", restored));
         // Each card game is its own box and opens the shared table on that game.
@@ -318,7 +318,7 @@ int main() {
             (*collection).open_entry(e);
             cards = child(*collection, "collection.cards");
             window.perform_layout();
-            assert((*cards).visible() && !(*shelf).visible());
+            assert((*cards).visible.read() && !(*shelf).visible.read());
             assert(static_cast<int>((*std::static_pointer_cast<Table>(cards)).game.state.kind) ==
                    static_cast<int>(e));
             assert(button(*capsule, "capsule.cmd.new") && button(*capsule, "capsule.cmd.undo"));
@@ -378,24 +378,24 @@ int main() {
             gf::Window& window;
             std::shared_ptr<gf::Control> operator()(Entry e, const std::string& id) const {
                 std::shared_ptr<gf::Control> view = child(*collection, id);
-                assert(!view || !(*view).visible());
+                assert(!view || !(*view).visible.read());
                 const std::string box = "shelf.box." + std::to_string(static_cast<int>(e));
                 assert((*button(*shelf, box)).perform_click());
                 window.perform_layout();
                 view = child(*collection, id);
-                assert(view && !(*shelf).visible() && (*view).visible());
+                assert(view && !(*shelf).visible.read() && (*view).visible.read());
                 return view;
             }
         };
         VisitGame visit{child, collection, shelf, window};
         std::shared_ptr<gf::Control> switchbox = visit(Entry::switchbox, "switchbox.view");
         assert((*button(*capsule, "capsule.back")).perform_click());
-        assert((*shelf).visible() && !(*switchbox).visible());
+        assert((*shelf).visible.read() && !(*switchbox).visible.read());
         // The retired puzzle-view versions of Four Pegs and Atom Probe are never offered.
         assert(!child(*collection, "collection.puzzle.4") &&
                !child(*collection, "collection.puzzle.3"));
         std::shared_ptr<gf::Control> fourpegs = visit(Entry::pegs, "fourpegs.view");
-        assert(!(*switchbox).visible());
+        assert(!(*switchbox).visible.read());
         // Hosted explanations open the shared document, not the game's former popup.
         open_capsule();
         assert(!button(*capsule, "capsule.cmd.help"));
@@ -405,14 +405,14 @@ int main() {
         (*collection).close_help();
         assert((*std::static_pointer_cast<fp::FourPegsView>(fourpegs)).host_panel().empty());
         assert((*button(*capsule, "capsule.back")).perform_click());
-        assert((*shelf).visible() && !(*fourpegs).visible());
+        assert((*shelf).visible.read() && !(*fourpegs).visible.read());
         std::shared_ptr<gf::Control> atomprobe = visit(Entry::atom, "atomprobe.view");
-        assert(!(*fourpegs).visible());
+        assert(!(*fourpegs).visible.read());
         open_capsule();
         assert((*button(*capsule, "capsule.cmd.scores")).perform_click());
         assert((*std::static_pointer_cast<ap::AtomProbeView>(atomprobe)).host_panel() == "scores");
         assert((*button(*capsule, "capsule.back")).perform_click());
-        assert((*shelf).visible() && !(*atomprobe).visible());
+        assert((*shelf).visible.read() && !(*atomprobe).visible.read());
         for (Entry entry : {Entry::koikoi, Entry::parrots, Entry::liarsdice, Entry::penthesheep,
                             Entry::rockstack}) {
             (*collection).open_entry(entry);
@@ -422,7 +422,7 @@ int main() {
             assert(!button(*capsule, "capsule.cmd." + id));
             CommandSource* source = nullptr;
             for (const std::shared_ptr<gf::Control>& candidate : (*collection).children())
-                if ((*candidate).visible()) {
+                if ((*candidate).visible.read()) {
                     CommandSource* match = dynamic_cast<CommandSource*>(candidate.get());
                     if (match)
                         source = match;
@@ -480,7 +480,7 @@ int main() {
         assert((*capsule_sound).crossed() == !sound && (*shelf_sound).crossed() == !sound);
         store.toggle_sound(); // as a game's own menu or the Settings screen would
         assert((*capsule_sound).crossed() == sound && (*shelf_sound).crossed() == sound);
-        assert((*capsule_sound).accessible_name() == (sound ? "Sound off" : "Sound on"));
+        assert((*capsule_sound).accessible_name.read() == (sound ? "Sound off" : "Sound on"));
         // M, and the capsule's own switch, go through the same store.
         const bool music = store.values().music;
         gf::KeyEvent key;
@@ -498,7 +498,7 @@ int main() {
         for (const std::shared_ptr<gf::Control>& c : (*collection).children())
             if (std::dynamic_pointer_cast<SettingsSheet>(c))
                 sheet = std::static_pointer_cast<SettingsSheet>(c);
-        assert(sheet && (*sheet).visible());
+        assert(sheet && (*sheet).visible.read());
         struct FindNamed {
             std::shared_ptr<gf::Control> operator()(gf::Control& root, const std::string& suffix) const {
                 for (const std::shared_ptr<gf::Control>& c : root.children()) {
@@ -520,22 +520,22 @@ int main() {
         const std::shared_ptr<SettingSlider> sound_slider =
             std::dynamic_pointer_cast<SettingSlider>(named(*sheet, ".slider.sound"));
         assert(music_box && music_slider && sound_slider);
-        assert((*music_box).checked() == store.values().music);
+        assert((*music_box).checked.read() == store.values().music);
         assert((*music_box).perform_click());
-        assert(store.values().music == !music && (*music_box).checked() == !music &&
+        assert(store.values().music == !music && (*music_box).checked.read() == !music &&
                (*capsule_music).crossed() == music);
         // Volumes: the slider moves the master and every audio path's gain with it.
-        (*music_slider).set_value(50);
+        (*music_slider).value = 50;
         assert(std::abs(store.values().music_volume - .5) < 1e-9);
         assert(std::abs(bus_gain(AudioBus::music) - .25) < 1e-9);
-        (*sound_slider).set_value(80);
+        (*sound_slider).value = 80;
         assert(std::abs(bus_gain(AudioBus::sound) - .64) < 1e-9);
         assert(std::abs(bus_gain(AudioBus::music) - .25) < 1e-9);
         // A change elsewhere moves the slider.
         SuiteSettings next = store.values();
         next.music_volume = .7;
         store.set(next);
-        assert(std::abs((*music_slider).value() - 70) < 1e-9);
+        assert(std::abs((*music_slider).value.read() - 70) < 1e-9);
         // Card games choose the shared card back here; the table draws it at once.
         const std::shared_ptr<gf::Button> ruby = std::dynamic_pointer_cast<gf::Button>(named(*sheet, ".back.1"));
         assert(ruby && (*ruby).perform_click() && store.values().card_back == 1);
@@ -583,7 +583,7 @@ int main() {
             window.perform_layout();
             // The same corner link and shortcuts work over every render path.
             const std::shared_ptr<gf::Button> help = button(*collection, "collection.help");
-            assert(help && (*help).visible());
+            assert(help && (*help).visible.read());
             click(window, *help, {18, 18});
             assert((*collection).help_open());
             window.perform_layout();
@@ -638,7 +638,7 @@ int main() {
                     const gf::Point top = (*c).point_to_window({0, 0});
                     assert(top.x >= 0 && top.y >= 0 && top.x + r.width <= 600 && top.y + r.height <= 420);
                     const std::shared_ptr<gf::Control> focus = window.focused_control();
-                    assert(focus && (*focus).focusable());
+                    assert(focus && (*focus).focusable.read());
                     painter.text_seen.clear();
                     static_cast<void>(window.paint(painter));
                     assert(painter.text_seen.contains(std::string(entry_info(entry).title) + " · Settings"));
@@ -652,7 +652,7 @@ int main() {
             // Invoke through hit-testing, not perform_click(): a game painted
             // above the capsule must not steal its Back button's pointer input.
             const std::shared_ptr<gf::Button> back = button(*capsule, "capsule.back");
-            assert(back && (*back).visible());
+            assert(back && (*back).visible.read());
             gf::Rect back_bounds = (*back).client_rectangle();
             click(window, *back, {back_bounds.width * .5, back_bounds.height * .5});
             assert((*collection).shelf_open());
@@ -666,7 +666,7 @@ int main() {
             assert(folded_back.x == expanded_back.x && folded_back.y == expanded_back.y);
             const gf::Rect bounds = (*capsule).client_rectangle();
             for (const std::shared_ptr<gf::Control>& child : (*capsule).children()) {
-                assert((*child).visible());
+                assert((*child).visible.read());
                 const gf::Rect rect = (*child).client_rectangle();
                 const gf::Point bottom = (*child).point_to_window({rect.width, rect.height});
                 const gf::Point top = (*child).point_to_window({0, 0});

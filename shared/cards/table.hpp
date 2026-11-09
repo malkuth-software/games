@@ -134,7 +134,7 @@ class Table final : public gf::Control, public CommandSource {
     [[nodiscard]] std::uint32_t deal_seed(Kind kind, int option);
     [[nodiscard]] std::string level_name() const;
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
     void action(gf::ButtonBase& button);
     void tick();
     void layout_cards(bool animate);

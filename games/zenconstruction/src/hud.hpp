@@ -53,7 +53,7 @@ private:
 class HoldButton final : public games::SuiteButton {
 public:
     HoldButton(gf::StableId id, std::string text);
-    [[nodiscard]] bool holding() const { return enabled() && pressed_visual() && hovered_visual(); }
+    [[nodiscard]] bool holding() const { return enabled.read() && pressed_visual() && hovered_visual(); }
     // 0 while not held; 1 when the hold is complete.
     void set_progress(double progress);
     void on_paint(gf::Painter& painter, gf::Rect damage) override;

@@ -74,6 +74,6 @@ class HelpBook final : public gf::Control {
     void wheel_over_card(gf::PointerEvent& event);
     void card_clicked();
     void visibility(bool shown);
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
 };
 } // namespace games

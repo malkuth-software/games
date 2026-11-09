@@ -198,14 +198,14 @@ BusinessCard::BusinessCard(gf::StableId id, Kind kind)
     : Control(std::move(id)), kind_(kind),
       remarks_(static_cast<std::uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count())) {
     set_paint_plane(gf::PaintPlane::overlay);
-    set_focusable(true);
+    focusable = true;
     if (kind_ == Kind::page) {
-        set_accessible_name("Rainstar Software business card");
-        set_accessible_description("Opens the card (Enter).");
+        accessible_name = "Rainstar Software business card";
+        accessible_description = "Opens the card (Enter).";
     } else {
-        set_accessible_name("Rainstar Software business card, in the hand");
-        set_accessible_description(std::string(contact) + ". Enter opens " + std::string(website) +
-                                   "; the arrow keys turn the card; Escape puts it away.");
+        accessible_name = "Rainstar Software business card, in the hand";
+        accessible_description = std::string(contact) + ". Enter opens " + std::string(website) +
+                                   "; the arrow keys turn the card; Escape puts it away.";
     }
     for (int c = 0; c < 3; ++c) {
         material_.edge[c] = linear_of(kStock.colour[c]) * .78;
@@ -226,7 +226,7 @@ void BusinessCard::initialize_control_tree() {
         return;
     std::shared_ptr<HelpGlyph> mark = gf::make_control<HelpGlyph>(gf::StableId(std::string(stable_id().value()) + ".close"), "×");
     (*mark).set_ink(gf::Color::rgba(228, 220, 196));
-    (*mark).set_accessible_name("Put the card away (Escape)");
+    (*mark).accessible_name = "Put the card away (Escape)";
     (*mark).set_paint_plane(gf::PaintPlane::overlay);
     gf::on((*mark).clicked(), *this, &BusinessCard::put_away);
     close_mark_ = mark;
@@ -343,7 +343,7 @@ void BusinessCard::on_attached_to_window() {
     wake();
 }
 
-void BusinessCard::on_detaching_from_window(gf::Window& window) noexcept {
+void BusinessCard::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
     if (timer_)
         (*timer_).stop();
     timer_.reset();
@@ -709,9 +709,9 @@ void BusinessCard::hover(gf::Point local) {
     if (pointing != over_company_) {
         over_company_ = pointing;
         if (pointing)
-            set_cursor(gf::CursorKind::hand);
+            cursor = gf::CursorKind::hand;
         else
-            set_cursor(std::nullopt);
+            cursor = std::nullopt;
     }
     wake();
 }
@@ -720,7 +720,7 @@ void BusinessCard::unhover() {
     hovering_ = false;
     if (over_company_) {
         over_company_ = false;
-        set_cursor(std::nullopt);
+        cursor = std::nullopt;
     }
     wake();
 }

@@ -45,14 +45,13 @@ int size_index(int n) {
 
 SpecimenCabinetView::SpecimenCabinetView(gf::StableId id, Options options) : Control(std::move(id)), options_(options) {
     front_ = !options_.hosted;
-    set_focusable(true);
+    focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     gf::SurfaceMaterial plain;
     plain.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(36, 23, 14))};
     set_authored_surface_material(plain);
-    set_accessible_name(
-        "Specimen Cabinet. Set every stone in the cabinet so that no row and no column holds two stones of one "
-        "shape or of one material.");
+    accessible_name = "Specimen Cabinet. Set every stone in the cabinet so that no row and no column holds two stones of one "
+        "shape or of one material.";
     scene_.set_runner(Runner{crew_run, nullptr});
     if (!restore()) {
         session_ = Session{};
@@ -118,7 +117,7 @@ void SpecimenCabinetView::on_attached_to_window() {
     request_frame();
 }
 
-void SpecimenCabinetView::on_detaching_from_window(gf::Window&) noexcept {
+void SpecimenCabinetView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
     try {
         persist();
     } catch (...) {
@@ -193,7 +192,7 @@ void SpecimenCabinetView::on_paint(gf::Painter& painter, gf::Rect) {
 
 void SpecimenCabinetView::request_frame() {
     render_dirty_ = true;
-    if (!timer_ || !visible() || !front_)
+    if (!timer_ || !visible.read() || !front_)
         return;
     if (!(*timer_).enabled())
         last_tick_ = std::chrono::steady_clock::now();
@@ -202,7 +201,7 @@ void SpecimenCabinetView::request_frame() {
 }
 
 bool SpecimenCabinetView::clock_running() const {
-    return session_.playing && !session_.won && panel_ == Panel::none && !help_ && front_ && visible();
+    return session_.playing && !session_.won && panel_ == Panel::none && !help_ && front_ && visible.read();
 }
 
 bool SpecimenCabinetView::dropping() const {
@@ -236,7 +235,7 @@ void SpecimenCabinetView::step_drops(double seconds) {
 }
 
 void SpecimenCabinetView::tick() {
-    if (!visible() || !front_) {
+    if (!visible.read() || !front_) {
         if (timer_)
             (*timer_).stop();
         return;
@@ -340,7 +339,7 @@ void SpecimenCabinetView::publish() {
 }
 
 void SpecimenCabinetView::play(const std::string& name, float gain, float rate) {
-    audio_sfx(name, gain, rate, sound_ && front_ && visible());
+    audio_sfx(name, gain, rate, sound_ && front_ && visible.read());
 }
 
 void SpecimenCabinetView::sync_music() {
@@ -581,7 +580,7 @@ void SpecimenCabinetView::on_pointer(gf::PointerEvent& event) {
     if (panel_ != Panel::none) {
         const int button = panel_button(x, y);
         if (event.action == gf::PointerAction::move) {
-            set_cursor(button >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow);
+            cursor = button >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
         } else if (event.action == gf::PointerAction::down && event.button == gf::PointerButton::primary) {
             activate();
             pressed_button_ = button;
@@ -614,10 +613,10 @@ void SpecimenCabinetView::on_pointer(gf::PointerEvent& event) {
             target_ = pick_cell(layout_, held_x_, held_y_);
             keyboard_ = false;
             render_dirty_ = true;
-            set_cursor(gf::CursorKind::hand);
+            cursor = gf::CursorKind::hand;
         } else if (event.action == gf::PointerAction::move) {
             const int under = stone_under(layout_, session_, x, y, waiting_);
-            set_cursor(under >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow);
+            cursor = under >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
         }
         if (render_dirty_)
             request_frame();

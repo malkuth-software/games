@@ -34,12 +34,12 @@ std::string size_label(int side) {
 TemplateView::TemplateView(gf::StableId id, Options options)
     : Control(std::move(id)), options_(options) {
     front_ = !options_.hosted;
-    set_focusable(true);
+    focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     gf::SurfaceMaterial plain;
     plain.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
     set_authored_surface_material(plain);
-    set_accessible_name("Template Game. Press lamps to light the whole board.");
+    accessible_name = "Template Game. Press lamps to light the whole board.";
     if (!restore()) {
         session_.board = new_game(session_.next_side, seed_from_clock());
     }
@@ -56,7 +56,7 @@ void TemplateView::on_attached_to_window() {
     request_frame();
 }
 
-void TemplateView::on_detaching_from_window(gf::Window&) noexcept {
+void TemplateView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
     try {
         persist();
     } catch (...) {
@@ -126,7 +126,7 @@ void TemplateView::on_paint(gf::Painter& painter, gf::Rect) {
 // Asks for one more frame. Safe to call often; it only restarts a stopped timer.
 void TemplateView::request_frame() {
     render_dirty_ = true;
-    if (!timer_ || !visible() || !front_) {
+    if (!timer_ || !visible.read() || !front_) {
         return;
     }
     if (!(*timer_).enabled()) {
@@ -145,7 +145,7 @@ void TemplateView::note_player() {
 }
 
 void TemplateView::tick() {
-    if (!visible() || !front_) {
+    if (!visible.read() || !front_) {
         if (timer_) {
             (*timer_).stop();
         }
@@ -223,7 +223,7 @@ void TemplateView::publish() {
 }
 
 void TemplateView::play(const std::string& name, float gain, float rate) {
-    audio_sfx(name, gain, rate, sound_ && front_ && visible());
+    audio_sfx(name, gain, rate, sound_ && front_ && visible.read());
 }
 
 void TemplateView::sync_music() {
@@ -319,7 +319,7 @@ void TemplateView::on_pointer(gf::PointerEvent& event) {
         const int hover = event.action == gf::PointerAction::leave ? -1 : under;
         if (hover != visual_.hover) {
             visual_.hover = hover;
-            set_cursor(hover >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow);
+            cursor = hover >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
             request_frame();
         }
         return;

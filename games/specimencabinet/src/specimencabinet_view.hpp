@@ -110,7 +110,7 @@ private:
     std::atomic<bool> studio_done_{false};
 
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
     void window_activation(bool active);
     void tick();
     void keep_studio_busy();

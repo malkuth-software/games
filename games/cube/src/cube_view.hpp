@@ -134,7 +134,7 @@ private:
     bool environment_loaded_ = false;
 
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
     void tick();
     void request_frame();
     void pace(long long milliseconds);

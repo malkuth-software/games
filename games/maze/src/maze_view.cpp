@@ -39,15 +39,15 @@ std::string replace_all(std::string s, const std::string& a, const std::string& 
 }  // namespace
 
 MazeView::MazeView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt) {
-    set_focusable(true);
+    focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     {
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
         set_authored_surface_material(none);
     }
-    set_accessible_name("Maze 95. A first-person maze: find the reward each maze names as it begins, one maze after another. Arrow keys or WASD: up walks forward, down steps back, left and right turn. "
-                        "Pads open doors of their colour. Left alone, the maze walks itself. F1 help, M music.");
+    accessible_name = "Maze 95. A first-person maze: find the reward each maze names as it begins, one maze after another. Arrow keys or WASD: up walks forward, down steps back, left and right turn. "
+                        "Pads open doors of their colour. Left alone, the maze walks itself. F1 help, M music.";
     load_save(save_path(opt_.dev), save_);
     if (!save_.run_seed) { save_.run_seed = seed_now() | 1; dirty_ = true; }
     start_level(level_reached());
@@ -89,7 +89,7 @@ bool MazeView::walking_passively() const {
     return result;
 }
 
-void MazeView::on_detaching_from_window(gf::Window&) noexcept {
+void MazeView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
     try { persist(); } catch (...) {}
     if (timer_) (*timer_).stop();
     timer_.reset();
@@ -333,11 +333,11 @@ void MazeView::persist() {
 }
 
 void MazeView::play(const std::string& name, float gain, float rate) {
-    audio_sfx(name, gain, rate, (opt_.hosted || save_.sound) && cab_sound_ && cab_front_ && visible());
+    audio_sfx(name, gain, rate, (opt_.hosted || save_.sound) && cab_sound_ && cab_front_ && visible.read());
 }
 
 bool MazeView::scripted_action(std::string_view code_view) {
-    if (!opt_.dev || !cab_front_ || !visible()) return false;
+    if (!opt_.dev || !cab_front_ || !visible.read()) return false;
     const std::string code(code_view);
     if (code == "f") sess_.command(Cmd::forward);
     else if (code == "b") sess_.command(Cmd::back);
@@ -365,14 +365,14 @@ void MazeView::run_script() {
 }
 void MazeView::request_frame() {
     render_dirty_ = true;
-    if (timer_ && visible() && cab_front_) {
+    if (timer_ && visible.read() && cab_front_) {
         if (!(*timer_).enabled()) last_ = std::chrono::steady_clock::now();
         (*timer_).set_interval(std::chrono::milliseconds(33));
         if (!(*timer_).enabled()) (*timer_).start();
     }
 }
 void MazeView::on_visible_changed(bool) {
-    if (!visible()) {
+    if (!visible.read()) {
         if (timer_) (*timer_).stop();
         audio_cabinet(false,cab_music_,cab_sound_);
     } else {
@@ -385,8 +385,8 @@ void MazeView::set_cabinet(bool foreground, bool music, bool sound, bool reduced
                          cab_sound_ != sound || cab_reduced_ != reduced;
     cab_front_ = foreground; cab_music_ = music; cab_sound_ = sound; cab_reduced_ = reduced;
     sess_.set_reduced_motion(reduced);
-    audio_cabinet(foreground && visible(),music,sound);
-    if (!foreground || !visible()) { if (timer_) (*timer_).stop(); }
+    audio_cabinet(foreground && visible.read(),music,sound);
+    if (!foreground || !visible.read()) { if (timer_) (*timer_).stop(); }
     else if (changed) request_frame();
 }
 std::vector<games::GameCommand> MazeView::commands() const {
@@ -410,7 +410,7 @@ bool MazeView::controls_fit() const {
 }
 
 void MazeView::tick() {
-    if (!visible() || !cab_front_) { if (timer_) (*timer_).stop(); return; }
+    if (!visible.read() || !cab_front_) { if (timer_) (*timer_).stop(); return; }
     ++timer_callbacks_;
     const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
     const double elapsed = std::max(0.0,std::chrono::duration<double>(now-last_).count());
@@ -473,7 +473,7 @@ void MazeView::tick() {
         }
         (*maze_band_).muffle(sess_.play.blackout);
         (*maze_band_).backwards(sess_.play.flipped);
-        audio_live_music(band_, on && visible());
+        audio_live_music(band_, on && visible.read());
 #else
         static_cast<void>(on);
         static_cast<void>(style);
@@ -541,7 +541,7 @@ void MazeView::on_pointer(gf::PointerEvent& e) {
     if (e.action == gf::PointerAction::move) {
         if (hover_ != hit) request_frame();
         hover_ = hit;
-        set_cursor(!hover_.empty() ? gf::CursorKind::hand : gf::CursorKind::arrow);
+        cursor = !hover_.empty() ? gf::CursorKind::hand : gf::CursorKind::arrow;
     }
     if (e.action == gf::PointerAction::down || e.action == gf::PointerAction::up) request_frame();
     if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {

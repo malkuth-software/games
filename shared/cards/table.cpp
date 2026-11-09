@@ -47,7 +47,7 @@ class HeartsButton final : public gf::Button {
         const gf::Rect b = client_rectangle();
         const gf::Rect r{2, 2, b.width - 4, b.height - 6};
         const double radius = r.height * .5;
-        const bool hot = hovered_visual() && enabled(), down = pressed_visual() && enabled();
+        const bool hot = hovered_visual() && enabled.read(), down = pressed_visual() && enabled.read();
         if (!down)
             p.draw_box_shadow(r, radius, {0, 3}, 6, 0, gf::Color::rgba(40, 0, 10, 110));
         const gf::GradientStop stops[] = {
@@ -66,7 +66,7 @@ class HeartsButton final : public gf::Button {
         if (focus_cue_visible())
             p.stroke_rounded_rect(enlarged(r, 3), radius + 3, gf::Color::rgba(255, 226, 150), 2);
         const gf::FontSpec f{gf::FontRole::content, 16, 700, false, .3};
-        const gf::Size m = p.measure_text_utf8(text(), f);
+        const gf::Size m = p.measure_text_utf8(text.read(), f);
         const double heart = r.height * .42, gap = 8;
         const double x = r.x + (r.width - m.width - heart - gap) * .5 + (down ? 1 : 0);
         const double cy = r.y + r.height * .5 + (down ? 1 : 0);
@@ -78,9 +78,9 @@ class HeartsButton final : public gf::Button {
                               std::cos(4 * t);
             outline.push_back({x + heart * .5 + hx * heart / 34, cy - 1 - hy * heart / 34});
         }
-        paint_polygon(p, outline, gf::Color::rgba(255, 246, 240, enabled() ? 255 : 120));
-        p.draw_text_utf8({x + heart + gap, cy + f.size * .36}, text(), f,
-                         gf::Color::rgba(255, 248, 240, enabled() ? 255 : 120));
+        paint_polygon(p, outline, gf::Color::rgba(255, 246, 240, enabled.read() ? 255 : 120));
+        p.draw_text_utf8({x + heart + gap, cy + f.size * .36}, text.read(), f,
+                         gf::Color::rgba(255, 248, 240, enabled.read() ? 255 : 120));
     }
 };
 std::string upper(std::string s) {
@@ -103,9 +103,9 @@ gf::ImageId load_image(gf::Window& window, const std::string& name) {
 }
 } // namespace
 Table::Table(gf::StableId id) : Control(std::move(id)) {
-    set_focusable(true);
-    set_accessible_name("Card table. Arrow keys choose piles, Enter selects or places, H hints, "
-                        "Space deals, Z undoes, F1 opens help.");
+    focusable = true;
+    accessible_name = "Card table. Arrow keys choose piles, Enter selects or places, H hints, "
+                        "Space deals, Z undoes, F1 opens help.";
     next_seed_ =
         static_cast<std::uint32_t>(std::chrono::system_clock::now().time_since_epoch().count());
     load_levels();
@@ -147,8 +147,8 @@ void Table::initialize_control_tree() {
                                                        names[i]);
             (*std::static_pointer_cast<GameButton>(buttons_[i])).set_skin(ButtonSkin::ivory);
         }
-        (*buttons_[i]).set_font({gf::FontRole::content, 14, 700, false});
-        (*buttons_[i]).set_accessible_name(names[i]);
+        (*buttons_[i]).font = gf::FontSpec{gf::FontRole::content, 14, 700, false};
+        (*buttons_[i]).accessible_name = names[i];
         add_child(buttons_[i]);
         subscriptions_.push_back(
             (*buttons_[i])
@@ -156,12 +156,12 @@ void Table::initialize_control_tree() {
                 .subscribe(*this,
                            gf::Delegate<gf::ButtonBase&>::bind<Table, &Table::action>(*this)));
         // Game commands live in the PlaySuite capsule; panel buttons appear with their panels.
-        (*buttons_[i]).set_visible(false);
+        (*buttons_[i]).visible = false;
     }
     score_name_ = gf::make_control<gf::TextBox>(gf::StableId("score.name"), cabinet_.player_name);
-    (*score_name_).set_accessible_name("Your name for the top score table");
-    (*score_name_).set_maximum_length(24);
-    (*score_name_).set_visible(false);
+    (*score_name_).accessible_name = "Your name for the top score table";
+    (*score_name_).maximum_length = 24;
+    (*score_name_).visible = false;
     add_child(score_name_);
 }
 void Table::on_attached_to_window() {
@@ -185,7 +185,7 @@ void Table::on_attached_to_window() {
     show_result();
     request_tick();
 }
-void Table::on_detaching_from_window(gf::Window& window) noexcept {
+void Table::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
     try {
         save_due_ = false;
         persist();
@@ -587,10 +587,10 @@ void Table::layout_cards(bool animate) {
         }
     }
     (*buttons_[18])
-        .set_visible(panel_ == 0 && game.state.kind == Kind::hearts && !game.state.over &&
-                     (game.state.passing || game.state.trick_number == 13));
-    (*buttons_[18]).set_text(game.state.passing ? "Pass cards" : "Next hand");
-    (*buttons_[18]).set_enabled(!game.state.over);
+        .visible = panel_ == 0 && game.state.kind == Kind::hearts && !game.state.over &&
+                     (game.state.passing || game.state.trick_number == 13);
+    (*buttons_[18]).text = game.state.passing ? "Pass cards" : "Next hand";
+    (*buttons_[18]).enabled = !game.state.over;
     dealing_ = false;
     animating_ = animate && !reduced_;
     animation_start_ = gf::FrameClock::now();
@@ -1306,10 +1306,10 @@ void Table::open_panel(int panel) {
     dragging_ = false;
     set_pointer_capture(false);
     for (int i = 0; i < 9; ++i)
-        (*buttons_[i]).set_enabled(panel == 0);
+        (*buttons_[i]).enabled = panel == 0;
     for (int i = 9; i < 22; ++i)
         (*buttons_[i])
-            .set_visible(i == 9   ? panel != 0
+            .visible = i == 9   ? panel != 0
                          : i < 15 ? false
                          : i < 18 ? panel == 1
                          : i == 18
@@ -1317,8 +1317,8 @@ void Table::open_panel(int panel) {
                                    (game.state.passing || game.state.trick_number == 13)
                          : i == 19 ? false
                          : i == 20 ? panel == 3 && pending_score()
-                                   : panel == 3 && game.state.over);
-    (*score_name_).set_visible(panel == 3 && pending_score());
+                                   : panel == 3 && game.state.over;
+    (*score_name_).visible = panel == 3 && pending_score();
     if (!panel)
         request_tick();
     if (attached_window())
@@ -1432,7 +1432,7 @@ void Table::show_result() {
     if (cascading_)
         return; // the score card opens when the cards have finished bouncing
     if (game.state.over && !cabinet_.result_recorded[static_cast<int>(game.state.kind)]) {
-        (*score_name_).set_text(cabinet_.player_name);
+        (*score_name_).text = cabinet_.player_name;
         open_panel(3);
     }
 }
@@ -1724,7 +1724,7 @@ void Table::action(gf::ButtonBase& button) {
     if (a == 19)
         open_panel(3);
     if (a == 20 && pending_score()) {
-        std::string name((*score_name_).text());
+        std::string name((*score_name_).text.read());
         if (add_top_score(cabinet_.top_scores, game.state, name)) {
             cabinet_.player_name = name;
             cabinet_.result_recorded[static_cast<int>(game.state.kind)] = true;
@@ -1804,7 +1804,7 @@ void Table::update_solvable() {
 }
 void Table::show_solve() {
     if (buttons_[22])
-        (*buttons_[22]).set_visible(panel_ == 0 && solvable_ && !game.state.over && autoplay_next_ >= autoplay_.size());
+        (*buttons_[22]).visible = panel_ == 0 && solvable_ && !game.state.over && autoplay_next_ >= autoplay_.size();
 }
 int Table::hit_card(gf::Point point) const {
     int found = -1;

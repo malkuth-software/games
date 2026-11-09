@@ -56,7 +56,7 @@ class BusinessCard final : public gf::Control {
 
   protected:
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
 
   private:
     // A remark around the card: where (points in this control), when it was said, how long it stays.

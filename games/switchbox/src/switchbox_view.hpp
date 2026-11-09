@@ -128,7 +128,7 @@ private:
     std::vector<HiText> texts_;
 
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
     void on_focus_changed(bool focused) override;
     void cursor_active_changed(bool active);
     void cursor_capture_changed(const gf::PointerCaptureChange& change);

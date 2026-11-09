@@ -27,8 +27,8 @@ constexpr double kRow = 34, kGap = 8;
 } // namespace
 
 SettingSlider::SettingSlider(gf::StableId id) : TrackBar(std::move(id)) {
-    set_show_ticks(false);
-    set_visual_style(gf::TrackBarVisualStyle::filled);
+    show_ticks = false;
+    visual_style = gf::TrackBarVisualStyle::filled;
     set_paint_plane(gf::PaintPlane::overlay);
 }
 void SettingSlider::on_paint(gf::Painter& p, gf::Rect) {
@@ -42,7 +42,7 @@ void SettingSlider::on_paint(gf::Painter& p, gf::Rect) {
     p.stroke_rounded_rect(groove, 3, rgb(173, 151, 88), 1);
     if (ratio > 0)
         p.fill_rounded_rect({groove.x, groove.y, 6 + width * ratio, 6}, 3,
-                            enabled() ? rgb(201, 146, 40) : rgb(190, 180, 150));
+                            enabled.read() ? rgb(201, 146, 40) : rgb(190, 180, 150));
     const double x = inset + width * ratio, r = 9;
     gf::Window* window = attached_window();
     if (focused_ && window && (*window).focus_cue_visible())
@@ -50,7 +50,7 @@ void SettingSlider::on_paint(gf::Painter& p, gf::Rect) {
                               rgb(184, 137, 42), 2);
     p.draw_box_shadow({x - r, cy - r, 2 * r, 2 * r}, r, {0, 1}, 3, 0, rgb(0, 0, 0, 80));
     paint_gloss(p, {x - r, cy - r, 2 * r, 2 * r}, r, GlossTone::gold,
-                {false, false, enabled(), false});
+                {false, false, enabled.read(), false});
 }
 void SettingSlider::on_focus_changed(bool focused) {
     TrackBar::on_focus_changed(focused);
@@ -64,36 +64,36 @@ SettingCheck::SettingCheck(gf::StableId id, std::string text) : CheckBox(std::mo
 void SettingCheck::on_paint(gf::Painter& p, gf::Rect) {
     const gf::Rect b = client_rectangle();
     const double s = 18, y = (b.height - s) * .5;
-    const gf::Size label = p.measure_text_utf8(text(), font());
+    const gf::Size label = p.measure_text_utf8(text.read(), font.read());
     if (focus_cue_visible())
         p.stroke_rounded_rect({1, 2, std::min(b.width - 2, s + 16 + label.width), b.height - 4}, 8,
                               rgb(214, 160, 40, 200), 2);
     const gf::Rect box{6, y, s, s};
-    if (checked()) {
-        paint_gloss(p, box, 4, GlossTone::gold, {hovered_visual(), pressed_visual(), enabled(), false});
+    if (checked.read()) {
+        paint_gloss(p, box, 4, GlossTone::gold, {hovered_visual(), pressed_visual(), enabled.read(), false});
         p.draw_line({box.x + 4.5, box.y + 9.5}, {box.x + 8, box.y + 13}, rgb(70, 46, 8), 2.2);
         p.draw_line({box.x + 8, box.y + 13}, {box.x + 14, box.y + 5}, rgb(70, 46, 8), 2.2);
     } else {
         p.fill_rounded_rect(box, 4, hovered_visual() ? rgb(255, 246, 214) : rgb(255, 253, 240));
         p.stroke_rounded_rect(box, 4, rgb(166, 140, 74), 1.5);
     }
-    p.draw_text_utf8({box.x + s + 9, (b.height + font().size * .72) * .5}, text(), font(),
-                     enabled() ? ink : rgb(150, 140, 110));
+    p.draw_text_utf8({box.x + s + 9, (b.height + font.read().size * .72) * .5}, text.read(), font.read(),
+                     enabled.read() ? ink : rgb(150, 140, 110));
 }
 CardBackChoice::CardBackChoice(gf::StableId id, std::string name, int back)
     : Button(std::move(id), std::move(name)), back_(back) {
-    set_accessible_name(text());
+    accessible_name = text.read();
     set_paint_plane(gf::PaintPlane::overlay);
 }
-void CardBackChoice::set_image(gf::ImageId image) {
-    image_ = image;
+void CardBackChoice::set_image(gf::ImageId picture) {
+    image_ = picture;
     invalidate(gf::Dirty::paint);
 }
 void CardBackChoice::set_chosen(bool chosen) {
     if (chosen_ == chosen)
         return;
     chosen_ = chosen;
-    set_accessible_name(text() + (chosen ? ", chosen" : ""));
+    accessible_name = text.read() + (chosen ? ", chosen" : "");
     invalidate(gf::Dirty::paint);
 }
 void CardBackChoice::on_paint(gf::Painter& p, gf::Rect) {
@@ -112,7 +112,7 @@ void CardBackChoice::on_paint(gf::Painter& p, gf::Rect) {
 }
 
 SettingsPage::SettingsPage(gf::StableId id) : ScrollableControl(std::move(id)) {
-    set_auto_scroll(true);
+    auto_scroll = true;
     set_paint_plane(gf::PaintPlane::overlay);
 }
 std::shared_ptr<gf::Label> SettingsPage::text_label(const std::string& text, double size,
@@ -121,26 +121,26 @@ std::shared_ptr<gf::Label> SettingsPage::text_label(const std::string& text, dou
         gf::StableId("settings." + std::to_string(built_) + ".label." +
                      std::to_string(children().size())),
         text);
-    (*label).set_font({gf::FontRole::content, size, static_cast<std::uint16_t>(weight), false});
-    (*label).set_foreground(ink);
-    (*label).set_vertical_alignment(gf::VerticalAlignment::center);
-    (*label).set_text_wrapping(gf::TextWrapping::word);
+    (*label).font = gf::FontSpec{gf::FontRole::content, size, static_cast<std::uint16_t>(weight), false};
+    (*label).fore_color = ink;
+    (*label).vertical_alignment = gf::VerticalAlignment::center;
+    (*label).text_wrapping = gf::TextWrapping::word;
     add_child(label);
     return label;
 }
 std::shared_ptr<gf::Label> SettingsPage::heading(const std::string& text) {
     std::shared_ptr<gf::Label> label = text_label(text, 13, 700);
-    (*label).set_foreground(brown);
-    (*label).set_text_case_transform(gf::TextCaseTransform::uppercase_ascii);
+    (*label).fore_color = brown;
+    (*label).text_case_transform = gf::TextCaseTransform::uppercase_ascii;
     return label;
 }
 std::shared_ptr<gf::CheckBox> SettingsPage::check(const std::string& key, const std::string& text) {
     std::shared_ptr<gf::CheckBox> box = gf::make_control<SettingCheck>(
         gf::StableId("settings." + std::to_string(built_) + ".check." + key), text);
     // The masters' commands or the game decide; the box shows what they decided.
-    (*box).set_auto_check(false);
-    (*box).set_font({gf::FontRole::content, 16, 600, false});
-    (*box).set_accessible_name(text);
+    (*box).auto_check = false;
+    (*box).font = gf::FontSpec{gf::FontRole::content, 16, 600, false};
+    (*box).accessible_name = text;
     (*box).set_paint_plane(gf::PaintPlane::overlay);
     add_child(box);
     return box;
@@ -151,9 +151,9 @@ std::shared_ptr<SettingSlider> SettingsPage::slider(const std::string& key,
     std::shared_ptr<SettingSlider> bar = gf::make_control<SettingSlider>(
         gf::StableId("settings." + std::to_string(built_) + ".slider." + key));
     (*bar).set_range(minimum, maximum);
-    (*bar).set_small_change(step);
-    (*bar).set_large_change(std::max(step, (maximum - minimum) / 5));
-    (*bar).set_accessible_name(name);
+    (*bar).small_change = step;
+    (*bar).large_change = std::max(step, (maximum - minimum) / 5);
+    (*bar).accessible_name = name;
     add_child(bar);
     return bar;
 }
@@ -197,7 +197,7 @@ void SettingsPage::build(CommandSource* game, const std::string& game_title) {
         }
         Row row{Shape::volume, m.toggle, box, {bar}, nullptr, nullptr};
         row.readout = text_label("", 15, 600);
-        (*row.readout).set_alignment(gf::HorizontalAlignment::far);
+        (*row.readout).alignment = gf::HorizontalAlignment::far;
         add_row(std::move(row));
     }
     add_row({Shape::heading, "", heading("Motion"), {}, nullptr, nullptr});
@@ -239,7 +239,7 @@ void SettingsPage::build(CommandSource* game, const std::string& game_title) {
                                      std::to_string(k)),
                         s.choices[k], GlossTone::chrome);
                     (*chip).set_radius(15);
-                    (*chip).set_accessible_name(s.label + ": " + s.choices[k]);
+                    (*chip).accessible_name = s.label + ": " + s.choices[k];
                     (*chip).set_paint_plane(gf::PaintPlane::overlay);
                     gf::on((*chip).clicked(), *this, &SettingsPage::chose, at, static_cast<int>(k));
                     add_child(chip);
@@ -253,7 +253,7 @@ void SettingsPage::build(CommandSource* game, const std::string& game_title) {
                 gf::on((*bar).scroll(), *this, &SettingsPage::slid, at);
                 row.items.push_back(bar);
                 row.readout = text_label("", 15, 600);
-                (*row.readout).set_alignment(gf::HorizontalAlignment::far);
+                (*row.readout).alignment = gf::HorizontalAlignment::far;
             }
             if (!s.note.empty())
                 row.note = text_label(s.note, 13, 400);
@@ -300,8 +300,8 @@ void SettingsPage::refresh() {
             const double volume = (music ? masters.music_volume : masters.sound_volume) * 100;
             // The box and the slider are bound to the masters; only the words follow here.
             (*std::static_pointer_cast<gf::CheckBox>(row.lead))
-                .set_accessible_name(std::string(music ? "Music" : "Sound") + (on ? " on" : " off"));
-            (*row.readout).set_text(percent(volume));
+                .accessible_name = std::string(music ? "Music" : "Sound") + (on ? " on" : " off");
+            (*row.readout).text = percent(volume);
         } else if (row.setting == reduced_id) {
             // Bound to the masters' command; nothing to copy.
         } else if (row.setting == backs_id) {
@@ -314,14 +314,14 @@ void SettingsPage::refresh() {
                 if (s.id != row.setting)
                     continue;
                 if (row.shape == Shape::check)
-                    (*std::static_pointer_cast<gf::CheckBox>(row.lead)).set_checked(s.value != 0);
+                    (*std::static_pointer_cast<gf::CheckBox>(row.lead)).checked = s.value != 0;
                 else if (row.shape == Shape::chips)
                     for (std::size_t k = 0; k < row.items.size(); ++k)
                         (*std::static_pointer_cast<SuiteButton>(row.items[k]))
                             .set_checked(static_cast<std::size_t>(std::lround(s.value)) == k);
                 else if (row.shape == Shape::slider) {
-                    (*std::static_pointer_cast<SettingSlider>(row.items.front())).set_value(s.value);
-                    (*row.readout).set_text(slider_text(s, s.value));
+                    (*std::static_pointer_cast<SettingSlider>(row.items.front())).value = s.value;
+                    (*row.readout).text = slider_text(s, s.value);
                 }
             }
         }
@@ -340,7 +340,7 @@ void SettingsPage::toggled(int row) {
     const Row& r = rows_[static_cast<std::size_t>(row)];
     if (game_)
         (*game_).change_setting(r.setting,
-                                (*std::static_pointer_cast<gf::CheckBox>(r.lead)).checked() ? 0 : 1);
+                                (*std::static_pointer_cast<gf::CheckBox>(r.lead)).checked.read() ? 0 : 1);
     refresh();
 }
 void SettingsPage::chose(int row, int choice) {
@@ -353,7 +353,7 @@ void SettingsPage::slid(int row) {
     const Row& r = rows_[static_cast<std::size_t>(row)];
     if (game_)
         (*game_).change_setting(r.setting,
-                                (*std::static_pointer_cast<SettingSlider>(r.items.front())).value());
+                                (*std::static_pointer_cast<SettingSlider>(r.items.front())).value.read());
     refresh();
 }
 void SettingsPage::chose_back(int back) {
@@ -456,13 +456,13 @@ void SettingsPage::on_key_bubble(gf::KeyEvent& e) {
 SettingsSheet::SettingsSheet(gf::StableId id) : Control(std::move(id)) {
     set_paint_plane(gf::PaintPlane::overlay);
     set_theme_override(games_theme(ButtonSkin::ivory));
-    set_accessible_name("PlaySuite settings");
+    accessible_name = "PlaySuite settings";
 }
 void SettingsSheet::initialize_control_tree() {
     page_ = gf::make_control<SettingsPage>(gf::StableId("settings.page"));
     close_ = gf::make_control<HelpGlyph>(gf::StableId("settings.close"), "×");
     (*close_).set_paint_plane(gf::PaintPlane::overlay);
-    (*close_).set_accessible_name("Close settings (Escape)");
+    (*close_).accessible_name = "Close settings (Escape)";
     gf::on((*close_).clicked(), *this, &SettingsSheet::clicked_close);
     add_child(page_);
     add_child(close_);
@@ -502,7 +502,7 @@ void SettingsSheet::load_backs() {
     }
     (*page_).set_card_back_images(backs_);
 }
-void SettingsSheet::on_detaching_from_window(gf::Window& window) noexcept {
+void SettingsSheet::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
     sheet_.release(window);
     for (gf::ImageId& image : backs_)
         if (image.value) {
@@ -522,7 +522,7 @@ void SettingsSheet::refresh() {
 }
 std::shared_ptr<gf::Control> SettingsSheet::first_control() const {
     for (const std::shared_ptr<gf::Control>& child : (*page_).children())
-        if ((*child).focusable() && (*child).visible())
+        if ((*child).focusable.read() && (*child).visible.read())
             return child;
     return close_;
 }

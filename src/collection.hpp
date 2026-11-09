@@ -37,18 +37,18 @@ class Collection final : public gf::Control, public HelpHost {
     void show_settings();
     void close_settings();
     [[nodiscard]] bool settings_open() const {
-        return settings_ && (*settings_).visible();
+        return settings_ && (*settings_).visible.read();
     }
     bool dispatch_action(std::string_view action) { return !shelf_open_ && (*games_.at(active_)).scripted_action(action); }
     void dispatch_command(const std::string& id) { run_command(id); }
     [[nodiscard]] bool help_open() const {
-        return help_ && (*help_).visible();
+        return help_ && (*help_).visible.read();
     }
     // Rainstar Software's business card, opened from help over the whole window.
     void show_card();
     void close_card();
     [[nodiscard]] bool card_open() const {
-        return card_ && (*card_).visible();
+        return card_ && (*card_).visible.read();
     }
     [[nodiscard]] bool shelf_open() const {
         return shelf_open_;
@@ -86,7 +86,7 @@ class Collection final : public gf::Control, public HelpHost {
     gf::Point pointer_{-1000, -1000};
     double capsule_width_limit_ = 0;
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
     void tick();
     void wake();
     void ensure_view(Entry entry);

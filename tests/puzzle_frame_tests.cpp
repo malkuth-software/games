@@ -54,7 +54,7 @@ void check(games::PuzzleKind kind) {
                 "Ordinary Gems animation damages only the board");
         require(window.image_resource_snapshot().revision > initial,
                 "Bounded damage still publishes animated gem pixels");
-        (*view).set_visible(false);
+        (*view).visible = false;
         const std::uint64_t hidden = window.image_resource_snapshot().revision;
         static_cast<void>(
             window.poll_frame_schedule(gf::FrameClock::now() + std::chrono::milliseconds(60)));

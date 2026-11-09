@@ -360,7 +360,7 @@ int main(const int argc, char** const argv) {
         }
         if (game != "eggy") {
             set_foreground(*view, false);
-            (*view).set_visible(false);
+            (*view).visible = false;
             const std::uint64_t hidden = (*surface).snapshot().published_generation;
             const std::uint64_t callbacks = window.metrics_snapshot().callbacks_emitted;
             static_cast<void>(
@@ -369,7 +369,7 @@ int main(const int argc, char** const argv) {
                     "Hidden game has no polling timer callbacks");
             require((*surface).snapshot().published_generation == hidden,
                     "Hidden game does not render or publish");
-            (*view).set_visible(true);
+            (*view).visible = true;
             set_foreground(*view, true);
             run_ticks(window, surface, *view, 1);
             const gf::LiveSurfaceFrame resumed = (*surface).acquire_latest();

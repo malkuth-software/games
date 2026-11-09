@@ -57,15 +57,15 @@ void medal_icon(Canvas& c, double x, double y, double r, int medal) {
 
 ThievesView::ThievesView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt), show_(seed_now()) {
     cab_front_ = !opt_.hosted;
-    set_focusable(true);
+    focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     {
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
         set_authored_surface_material(none);
     }
-    set_accessible_name("Catching Thieves. Raccoon bandits are raiding the bear's garden from their burrows. Push a pumpkin onto every burrow to trap them. "
-                        "Arrow keys or WASD walk; walking into a pumpkin pushes it. Click a square to walk there. Z undo, R restart, H or F1 help; Hint is in the command capsule and the difficulty in Settings.");
+    accessible_name = "Catching Thieves. Raccoon bandits are raiding the bear's garden from their burrows. Push a pumpkin onto every burrow to trap them. "
+                        "Arrow keys or WASD walk; walking into a pumpkin pushes it. Click a square to walk there. Z undo, R restart, H or F1 help; Hint is in the command capsule and the difficulty in Settings.";
     rng_ = seed_now() | 1;
     load_tables();
     if (load_save(save_path(opt_.dev), save_)) {
@@ -159,10 +159,10 @@ void ThievesView::on_attached_to_window() {
     timer_ = std::make_unique<gf::Timer>(*attached_window(), std::chrono::milliseconds(33));
     subs_.push_back((*timer_).tick().subscribe(*this, gf::Delegate<>::bind<ThievesView, &ThievesView::tick>(*this)));
     last_ = std::chrono::steady_clock::now();
-    if (cab_front_ && visible()) (*timer_).start();
+    if (cab_front_ && visible.read()) (*timer_).start();
 }
 
-void ThievesView::on_detaching_from_window(gf::Window&) noexcept {
+void ThievesView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
     try { persist(); } catch (...) {}
     if (timer_) (*timer_).stop();
     timer_.reset();
@@ -180,7 +180,7 @@ void ThievesView::activate() {
 
 void ThievesView::request_frame() {
     render_dirty_ = true;
-    if (timer_ && cab_front_ && visible()) {
+    if (timer_ && cab_front_ && visible.read()) {
         if (!(*timer_).enabled()) last_ = std::chrono::steady_clock::now();
         (*timer_).start();
     }
@@ -194,7 +194,7 @@ void ThievesView::set_cabinet(bool foreground, bool music, bool sound, bool redu
         if (timer_) (*timer_).stop();
         queue_.clear(); pressed_.clear(); hover_.clear(); mouse_in_ = false; hover_cell_ = -1;
         show_.state().hover_cell = -1; show_.state().path.clear();
-        set_cursor(gf::CursorKind::arrow);
+        cursor = gf::CursorKind::arrow;
         if (hint_) (*hint_).cancellation.request_stop();
         if (gen_) (*gen_).cancellation.request_stop();
         if (field_) (*field_).cancel = true;
@@ -683,7 +683,7 @@ void ThievesView::next() {
 
 // ------------------------------------------------------------------ frame
 void ThievesView::play(const std::string& name, float gain, float rate) {
-    audio_sfx(name, gain, rate, (opt_.hosted || save_.settings.sound) && cab_sound_ && cab_front_ && visible());
+    audio_sfx(name, gain, rate, (opt_.hosted || save_.settings.sound) && cab_sound_ && cab_front_ && visible.read());
 }
 
 void ThievesView::say(const std::string& s, Col c) {
@@ -787,7 +787,7 @@ void ThievesView::commit_queued_moves() {
 
 void ThievesView::tick() {
     ++timer_callbacks_;
-    if (!cab_front_ || !visible()) { if (timer_) (*timer_).stop(); return; }
+    if (!cab_front_ || !visible.read()) { if (timer_) (*timer_).stop(); return; }
     const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
     const double dt = std::clamp(std::chrono::duration<double>(now - last_).count(), 0.0, .25);
     last_ = now; t_ += dt;
@@ -854,7 +854,7 @@ void ThievesView::on_pointer(gf::PointerEvent& e) {
         hover_ = hit_button();
         hover_cell_ = mouse_in_ && hover_.empty() && panel_ == Panel::none && mouse_x_ < pw_ - hud_w_ ? garden_.pick_cell(mouse_x_, mouse_y_) : -1;
         if (hover_cell_ >= 0 && !board_.level().floor(hover_cell_)) hover_cell_ = -1;
-        set_cursor(!hover_.empty() || hover_cell_ >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow);
+        cursor = !hover_.empty() || hover_cell_ >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
     }
     if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
         activate();

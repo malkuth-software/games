@@ -115,7 +115,7 @@ class ShelfRows final : public gf::Control {
 class LaunchCurtain final : public gf::Control {
   public:
     explicit LaunchCurtain(gf::StableId id) : Control(std::move(id)) {
-        set_hit_test_transparent(true);
+        hit_test_transparent = true;
     }
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
     gf::Rect from{};
@@ -168,7 +168,7 @@ class ShelfView final : public gf::Control {
     ShelfWood wood_;
     double wood_scale_ = 0;
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
     void tick();
     void request_animation();
     void focused_box(Entry entry);

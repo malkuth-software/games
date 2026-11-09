@@ -82,14 +82,13 @@ bool neighbours(int a, int b) {
 
 TumbledStonesView::TumbledStonesView(gf::StableId id, Options options) : Control(std::move(id)), options_(options) {
     front_ = !options_.hosted;
-    set_focusable(true);
+    focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     gf::SurfaceMaterial plain;
     plain.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(30, 19, 12))};
     set_authored_surface_material(plain);
-    set_accessible_name(
-        "Tumbled Stones. Flip and turn polished stones until neighbours of one shape lie the same way, and pull "
-        "the size of group you chose.");
+    accessible_name = "Tumbled Stones. Flip and turn polished stones until neighbours of one shape lie the same way, and pull "
+        "the size of group you chose.";
     scene_.set_runner(Runner{crew_run, &crew()});
     if (!restore()) {
         session_ = Session{};
@@ -163,7 +162,7 @@ void TumbledStonesView::on_attached_to_window() {
     request_frame();
 }
 
-void TumbledStonesView::on_detaching_from_window(gf::Window&) noexcept {
+void TumbledStonesView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
     try {
         persist();
     } catch (...) {
@@ -236,7 +235,7 @@ void TumbledStonesView::on_paint(gf::Painter& painter, gf::Rect) {
 
 void TumbledStonesView::request_frame() {
     render_dirty_ = true;
-    if (!timer_ || !visible() || !front_)
+    if (!timer_ || !visible.read() || !front_)
         return;
     if (!(*timer_).enabled())
         last_tick_ = std::chrono::steady_clock::now();
@@ -249,7 +248,7 @@ bool TumbledStonesView::busy() const {
 }
 
 void TumbledStonesView::tick() {
-    if (!visible() || !front_) {
+    if (!visible.read() || !front_) {
         if (timer_)
             (*timer_).stop();
         return;
@@ -374,7 +373,7 @@ void TumbledStonesView::publish() {
 }
 
 void TumbledStonesView::play(const std::string& name, float gain, float rate) {
-    audio_sfx(name, gain, rate, sound_ && front_ && visible());
+    audio_sfx(name, gain, rate, sound_ && front_ && visible.read());
 }
 
 void TumbledStonesView::sync_music() {
@@ -656,7 +655,7 @@ void TumbledStonesView::on_pointer(gf::PointerEvent& event) {
     if (panel_ != Panel::none) {
         const int button = panel_button(x, y);
         if (event.action == gf::PointerAction::move) {
-            set_cursor(button != 0 ? gf::CursorKind::hand : gf::CursorKind::arrow);
+            cursor = button != 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
         } else if (event.action == gf::PointerAction::down && event.button == gf::PointerButton::primary) {
             activate();
             pressed_button_ = button;
@@ -695,7 +694,7 @@ void TumbledStonesView::on_pointer(gf::PointerEvent& event) {
             // The keys carry on from the stone under the pointer.
             if (hover >= 0)
                 cursor_ = hover;
-            set_cursor(hover >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow);
+            cursor = hover >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
             render_dirty_ = true;
         }
         // Moving off the stone in hand sets it down.

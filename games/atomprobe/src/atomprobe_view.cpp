@@ -41,16 +41,16 @@ const char* kWords[] = {"one", "two", "three", "four"};
 }  // namespace
 
 AtomProbeView::AtomProbeView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt), box_(seed_now()) {
-    set_focusable(true);
+    focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     {
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
         set_authored_surface_material(none);
     }
-    set_accessible_name("Atom Probe. Four atoms hide in a fogged eight by eight chamber. Fire beams from the 32 emitters around the edge: "
+    accessible_name = "Atom Probe. Four atoms hide in a fogged eight by eight chamber. Fire beams from the 32 emitters around the edge: "
                         "a beam is absorbed, reflected, or comes out somewhere else. Mark four squares on the glass, then pull the lever to open the box. "
-                        "Fewest points wins. Keys: Enter opens the box, N new box, F1 help, T top scores, M music, S sound.");
+                        "Fewest points wins. Keys: Enter opens the box, N new box, F1 help, T top scores, M music, S sound.";
     bool resumed = false;
     if (load_save(save_path(opt_.dev), save_) && save_.has_box && box_.restore(save_.box)) {
         resumed = true;
@@ -104,7 +104,7 @@ void AtomProbeView::on_attached_to_window() {
     (*timer_).start();
 }
 
-void AtomProbeView::on_detaching_from_window(gf::Window&) noexcept {
+void AtomProbeView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
     try { persist(); } catch (...) {}
     if (timer_) (*timer_).stop();
     timer_.reset();
@@ -136,7 +136,7 @@ void AtomProbeView::cancel_press() {
     mouse_in_ = false;
     st_.hover_port = st_.hover_cell = st_.partner = -1;
     st_.lever_hover = false;
-    set_cursor(gf::CursorKind::arrow);
+    cursor = gf::CursorKind::arrow;
 }
 void AtomProbeView::active_changed(bool active) {
     if (!active) { cancel_press(); }
@@ -179,7 +179,7 @@ void AtomProbeView::on_paint(gf::Painter& p, gf::Rect) {
 // ------------------------------------------------------------------ game
 void AtomProbeView::play(const std::string& name, float gain, float rate) {
     // Hosted, PlaySuite's Sound master is the only switch.
-    audio_sfx(name, gain, rate, (opt_.hosted || save_.settings.sound) && cab_sound_ && cab_front_ && visible());
+    audio_sfx(name, gain, rate, (opt_.hosted || save_.settings.sound) && cab_sound_ && cab_front_ && visible.read());
 }
 
 void AtomProbeView::say(const std::string& s, Col c) {
@@ -476,7 +476,7 @@ void AtomProbeView::tick() {
     }
     {
         const bool on = (opt_.hosted || save_.settings.music) && cab_music_ && cab_front_;
-        audio_music(visible() && cab_front_ ? "ap_music" : "", on);
+        audio_music(visible.read() && cab_front_ ? "ap_music" : "", on);
     }
     audio_tick(dt);
     save_t_ += dt;
@@ -484,7 +484,7 @@ void AtomProbeView::tick() {
     gf::Window* win = attached_window();
     const bool hidden = win && (*win).occluded();
     const bool front = !win || (*win).active();
-    const bool shown = visible();
+    const bool shown = visible.read();
     const auto pace = std::chrono::milliseconds(hidden || !shown || !cab_front_ ? 500 : front ? 33 : 100);
     if (timer_ && (*timer_).interval() != pace) (*timer_).set_interval(pace);
     if (hidden || !shown || ch_.r.rgb.empty() || frame_.px.empty()) return;
@@ -567,7 +567,7 @@ void AtomProbeView::on_pointer(gf::PointerEvent& e) {
         if (st_.hover_port >= 0 && st_.hover_port != last_hover_port_) play("ap_hover", .25f, .9f + .2f * static_cast<float>(st_.hover_port % 8) / 8);
         last_hover_port_ = st_.hover_port;
         const bool over = over_ui || st_.hover_port >= 0 || st_.hover_cell >= 0 || st_.lever_hover;
-        set_cursor(over ? gf::CursorKind::hand : gf::CursorKind::arrow);
+        cursor = over ? gf::CursorKind::hand : gf::CursorKind::arrow;
     }
     if (e.action == gf::PointerAction::down) {
         activate();

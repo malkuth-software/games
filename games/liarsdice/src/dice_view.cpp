@@ -37,14 +37,14 @@ std::string a_an(const std::string& w) { return (w.empty() || std::strchr("aeiou
 
 DiceView::DiceView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt) {
     cab_front_ = !opt_.hosted;
-    set_focusable(true);
+    focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     {
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
         set_authored_surface_material(none);
     }
-    set_accessible_name("Liar's Dice in Davy Jones' locker. Bid on how many dice show a face, ones wild, or call the last bid a lie.");
+    accessible_name = "Liar's Dice in Davy Jones' locker. Bid on how many dice show a face, ones wild, or call the last bid a lie.";
     if (!load_ledger(save_path(opt_.dev), L_)) {
         L_ = Ledger{};
         L_.offer_seed = static_cast<std::uint64_t>(wall_clock() * 1000) ^ 0xD1CEULL;
@@ -79,7 +79,7 @@ void DiceView::on_attached_to_window() {
     (*timer_).start();
 }
 
-void DiceView::on_detaching_from_window(gf::Window&) noexcept {
+void DiceView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
     try { persist(); } catch (...) {}
     if (timer_) (*timer_).stop();
     timer_.reset();
@@ -419,7 +419,7 @@ void DiceView::persist() {
 }
 
 void DiceView::play(const std::string& name, float gain, float rate) {
-    audio_sfx(name, gain, rate, (opt_.hosted || L_.sound) && cab_sound_ && cab_front_ && visible());
+    audio_sfx(name, gain, rate, (opt_.hosted || L_.sound) && cab_sound_ && cab_front_ && visible.read());
 }
 
 // ------------------------------------------------------------------ the frame
@@ -522,7 +522,7 @@ void DiceView::animate(double dt) {
 }
 
 void DiceView::tick() {
-    if (!visible() || !cab_front_) { last_ = std::chrono::steady_clock::now(); return; }
+    if (!visible.read() || !cab_front_) { last_ = std::chrono::steady_clock::now(); return; }
     const auto now = std::chrono::steady_clock::now();
     const double rdt = std::clamp(std::chrono::duration<double>(now - last_).count(), 0.0, .25);
     last_ = now;
@@ -598,8 +598,8 @@ void DiceView::tick() {
     while (!bubbles_.empty() && bubbles_.front().age > bubbles_.front().life) bubbles_.pop_front();
     animate(dt);
     {
-        const bool on = (opt_.hosted || L_.music) && cab_music_ && cab_front_ && visible();
-        audio_music_on_bar(visible() && cab_front_ ? (st_.tension > .45 ? "ld_music_tense" : "ld_music") : "", on);
+        const bool on = (opt_.hosted || L_.music) && cab_music_ && cab_front_ && visible.read();
+        audio_music_on_bar(visible.read() && cab_front_ ? (st_.tension > .45 ? "ld_music_tense" : "ld_music") : "", on);
     }
     audio_tick(rdt);
     save_t_ += rdt;
@@ -609,7 +609,7 @@ void DiceView::tick() {
     static const bool capturing = opt_.dev && std::getenv("LD_PRINT_WID");
     const bool hidden = win && (*win).occluded() && !capturing;
     const bool front = !win || (*win).active();
-    const bool shown = visible();
+    const bool shown = visible.read();
     const auto pace = std::chrono::milliseconds(hidden || !shown || !cab_front_ ? 500 : front ? 33 : 100);
     if (timer_ && (*timer_).interval() != pace) (*timer_).set_interval(pace);
 
@@ -652,7 +652,7 @@ void DiceView::on_pointer(gf::PointerEvent& e) {
     if (e.action == gf::PointerAction::move) {
         hover_ = hit();
         hover_seat_ = hover_.empty() && panel_ == Panel::none && phase_ != Phase::wagers && mouse_y_ < ph_ - panel_h_ ? cab_.pick(mouse_x_, mouse_y_, st_) : -1;
-        set_cursor(!hover_.empty() ? gf::CursorKind::hand : gf::CursorKind::arrow);
+        cursor = !hover_.empty() ? gf::CursorKind::hand : gf::CursorKind::arrow;
     }
     if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
         activate();
