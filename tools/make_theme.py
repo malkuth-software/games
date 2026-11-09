@@ -60,7 +60,8 @@ def mix_truncated(a: Colour, b: Colour, t: float) -> Colour:
 
 
 class Sheet:
-    """The palette (roles) and the rules, in the order they are written."""
+    """The palette and the rules, in the order they are written. PlaySuite's named colours
+    are custom properties defined in :root (GUI.Forms' palette roles are a fixed set)."""
 
     def __init__(self) -> None:
         self.roles: dict[str, Colour] = {}
@@ -71,7 +72,7 @@ class Sheet:
         if known is not None and known != colour:
             raise ValueError(f"role {name} given two colours")
         self.roles[name] = colour
-        return f"role({name})"
+        return f"var(--{name})"
 
     def comment(self, text: str) -> None:
         self.blocks.append("\n/* " + text + " */")
@@ -81,12 +82,21 @@ class Sheet:
         self.blocks.append(f"{selector} {{ {body}; }}")
 
     def text(self) -> str:
-        palette = "\n".join(f"  {name}: {hex_colour(colour)};" for name, colour in self.roles.items())
+        # A rule holds at most 64 declarations, so the palette is several :root blocks
+        # (the engine reads them as one palette); the first also names the scheme.
+        lines = [f"  --{name}: {hex_colour(colour)};" for name, colour in self.roles.items()]
+        palette = ""
+        for start in range(0, max(len(lines), 1), PALETTE_BLOCK):
+            scheme = "  color-scheme: light;\n" if start == 0 else ""
+            palette += ":root {\n" + scheme + "\n".join(lines[start:start + PALETTE_BLOCK]) + "\n}\n"
         header = (
             "/* PlaySuite's look as a GUI.Forms theme package. Written by tools/make_theme.py\n"
-            "   from the shell's colours; edit the script, not this file. */\n"
-            ":root {\n  color-scheme: light;\n" + palette + "\n}\n")
+            "   from the shell's colours; edit the script, not this file. */\n" + palette)
         return header + "\n".join(self.blocks) + "\n"
+
+
+# Role declarations in one :root block (GUI.Forms admits 64 declarations a rule).
+PALETTE_BLOCK = 60
 
 
 def pseudo(states: tuple[str, ...]) -> str:
@@ -385,7 +395,7 @@ def build() -> dict[str, str]:
         "format": "gui-forms-theme/1",
         "name": "playsuite",
         "version": VERSION,
-        "engine": ">=0.5",
+        "engine": ">=0.3",
         "sheet": {"path": SHEET, "sha256": digest},
     }
     return {SHEET: css, "theme.json": json.dumps(manifest, indent=2) + "\n"}

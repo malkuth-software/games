@@ -200,13 +200,21 @@ int main(int argc, char** argv) {
             gui_forms::Size{100, 100});
         games::require(!headless.create_framebuffer({100, 100}, 1),
                        "A headless window explicitly reports no native framebuffer");
+        // The application first (the base theme is enough here), then its window.
+        gui_forms::ApplicationCreateResult created = gui_forms::Application::create(gui_forms::ApplicationConfig{});
+        if (!created)
+            throw std::runtime_error("The application could not be made");
+        gui_forms::Application& application = *created.application;
         std::shared_ptr<games::Collection> collection =
             gui_forms::make_control<games::Collection>(gui_forms::StableId("fixture"));
         gui_forms::ApplicationWindowOptions options;
         options.title = "PlaySuite native framebuffer test";
         options.ready = games::FramebufferReady{collection};
-        gui_forms::ApplicationResult result = gui_forms::Application::run(
-            std::make_unique<gui_forms::Window>(collection, gui_forms::Size{1060, 680}), options);
+        gui_forms::ApplicationResult result = application.run(
+            std::make_unique<gui_forms::Window>(application, collection, gui_forms::Size{1060, 680}), std::move(options));
+        collection.reset();
+        created.application.reset();
+        static_cast<void>(gui_forms::Application::shutdown());
         if (result.callback_exception)
             std::rethrow_exception(result.callback_exception);
         if (!result.accepted())

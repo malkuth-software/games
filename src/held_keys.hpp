@@ -5,6 +5,7 @@
 // when the window loses activation), so a game asks it instead of keeping its own
 // table filled from key downs and ups.
 #include "gui_forms/basic_controls.hpp"
+#include "gui_forms/surface_root/surface_root.hpp"
 
 #include <cstdint>
 

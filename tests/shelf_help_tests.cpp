@@ -1,3 +1,4 @@
+#include "stable_ids.hpp"
 #include "game_module.hpp"
 #include "gui_forms/window.hpp"
 #include "help_book.hpp"
@@ -49,7 +50,7 @@ int main() {
         assert((*rows).children().size() == entries.size() + 2); // every box and two arrows
         // The credits live in help now; the shelf gives their room to the games.
         assert(!find_control(*shelf, "shelf.credits"));
-        const std::shared_ptr<gf::Control> music = find_control(*shelf, "shelf.Music");
+        const std::shared_ptr<gf::Control> music = find_control(*shelf, "shelf.music");
         assert(music);
         const gf::Rect music_bounds = (*music).committed_arranged_bounds();
         for (Entry entry : entries) {
@@ -145,10 +146,11 @@ int main() {
         for (const HelpTopic& topic : descriptor.help_topics) {
             (*pages).select(static_cast<int>(entry), topic.id);
             window.perform_layout();
-            const std::shared_ptr<gf::Control> extra = find_control(*pages, prefix + topic.id);
+            const std::shared_ptr<gf::Control> extra = find_control(*pages, std::string(games::stable_id(prefix + topic.id).value()));
             assert(extra && (*extra).visible.read() && !(*body).visible.read());
             const std::shared_ptr<gf::Control> heading = find_control(
-                *pages, "help.topic." + std::to_string(static_cast<int>(entry)) + "." + topic.id);
+                *pages, std::string(games::stable_id("help.topic." + std::to_string(static_cast<int>(entry)) + "." +
+                                                     topic.id).value()));
             // The chosen topic opens first, straight under the dedication and credits (and
             // the business card beside them, which the book lays over the pages).
             const gf::Rect credits =
@@ -167,7 +169,7 @@ int main() {
     (*pages).select(-1, "about");
     // On the shelf the book holds every game's pages.
     assert((*pages).children().size() == topic_count * 2 + 2); // and two credit lines
-    assert((*find_control(*pages, "help.body.-1.about")).visible.read());
+    assert((*find_control(*pages, "help.body.suite.about")).visible.read());
     assert(help_about().find(std::to_string(entry_count) + " games") != std::string::npos);
     // The dedication and credits head the document, above every topic, whatever is selected.
     const std::shared_ptr<gf::Control> dedication = find_control(*pages, "help.front.dedication");
@@ -176,10 +178,10 @@ int main() {
     // The sponsor's address and website are on the business card now, not in the text.
     assert(!find_control(*pages, "help.front.contact") && !find_control(*pages, "help.front.website"));
     window.perform_layout();
-    const double first_heading = (*find_control(*pages, "help.topic.-1.about")).committed_arranged_bounds().y;
+    const double first_heading = (*find_control(*pages, "help.topic.suite.about")).committed_arranged_bounds().y;
     assert((*dedication).committed_arranged_bounds().y < first_heading);
     assert((*credits).committed_arranged_bounds().y < first_heading);
     (*pages).select(-123, "missing-topic");
-    assert((*find_control(*pages, "help.body.-1.rules")).visible.read());
+    assert((*find_control(*pages, "help.body.suite.rules")).visible.read());
     std::cout << "Native shelves and descriptor-owned help passed\n";
 }

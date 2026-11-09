@@ -27,6 +27,7 @@
 #include <fstream>
 #include <iostream>
 #include <thread>
+#include "stable_ids.hpp"
 
 namespace {
 namespace gf = gui_forms;
@@ -208,56 +209,56 @@ int main(const int argc, char** const argv) {
         std::shared_ptr<gf::Control> view{};
 #ifdef GAMES_FRAME_fourpegs
         if (game == "fourpegs") {
-            std::shared_ptr<fp::FourPegsView> control=gf::make_control<fp::FourPegsView>(gf::StableId(game),fp::Options{.dev=true});
+            std::shared_ptr<fp::FourPegsView> control=gf::make_control<fp::FourPegsView>(games::stable_id(game),fp::Options{.dev=true});
             (*control).set_cabinet(true,false,false,true);
             view=control;
         }
 #endif
 #ifdef GAMES_FRAME_atomprobe
         if (game == "atomprobe") {
-            std::shared_ptr<ap::AtomProbeView> control=gf::make_control<ap::AtomProbeView>(gf::StableId(game),ap::Options{.dev=true});
+            std::shared_ptr<ap::AtomProbeView> control=gf::make_control<ap::AtomProbeView>(games::stable_id(game),ap::Options{.dev=true});
             (*control).set_cabinet(true,false,false,true);
             view=control;
         }
 #endif
 #ifdef GAMES_FRAME_switchbox
         if (game == "switchbox") {
-            std::shared_ptr<sbx::SwitchboxView> control=gf::make_control<sbx::SwitchboxView>(gf::StableId(game),sbx::Options{.dev=true});
+            std::shared_ptr<sbx::SwitchboxView> control=gf::make_control<sbx::SwitchboxView>(games::stable_id(game),sbx::Options{.dev=true});
             (*control).set_cabinet(true,false,false,true);
             view=control;
         }
 #endif
 #ifdef GAMES_FRAME_eggy
         if (game == "eggy") {
-            std::shared_ptr<eggy::EggyView> control=gf::make_control<eggy::EggyView>(gf::StableId(game),eggy::Options{.dev=true});
+            std::shared_ptr<eggy::EggyView> control=gf::make_control<eggy::EggyView>(games::stable_id(game),eggy::Options{.dev=true});
             (*control).set_cabinet_preferences(false,false,true);
             view=control;
         }
 #endif
 #ifdef GAMES_FRAME_koikoi
         if (game == "koikoi") {
-            std::shared_ptr<kk::KoiView> control=gf::make_control<kk::KoiView>(gf::StableId(game),kk::Options{.hosted=true,.dev=true});
+            std::shared_ptr<kk::KoiView> control=gf::make_control<kk::KoiView>(games::stable_id(game),kk::Options{.hosted=true,.dev=true});
             (*control).set_cabinet(true,false,false,true);
             view=control;
         }
 #endif
 #ifdef GAMES_FRAME_parrots
         if (game == "parrots") {
-            std::shared_ptr<pt::TableView> control=gf::make_control<pt::TableView>(gf::StableId(game),pt::Options{.hosted=true,.dev=true});
+            std::shared_ptr<pt::TableView> control=gf::make_control<pt::TableView>(games::stable_id(game),pt::Options{.hosted=true,.dev=true});
             (*control).set_cabinet(true,false,false,true);
             view=control;
         }
 #endif
 #ifdef GAMES_FRAME_liarsdice
         if (game == "liarsdice") {
-            std::shared_ptr<ld::DiceView> control=gf::make_control<ld::DiceView>(gf::StableId(game),ld::Options{.hosted=true,.dev=true});
+            std::shared_ptr<ld::DiceView> control=gf::make_control<ld::DiceView>(games::stable_id(game),ld::Options{.hosted=true,.dev=true});
             (*control).set_cabinet(true,false,false,true);
             view=control;
         }
 #endif
 #ifdef GAMES_FRAME_penthesheep
         if (game == "penthesheep") {
-            std::shared_ptr<sh::SheepView> control=gf::make_control<sh::SheepView>(gf::StableId(game),sh::Options{.hosted=true,.dev=true});
+            std::shared_ptr<sh::SheepView> control=gf::make_control<sh::SheepView>(games::stable_id(game),sh::Options{.hosted=true,.dev=true});
             (*control).set_cabinet(true,false,false,true);
             view=control;
         }

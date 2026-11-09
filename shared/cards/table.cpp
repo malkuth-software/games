@@ -13,6 +13,7 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include "stable_ids.hpp"
 namespace games {
 // The PlaySuite capsule floats over the top of the felt; play starts below it.
 static constexpr double kTop = 54;
@@ -143,7 +144,7 @@ void Table::initialize_control_tree() {
         if (i == 18)
             buttons_[i] = gf::make_control<HeartsButton>(gf::StableId("action18"), names[i]);
         else {
-            buttons_[i] = gf::make_control<GameButton>(gf::StableId("action" + std::to_string(i)),
+            buttons_[i] = gf::make_control<GameButton>(games::stable_id("action" + std::to_string(i)),
                                                        names[i]);
             (*std::static_pointer_cast<GameButton>(buttons_[i])).set_skin(ButtonSkin::ivory);
         }
@@ -381,7 +382,7 @@ void Table::keep_print(Printed& printed, const Sprite& sprite, std::span<const s
     printed.design = sprite.card.up ? -1 : back_;
     printed.generation = printer_.generation();
 }
-void Table::forget_pictures(gf::Window& window) {
+void Table::forget_pictures(gf::SurfaceRoot& window) {
     for (Printed& printed : printed_) {
         if (printed.image.value)
             static_cast<void>(window.remove_image(printed.image));

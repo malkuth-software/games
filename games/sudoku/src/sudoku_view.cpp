@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include "stable_ids.hpp"
 namespace games {
 // The PlaySuite capsule floats above the board.
 static constexpr double kTop = 54;
@@ -73,11 +74,11 @@ void SudokuView::initialize_control_tree() {
                             "Erase",    "Close", "Save name",  "New game"};
     for (int i = 0; i < 20; ++i) {
         if (i >= 7 && i <= 16) {
-            buttons_[i] = gf::make_control<PadNumeral>(gf::StableId("sudoku." + std::to_string(i)),
+            buttons_[i] = gf::make_control<PadNumeral>(games::stable_id("sudoku." + std::to_string(i)),
                                                        i == 16 ? "×" : labels[i]);
         } else {
             std::shared_ptr<SuiteButton> button = gf::make_control<SuiteButton>(
-                gf::StableId("sudoku." + std::to_string(i)), labels[i],
+                games::stable_id("sudoku." + std::to_string(i)), labels[i],
                 game.dark ? GlossTone::smoke : GlossTone::chrome);
             (*button).set_radius(4);
             (*button).font = gf::FontSpec{gf::FontRole::content, 14.0, 700, false};

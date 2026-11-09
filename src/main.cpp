@@ -18,6 +18,9 @@ struct RunState final {
     gf::FrameRequestToken timer{};
     gf::FrameTime started{}, sample_start{}, resize_until{};
     bool completed = false, sampling = false, resizing = false;
+    // A script action that failed: the run closes and main reports it (an exception
+    // left to the frame timer would not end the run on the Windows host).
+    std::string failure;
     gf::Size resize_from{};
     std::weak_ptr<gf::Control> root;
     std::weak_ptr<games::Collection> collection;
@@ -35,7 +38,9 @@ static std::uint32_t key_code(const std::string& name) {
         {"w",gf::PhysicalKey::w},{"a",gf::PhysicalKey::a},{"s",gf::PhysicalKey::s},
         {"d",gf::PhysicalKey::d},{"h",gf::PhysicalKey::h},{"m",gf::PhysicalKey::m},
         {"t",gf::PhysicalKey::t},{"z",gf::PhysicalKey::z},{"n",gf::PhysicalKey::n},
-        {"backspace",gf::PhysicalKey::backspace}};
+        {"q",gf::PhysicalKey::q},{"e",gf::PhysicalKey::e},{"r",gf::PhysicalKey::r},
+        {"u",gf::PhysicalKey::u},{"f",gf::PhysicalKey::f},
+        {"backspace",gf::PhysicalKey::backspace},{"delete",gf::PhysicalKey::delete_forward}};
     const std::map<std::string,std::uint32_t>::const_iterator found = keys.find(name);
     if (found == keys.end()) throw std::runtime_error("Unsupported script key: " + name);
     return (*found).second;
@@ -106,6 +111,12 @@ struct RunTick final {
             static_cast<void>((*window).dispatch_key(key));
             key.action = gf::KeyAction::up;
             static_cast<void>((*window).dispatch_key(key));
+        } else if (action.verb == "press" || action.verb == "release") {
+            // a key held across script lines, for the games that steer with held keys
+            gf::KeyEvent key{};
+            key.action = action.verb == "press" ? gf::KeyAction::down : gf::KeyAction::up;
+            key.physical_key = key_code(action.argument);
+            static_cast<void>((*window).dispatch_key(key));
         } else if (action.verb == "click") {
             gf::PointerEvent pointer{};
             pointer.position = {action.x,action.y}; pointer.button = gf::PointerButton::primary;
@@ -167,7 +178,13 @@ struct RunTick final {
         }
         while ((*live).next < (*live).actions.size() &&
                (*live).actions[(*live).next].milliseconds <= seconds * 1000) {
-            perform(*live,(*live).actions[(*live).next++]);
+            try {
+                perform(*live,(*live).actions[(*live).next++]);
+            } catch (const std::exception& error) {
+                (*live).failure = error.what();
+                (*live).completed = true;
+                static_cast<void>(handle.request_close());
+            }
             if ((*live).completed || (*live).resizing) break;
         }
     }
@@ -200,9 +217,16 @@ struct Ready final {
     }
 };
 // Prints the theme compile's findings: the refusal's errors, or the warnings of a
-// theme that was taken (each a declaration or rule the engine dropped).
+// theme that was taken. W201 (a literal colour forced high contrast cannot remap) is
+// expected of every PlaySuite colour, which has no GUI.Forms palette role
+// (docs/TOOLKIT_REQUESTS.md), so those are counted on one line, not listed.
 static void report_theme_findings(const std::vector<gf::ThemeCompileDiagnostic>& findings) {
+    std::size_t unremappable = 0;
     for (const gf::ThemeCompileDiagnostic& finding : findings) {
+        if (finding.code == "W201") {
+            ++unremappable;
+            continue;
+        }
         std::cerr << "PlaySuite theme: " << finding.code << ' ' << finding.name << " at " << finding.file << ':'
                   << finding.line << ':' << finding.column;
         if (!finding.rule.empty()) std::cerr << " in " << finding.rule;
@@ -210,6 +234,8 @@ static void report_theme_findings(const std::vector<gf::ThemeCompileDiagnostic>&
         if (!finding.detail.empty()) std::cerr << ": " << finding.detail;
         std::cerr << '\n';
     }
+    if (unremappable > 0)
+        std::cerr << "PlaySuite theme: " << unremappable << " literal colours forced high contrast cannot remap (W201)\n";
 }
 // The application: PlaySuite's theme package (themes/playsuite) over Windows
 // Professional, compiled once. A refused package is reported and the suite runs in the
@@ -281,7 +307,8 @@ int main(int argc,char** argv) {
         options.print_metrics_on_close = true; options.ready = Ready{state};
         const gf::ApplicationResult result = application.run(std::move(window),std::move(options));
         if (result.callback_exception) std::rethrow_exception(result.callback_exception);
-        const bool completed = (*state).completed;
+        const bool completed = (*state).completed && (*state).failure.empty();
+        if (!(*state).failure.empty()) std::cerr << "Native script failed: " << (*state).failure << std::endl;
         // Everything the run made goes before the rendering library ends: the run state
         // (a standalone game's module), then the application and its resources.
         state.reset();

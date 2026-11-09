@@ -8,7 +8,7 @@ import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-TOOLKIT_REVISION = "2d0f52006a5d1f8ce98a2191c841052b2dd500b7"
+TOOLKIT_REVISION = "ffbdc2a775a9289eef142d131db3c91bac36faac"
 
 
 def miniaudio_license(toolkit, fetched):

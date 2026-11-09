@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include "stable_ids.hpp"
 
 namespace zc {
 
@@ -1147,7 +1148,7 @@ gf::Size size_of(gf::Label& label, double wrap) { return label.measure({wrap > 0
 }  // namespace
 
 std::shared_ptr<games::SuiteButton> ZenView::make_button(const std::string& id, const std::string& label, games::GlossTone tone) {
-    std::shared_ptr<games::SuiteButton> b = gf::make_control<games::SuiteButton>(gf::StableId("zc." + id), label, tone);
+    std::shared_ptr<games::SuiteButton> b = gf::make_control<games::SuiteButton>(games::stable_id("zc." + id), label, tone);
     (*b).set_radius(7);
     (*b).accessible_name = label;
     (*b).set_paint_plane(gf::PaintPlane::overlay);
@@ -1159,7 +1160,7 @@ std::shared_ptr<games::SuiteButton> ZenView::make_button(const std::string& id, 
 }
 
 std::shared_ptr<gf::Label> ZenView::make_label(const std::string& id, double size, int weight, bool italic, gf::Color colour, bool wrap) {
-    std::shared_ptr<gf::Label> l = gf::make_control<Words>(gf::StableId("zc." + id));
+    std::shared_ptr<gf::Label> l = gf::make_control<Words>(games::stable_id("zc." + id));
     font(*l, size, weight, italic);
     (*l).fore_color = colour;
     (*l).use_mnemonic = false;

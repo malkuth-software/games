@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include "stable_ids.hpp"
 namespace games {
 namespace {
 constexpr gf::Color rgb(int r, int g, int b, int a = 255) {
@@ -552,7 +553,7 @@ void ShelfView::initialize_control_tree() {
     (*rows_).sprites = &sprites_;
     add_child(rows_);
     for (int i = 0; i < entry_count; ++i) {
-        boxes_[i] = gf::make_control<ShelfBox>(gf::StableId("shelf.box." + std::to_string(static_cast<int>(entries[i]))),
+        boxes_[i] = gf::make_control<ShelfBox>(games::stable_id("shelf.box." + std::to_string(static_cast<int>(entries[i]))),
                                                entries[i], sprites_);
         (*boxes_[i]).focused = std::bind(&ShelfView::focused_box, this, entries[i]);
         (*boxes_[i]).wake = std::bind_front(&ShelfView::request_animation, this);

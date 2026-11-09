@@ -107,7 +107,7 @@ executables that pass falsely.
 
 [docs/BUILDING.md](docs/BUILDING.md) and `.github/workflows/applications.yml` are the
 recipe for the complete application and its packages. Release CI pins GUI.Forms
-`2d0f52006a5d1f8ce98a2191c841052b2dd500b7` (checkpoint 2026-11-08-cp22, the 0.5 fold) from `malkuth-software/gui_forms` and follows
+`ffbdc2a775a9289eef142d131db3c91bac36faac` (checkpoint 2026-11-09-cp25) from `malkuth-software/gui_forms` and follows
 its LLVM 22.1.8 contract on every platform (macOS 14.0 Apple silicon with GUI.Forms'
 bundled runtime, Windows 10, Ubuntu 24.04), restoring that revision's published
 compiler cache. Ogg Vorbis is decoded by GUI.Forms' stx_vorbis; packages carry its
@@ -186,7 +186,7 @@ The native executable is `.build/app-dogfood/games.app/Contents/MacOS/games`. Us
 `--list-games`, `--game <id> --standalone --dev`, or `--dev --script <file>` for
 isolated native checks; a script is lines of `<milliseconds> <verb>` ending in
 `quit`, with the verbs `help`, `shelf`, `open <id>`, `command <id>`, `action <code>`,
-`key <name>`, `click X Y`, `hover X Y`, `resize W H` and `capture <file.ppm>`.
+`key <name>`, `press <name>` and `release <name>` (a key held across lines), `click X Y`, `hover X Y`, `resize W H` and `capture <file.ppm>`.
 `--profile-idle` measures a settled game. `GAMES_EXTRA_GAME_DIRS` lets a complete
 external game folder be tested before it is copied into `games/`; clear it after the
 experiment, and never commit fixture games or generated catalog files. Test module

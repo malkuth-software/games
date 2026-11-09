@@ -192,7 +192,7 @@ int main() {
             assert(restored.state.marks[0] == 1 && restored.state.marks[1] == 1);
             static_cast<void>(window.dispatch_text({"b"}));
             static_cast<void>(window.dispatch_text({"c"}));
-            assert((*button(*view, "four_pegs.action.3")).perform_click());
+            assert((*button(*view, "four-pegs.action.3")).perform_click());
             assert(game.state.stage == 1 && game.state.grid[0] == 1 && game.state.grid[1] == 1 &&
                    game.state.grid[2] == 2 && game.state.grid[3] == 3);
         }
@@ -460,13 +460,13 @@ int main() {
         window.perform_layout();
         SettingsStore& store = SettingsStore::shared();
         const std::shared_ptr<SuiteButton> shelf_sound =
-            std::static_pointer_cast<SuiteButton>(button(*collection, "shelf.Sound"));
+            std::static_pointer_cast<SuiteButton>(button(*collection, "shelf.sound"));
         const std::shared_ptr<SuiteButton> capsule_sound =
-            std::static_pointer_cast<SuiteButton>(button(*collection, "capsule.Sound"));
+            std::static_pointer_cast<SuiteButton>(button(*collection, "capsule.sound"));
         const std::shared_ptr<SuiteButton> capsule_music =
-            std::static_pointer_cast<SuiteButton>(button(*collection, "capsule.Music"));
-        assert(shelf_sound && capsule_sound && capsule_music && button(*collection, "capsule.Settings") &&
-               button(*collection, "shelf.Settings"));
+            std::static_pointer_cast<SuiteButton>(button(*collection, "capsule.music"));
+        assert(shelf_sound && capsule_sound && capsule_music && button(*collection, "capsule.settings") &&
+               button(*collection, "shelf.settings"));
         (*collection).open_entry(Entry::solitaire);
         window.perform_layout();
         // Open the capsule, as hovering does, so its switches can be pressed.
@@ -490,10 +490,10 @@ int main() {
         assert((*capsule_music).perform_click());
         assert(store.values().music == music && (*capsule_music).crossed() == !music);
         // The Settings screen: the cog opens it over the game; its controls are the masters.
-        assert((*button(*collection, "capsule.Settings")).perform_click());
+        assert((*button(*collection, "capsule.settings")).perform_click());
         window.perform_layout();
         assert((*collection).settings_open() && window.focus_scope_depth() == 1);
-        assert((*std::static_pointer_cast<SuiteButton>(button(*collection, "capsule.Settings"))).checked());
+        assert((*std::static_pointer_cast<SuiteButton>(button(*collection, "capsule.settings"))).checked());
         std::shared_ptr<SettingsSheet> sheet;
         for (const std::shared_ptr<gf::Control>& c : (*collection).children())
             if (std::dynamic_pointer_cast<SettingsSheet>(c))
@@ -557,11 +557,11 @@ int main() {
         key.physical_key = gf::PhysicalKey::escape;
         assert(window.dispatch_key(key));
         assert(!(*collection).settings_open() && window.focus_scope_depth() == 0);
-        assert(!(*std::static_pointer_cast<SuiteButton>(button(*collection, "capsule.Settings"))).checked());
+        assert(!(*std::static_pointer_cast<SuiteButton>(button(*collection, "capsule.settings"))).checked());
         // The shelf has the same screen, with the masters only.
         (*collection).show_shelf();
         window.perform_layout();
-        assert((*button(*collection, "shelf.Settings")).perform_click());
+        assert((*button(*collection, "shelf.settings")).perform_click());
         window.perform_layout();
         assert((*collection).settings_open() && !named(*sheet, ".back.1") && !named(*sheet, ".chip.game.draw.0"));
         (*collection).dispatch_command("settings");

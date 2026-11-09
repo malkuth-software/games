@@ -107,6 +107,8 @@ gf::Rect outset(gf::Rect r, double amount);
 // the theme falls back to where no rule styles the part. A part the theme frames draws
 // its border inside `bounds`, so a caller that stroked a path centred on a rect passes
 // that rect grown by half the stroke.
+// The part key a skinned part is painted under, so `::part(<name>)` rules reach it.
+[[nodiscard]] std::optional<gf::PartKey> skin_part_key(gf::PartRole role);
 void paint_skin_part(gf::Painter& p, const gf::Control& control, gf::PartRole role, gf::Rect bounds,
                      gf::AnatomyStateSet states, std::optional<double> radius,
                      gf::ControlVisualRole family = gf::ControlVisualRole::button);

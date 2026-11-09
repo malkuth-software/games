@@ -14,6 +14,7 @@
 #include <cmath>
 #include <filesystem>
 #include <optional>
+#include "stable_ids.hpp"
 
 namespace games {
 namespace {
@@ -224,7 +225,7 @@ BusinessCard::~BusinessCard() = default;
 void BusinessCard::initialize_control_tree() {
     if (!in_hand())
         return;
-    std::shared_ptr<HelpGlyph> mark = gf::make_control<HelpGlyph>(gf::StableId(std::string(stable_id().value()) + ".close"), "×");
+    std::shared_ptr<HelpGlyph> mark = gf::make_control<HelpGlyph>(games::stable_id(std::string(stable_id().value()) + ".close"), "×");
     (*mark).set_variant(HelpGlyphVariant::card_mark);
     (*mark).accessible_name = "Put the card away (Escape)";
     (*mark).set_paint_plane(gf::PaintPlane::overlay);

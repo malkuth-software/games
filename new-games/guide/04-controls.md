@@ -16,7 +16,7 @@ The source of truth is the pinned toolkit (`.github/workflows/applications.yml`)
 |---|---|---|
 | `Control` | `gui_forms/control.hpp` | The base: `arrange`, `on_paint`, `on_pointer`, `on_key`, `on_key_bubble`, `on_attached_to_window`, `on_detaching_from_window`, `invalidate`, `set_paint_plane`, `set_accessible_name`. Anything owner-drawn. |
 | `Panel`, `GroupBox`, `ScaledPanel`, `Card` | `container_controls.hpp` | Grouping; a card with an elevation. |
-| `FlowLayoutPanel`, `TableLayoutPanel` | `container_controls.hpp` | Layout containers. The shell lays out by hand in `arrange`, which is shorter until the declarative grid below exists. |
+| `FlowLayoutPanel`, `TableLayoutPanel` | `container_controls.hpp` | Layout containers; `GridPanel` (`grid_panel.hpp`) is the declarative grid. The shell still lays out by hand in `arrange`. |
 | `ScrollableControl` | `controls/scrollable_control/` | A scrolling body: `set_auto_scroll`, `arrange_scroll_viewport`, `scroll_to`, `scroll_by`, `scroll_position`. The help pages and the Settings page are these. |
 | `Label` | `basic_controls.hpp` | Text: `font`, `text_wrapping`, `alignment` (property cells: `(*label).font = ...;`, `.read()`), `classes` for the theme, `measure`. |
 | `Button`, `CheckBox`, `RadioButton`, `LinkLabel` | `basic_controls.hpp` | Buttons and their kin, all on `ButtonBase`: `clicked`, `checked`, `enabled`, `expanded_state` (a disclosure; all property cells), `hovered_visual`, `focus_cue_visible`. |
@@ -196,8 +196,8 @@ page teaches:
 |---|---|---|
 | Named handlers: `gf::on` with owner-held tokens | Shipped (GUI.Forms f81ec0c) | Every `subscriptions_` vector and `Delegate::bind` |
 | Bound values, shared `Command` and `Value<T>` state, item-reporting groups | Shipped (5bb7a8b) | The capsule's and Settings page's pointer searches, the quiet slider subclass, manual `set_checked` copies between the shelf's and the capsule's switches |
-| One declarative grid (rows and columns as `"34 auto * 34"`, cells, dock and anchor) | Not yet | The hand-written `arrange` code in the capsule and shelf |
-| A form as a plain struct of controls built from `Options` records, attached in one call | Not yet | The constructors' `make_control` and setter runs |
+| One declarative grid (rows and columns as `"34 auto * 34"`, cells, dock and anchor) | Available: `GridPanel` (`grid_panel.hpp`; explicit and implicit tracks, named areas, flexible sizing) | The hand-written `arrange` code in the capsule and shelf; moving them is PlaySuite's choice |
+| A form as a plain struct of controls built from `Options` records, attached in one call | Available: `.form` documents compiled to a window struct (`forms/playsuite.form`) | The constructors' `make_control` and setter runs |
 | Skins that draw named parts; the HTML subset and the browser designer that produce the struct | Not yet | `SuiteButton`'s gloss and glyphs becoming a skin |
 
 Until the grid and form records exist, write controls as the shipped steps allow:

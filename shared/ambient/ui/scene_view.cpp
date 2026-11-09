@@ -16,6 +16,7 @@
 #include <functional>
 #include <span>
 #include <sstream>
+#include "stable_ids.hpp"
 
 namespace ambient {
 namespace {
@@ -145,7 +146,7 @@ SceneView::~SceneView() = default;
 
 // Children join once the view is owned (initialize_tree_after_construction).
 void SceneView::initialize_control_tree() {
-    card_ = gf::make_control<HelpCard>(gf::StableId(setup_.id + ".help_card"));
+    card_ = gf::make_control<HelpCard>(games::stable_id(setup_.id + ".help_card"));
     (*card_).visible = false;
     (*card_).close = std::bind_front(&SceneView::set_help, this, false);
     add_child(card_);

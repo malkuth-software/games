@@ -103,7 +103,7 @@ class Table final : public gf::Control, public CommandSource {
     // every core lending a hand: a move's few cards in a few milliseconds, a deck in tens.
     void print_stale();
     void keep_print(Printed& printed, const Sprite& sprite, std::span<const std::byte> pixels);
-    void forget_pictures(gf::Window& window);
+    void forget_pictures(gf::SurfaceRoot& window);
     std::array<Sprite, 104> sprites_{};
     std::array<gf::Rect, pile_count> slots_{};
     std::vector<int> pass_cards_;

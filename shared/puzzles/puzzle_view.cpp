@@ -11,6 +11,7 @@
 #include <fstream>
 #include <map>
 #include <sstream>
+#include "stable_ids.hpp"
 namespace games {
 namespace {
 // Nature Cube's sound for a path that just changed: it grew, shrank or reached its pair.
@@ -421,7 +422,7 @@ void PuzzleView::initialize_control_tree() {
     if (game.kind == PuzzleKind::gems || game.kind == PuzzleKind::untangle)
         for (int i = 0; i < 3; ++i) {
             scene_parts_[i] = gf::make_control<PuzzleScenePart>(
-                gf::StableId(std::string(puzzle_slug(game.kind)) + ".scene." + std::to_string(i)),
+                games::stable_id(std::string(puzzle_slug(game.kind)) + ".scene." + std::to_string(i)),
                 *this, i);
             add_child(scene_parts_[i]);
         }
@@ -429,7 +430,7 @@ void PuzzleView::initialize_control_tree() {
                             "Flip",     "Close", "Save name",  "New game"};
     for (int i = 0; i < 9; ++i) {
         buttons_[i] = gf::make_control<GameButton>(
-            gf::StableId(std::string(puzzle_slug(game.kind)) + ".action." + std::to_string(i)),
+            games::stable_id(std::string(puzzle_slug(game.kind)) + ".action." + std::to_string(i)),
             labels[i]);
         add_child(buttons_[i]);
         subscriptions_.push_back(
@@ -445,7 +446,7 @@ void PuzzleView::initialize_control_tree() {
                         // dragging.
     }
     name_ = gf::make_control<gf::TextBox>(
-        gf::StableId(std::string(puzzle_slug(game.kind)) + ".name"), game.player_name);
+        games::stable_id(std::string(puzzle_slug(game.kind)) + ".name"), game.player_name);
     (*name_).maximum_length = 24;
     (*name_).accessible_name = "Your name for the top scores";
     (*name_).visible = false;
