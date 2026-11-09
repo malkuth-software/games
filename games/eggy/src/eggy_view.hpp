@@ -118,7 +118,14 @@ private:
     std::vector<Button> buttons_;
     std::string pressed_;
     double away_m_ = 0, away_s_ = 0;
-    bool keys_[5] = {};        // up down left right hop-held
+    // The walk keys held now: the arrows or WASD, read from the window each tick.
+    struct WalkKeys {
+        bool up{};
+        bool down{};
+        bool left{};
+        bool right{};
+    };
+    [[nodiscard]] WalkKeys held_walk_keys() const;
     bool hop_edge_ = false;
     bool mouse_down_ = false;
     double mouse_x_ = 0, mouse_y_ = 0;  // physical pixels

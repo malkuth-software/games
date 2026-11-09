@@ -237,6 +237,7 @@ bool SceneView::scene_ready() const {
 SceneContext SceneView::context() {
     SceneContext result{governor_, sound_, settings_, scene_time_, reduced_, settings_.paused,
                         sound_on_ && front_ && visible.read(), 0, false};
+    result.keys = help_open_ ? nullptr : this;
     return result;
 }
 
@@ -627,15 +628,11 @@ void SceneView::on_key(gf::KeyEvent& event) {
         return;
     using Key = gf::PhysicalKey;
     const std::uint32_t key = event.physical_key;
-    if (!help_open_ && !event.repeat) {
-        SceneContext work = context();
-        const bool taken = (*scenery_).hold_key(key, event.action == gf::KeyAction::down, work);
-        finish(work);
-        if (taken) {
-            event.handled = true;
-            request_frame();
-            return;
-        }
+    if (!help_open_ && (*scenery_).steers_with(key)) {
+        // the scene reads the key's state as it advances (key_held); a frame shows it
+        event.handled = true;
+        request_frame();
+        return;
     }
     if (event.action != gf::KeyAction::down)
         return;

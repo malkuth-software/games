@@ -1,3 +1,4 @@
+#include "held_keys.hpp"
 #include "help_route.hpp"
 #include "zen_view.hpp"
 #include "runtime_paths.hpp"
@@ -461,19 +462,29 @@ void ZenView::react(const RunEvents& events) {
 
 // ---------------------------------------------------------------- play
 
+// A key the crane reads is held when the window has it down while the focus is in this
+// view (games::key_held), or while a development script holds it (hold=).
+bool ZenView::held(std::uint32_t key) const {
+    if (key < scripted_keys_.size() && scripted_keys_[key]) {
+        return true;
+    }
+    const bool result = games::key_held(*this, key);
+    return result;
+}
+
 CraneInput ZenView::gather_input() const {
     CraneInput input;
     if (panel_ != Panel::none) {
         return input;
     }
-    input.right = (keys_[kKeyRight] ? 1.0 : 0.0) - (keys_[kKeyLeft] ? 1.0 : 0.0);
-    input.forward = (keys_[kKeyUp] ? 1.0 : 0.0) - (keys_[kKeyDown] ? 1.0 : 0.0);
-    input.up = ((keys_[kKeyW] || keys_[kKeyPageUp]) ? 1.0 : 0.0) - ((keys_[kKeyS] || keys_[kKeyPageDown]) ? 1.0 : 0.0);
-    input.yaw = (keys_[kKeyQ] ? 1.0 : 0.0) - (keys_[kKeyE] ? 1.0 : 0.0);     // turn, about the vertical
-    input.pitch = (keys_[kKeyR] ? 1.0 : 0.0) - (keys_[kKeyF] ? 1.0 : 0.0);   // tip, toward or away from the crane
-    input.roll = (keys_[kKeyZ] ? 1.0 : 0.0) - (keys_[kKeyC] ? 1.0 : 0.0);
-    input.fast = keys_[kKeyShiftLeft] || keys_[kKeyShiftRight];
-    input.fine = keys_[kKeyAltLeft] || keys_[kKeyAltRight];
+    input.right = (held(kKeyRight) ? 1.0 : 0.0) - (held(kKeyLeft) ? 1.0 : 0.0);
+    input.forward = (held(kKeyUp) ? 1.0 : 0.0) - (held(kKeyDown) ? 1.0 : 0.0);
+    input.up = ((held(kKeyW) || held(kKeyPageUp)) ? 1.0 : 0.0) - ((held(kKeyS) || held(kKeyPageDown)) ? 1.0 : 0.0);
+    input.yaw = (held(kKeyQ) ? 1.0 : 0.0) - (held(kKeyE) ? 1.0 : 0.0);     // turn, about the vertical
+    input.pitch = (held(kKeyR) ? 1.0 : 0.0) - (held(kKeyF) ? 1.0 : 0.0);   // tip, toward or away from the crane
+    input.roll = (held(kKeyZ) ? 1.0 : 0.0) - (held(kKeyC) ? 1.0 : 0.0);
+    input.fast = held(kKeyShiftLeft) || held(kKeyShiftRight);
+    input.fine = held(kKeyAltLeft) || held(kKeyAltRight);
     return input;
 }
 
@@ -912,9 +923,6 @@ void ZenView::on_key(gf::KeyEvent& e) {
     }
     const std::uint32_t k = e.physical_key;
     const bool down = e.action == gf::KeyAction::down;
-    if (k < 256) {
-        keys_[k] = down;
-    }
     if (!down) {
         e.handled = true;
         return;
@@ -1031,13 +1039,13 @@ void ZenView::run_script() {
             const std::uint32_t codes[12] = {kKeyUp, kKeyDown, kKeyLeft, kKeyRight, kKeyW, kKeyS, kKeyQ, kKeyE, kKeyR, kKeyF, kKeyZ, kKeyC};
             for (int k = 0; k < 12; k += 1) {
                 if (name == names[k]) {
-                    keys_[codes[k]] = true;
+                    scripted_keys_[codes[k]] = true;
                     script_.push_back(std::pair<double, std::string>(t_ + seconds, "free=" + std::to_string(codes[k])));
                     std::stable_sort(script_.begin(), script_.end(), script_before);
                 }
             }
         } else if (c.rfind("free=", 0) == 0) {
-            keys_[std::atoi(c.c_str() + 5) & 255] = false;
+            scripted_keys_[static_cast<std::size_t>(std::atoi(c.c_str() + 5) & 255)] = false;
         }
     }
 }
@@ -1642,7 +1650,7 @@ std::vector<games::GameCommand> ZenView::commands() const {
 void ZenView::run_command(std::string_view id) { action(std::string(id)); }
 void ZenView::on_focus_changed(bool focused) {
     if (!focused) {
-        std::fill(std::begin(keys_), std::end(keys_), false);
+        scripted_keys_.fill(false);
         dragging_ = false;
         hold_reset_ = 0;
     }

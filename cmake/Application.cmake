@@ -167,6 +167,10 @@ add_executable(shelf_help_tests tests/shelf_help_tests.cpp)
 target_link_libraries(shelf_help_tests PRIVATE game_ui)
 add_test(NAME shelf_help COMMAND shelf_help_tests)
 set_tests_properties(shelf_help PROPERTIES ENVIRONMENT "GAMES_ASSET_DIR=${GAMES_RUNTIME_ASSET_DIR}")
+# The held-key query the steering games read (games::key_held): focus, release, deactivation.
+add_executable(held_keys_tests tests/held_keys_tests.cpp)
+target_link_libraries(held_keys_tests PRIVATE game_ui)
+add_test(NAME held_keys COMMAND held_keys_tests)
 # The help book's business card: the held card's drawing and picking, and its remarks.
 add_executable(business_card_tests tests/business_card_tests.cpp)
 target_link_libraries(business_card_tests PRIVATE game_ui)

@@ -1,3 +1,4 @@
+#include "held_keys.hpp"
 #include "help_route.hpp"
 #include "eggy_view.hpp"
 
@@ -124,7 +125,6 @@ void EggyView::register_surface() {
 void EggyView::cabinet_visibility(bool shown) {
     audio_cabinet(shown, cabinet_music_, cabinet_sound_);
     if (!shown) {
-        for (auto& key : keys_) key = false;
         mouse_down_ = hop_edge_ = false;
         set_pointer_capture(false);
         persist();
@@ -379,10 +379,12 @@ void EggyView::tick() {
     // input
     const bool playing = panel_ == Panel::none;
     s.in = Input{};
-    if (intro_ >= 0 && (keys_[0] || keys_[1] || keys_[2] || keys_[3] || hop_edge_ || mouse_down_)) { skip_intro(); hop_edge_ = false; mouse_down_ = false; }
+    const WalkKeys walk = playing ? held_walk_keys() : WalkKeys{};
+    const bool walking = walk.up || walk.down || walk.left || walk.right;
+    if (intro_ >= 0 && (walking || hop_edge_ || mouse_down_)) { skip_intro(); hop_edge_ = false; mouse_down_ = false; }
     if (playing && intro_ < 0) {
-        s.in.iv = (keys_[0] ? 1 : 0) - (keys_[1] ? 1 : 0);
-        s.in.iu = (keys_[3] ? 1 : 0) - (keys_[2] ? 1 : 0);
+        s.in.iv = (walk.up ? 1 : 0) - (walk.down ? 1 : 0);
+        s.in.iu = (walk.right ? 1 : 0) - (walk.left ? 1 : 0);
         s.in.hop = hop_edge_;
         if (mouse_down_) {
             double u, v;
@@ -784,24 +786,33 @@ void EggyView::on_pointer(gf::PointerEvent& e) {
     }
 }
 
+// The arrows and WASD held now (games::key_held: down in the window while the focus is
+// in this view); the window releases them all when it loses activation.
+EggyView::WalkKeys EggyView::held_walk_keys() const {
+    using K = gf::PhysicalKey;
+    WalkKeys result;
+    result.up = games::key_held(*this, K::up) || games::key_held(*this, K::w);
+    result.down = games::key_held(*this, K::down) || games::key_held(*this, K::s);
+    result.left = games::key_held(*this, K::left) || games::key_held(*this, K::a);
+    result.right = games::key_held(*this, K::right) || games::key_held(*this, K::d);
+    return result;
+}
+
 void EggyView::on_key(gf::KeyEvent& e) {
     if (e.handled) return;
     using K = gf::PhysicalKey;
     const bool down = e.action == gf::KeyAction::down;
     const std::uint32_t k = e.physical_key;
-    int idx = -1;
-    if (k == K::up || k == K::w) idx = 0;
-    else if (k == K::down || k == K::s) idx = 1;
-    else if (k == K::left || k == K::a) idx = 2;
-    else if (k == K::right || k == K::d) idx = 3;
+    const bool walk_key = k == K::up || k == K::w || k == K::down || k == K::s || k == K::left || k == K::a
+                          || k == K::right || k == K::d;
     if (panel_ == Panel::finale && !score_saved_) {
         if (down && k == K::backspace && !name_entry_.empty()) { name_entry_.pop_back(); audio_sfx("eggy_ui_key", .4f, .8f, sound_on()); }
         if (down && k == K::enter) action("save_name");
         e.handled = true;
         return;
     }
-    if (idx >= 0) {
-        keys_[idx] = down && panel_ == Panel::none;
+    if (walk_key) {
+        // the walk reads the window's held keys each tick (held_walk_keys)
         e.handled = true;
         return;
     }
