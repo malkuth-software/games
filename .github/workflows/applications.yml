@@ -85,6 +85,8 @@ jobs:
       # The harness's checker; scripts/check-style.py is the contributors' copy of it.
       - name: Check first-party C++ style
         run: python3 -B template_harness/harness/check_house_style.py src tests tools shared
+      - name: Check the theme package is written from its script
+        run: python3 -B tools/make_theme.py --check
       - name: Check each game's shipped size
         run: python3 tools/check_contribution.py prepared --runtime build/runtime-assets
       - name: Verify and archive resources

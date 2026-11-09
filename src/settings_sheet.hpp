@@ -40,6 +40,7 @@ class CardBackChoice final : public gf::Button {
     [[nodiscard]] int back() const {
         return back_;
     }
+    [[nodiscard]] gf::AnatomyStateSet anatomy_states() const override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
 
   private:

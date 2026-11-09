@@ -18,8 +18,8 @@ The source of truth is the pinned toolkit (`.github/workflows/applications.yml`)
 | `Panel`, `GroupBox`, `ScaledPanel`, `Card` | `container_controls.hpp` | Grouping; a card with an elevation. |
 | `FlowLayoutPanel`, `TableLayoutPanel` | `container_controls.hpp` | Layout containers. The shell lays out by hand in `arrange`, which is shorter until the declarative grid below exists. |
 | `ScrollableControl` | `controls/scrollable_control/` | A scrolling body: `set_auto_scroll`, `arrange_scroll_viewport`, `scroll_to`, `scroll_by`, `scroll_position`. The help pages and the Settings page are these. |
-| `Label` | `basic_controls.hpp` | Text: `set_font`, `set_foreground`, `set_text_wrapping`, `set_alignment`, `measure`. |
-| `Button`, `CheckBox`, `RadioButton`, `LinkLabel` | `basic_controls.hpp` | Buttons and their kin, all on `ButtonBase`: `clicked`, `set_checked`, `set_enabled`, `set_expanded_state` (a disclosure), `hovered_visual`, `focus_cue_visible`. |
+| `Label` | `basic_controls.hpp` | Text: `font`, `text_wrapping`, `alignment` (property cells: `(*label).font = ...;`, `.read()`), `classes` for the theme, `measure`. |
+| `Button`, `CheckBox`, `RadioButton`, `LinkLabel` | `basic_controls.hpp` | Buttons and their kin, all on `ButtonBase`: `clicked`, `checked`, `enabled`, `expanded_state` (a disclosure; all property cells), `hovered_visual`, `focus_cue_visible`. |
 | `TextBox` | `input_controls.hpp` | Text entry (`set_maximum_length`; multiline scrolls). The score name entry on the card table. |
 | `TrackBar`, `ProgressBar` | `range_controls.hpp` | A `RangeControl` with `value_changed` for every change and `scroll` for user input only. |
 | `ListBox` | `collection_controls.hpp` | A list: `selection_changed`, `item_activated(std::size_t)`. |
@@ -124,25 +124,42 @@ are ordinary controls, so a skin recipe applies to them.
 
 ## Skins: the shell's look
 
-The shell does not restyle the toolkit; it subclasses a control and paints it, keeping
-the control's behaviour, keyboard handling and accessibility:
+The shell's look is a GUI.Forms theme package, `themes/playsuite`, written by
+`tools/make_theme.py` from the colours the shell has always used (edit the script, then
+run it; CI fails when the package is not the script's output). The application compiles
+it once at start (`src/main.cpp`) over Windows Professional, and every window shows it in
+the light scheme.
 
-| Shell class | On | Adds |
-|---|---|---|
-| `SuiteButton` (`src/shelf.hpp`) | `Button` | Gloss tones, glyphs, round or pill radius. The capsule, the shelf arrows, the master switches. |
-| `GameButton` (`src/presentation.hpp`) | `Button` | Four `ButtonSkin`s (slate, ivory, blue, mint) for game panels. |
-| `SettingSlider`, `SettingCheck`, `CardBackChoice` (`src/settings_sheet.hpp`) | `TrackBar`, `CheckBox`, `Button` | The gold groove and knob, the gold box, a card back as it looks on the table. |
-| `HelpGlyph`, `TopicHeading` (`src/help_book.*`) | `Button`, `Button` | The close mark, a disclosure heading. |
-| `BusinessCard` (`src/business_card.*`) | `Control` | Rainstar Software's card, drawn by `shared/cards/held_card.*`: on the help page a small still card that opens on a click; in the hand, over the whole window on black, turned by dragging or the arrows, its name the link to the website, Escape to put it away. |
+Each skinned control keeps its behaviour, keyboard handling and accessibility, and its
+geometry (where the face sits, a circle's size, the pressed offset). It paints the stock
+parts of its kind through the theme (`paint_skin_part` and `gf::paint_text_part_at`,
+`src/suite.hpp`) and carries the classes the sheet styles:
 
-`games_theme(ButtonSkin)` (`src/presentation.hpp`) is the palette a sheet applies with
-`set_theme_override`. The help and Settings sheets are printed on the paper engine's
-tile (`src/paper_sheet.*`): made once per window scale when the sheet attaches, drawn
-with `fill_image_pattern`.
+| Shell class | On | Classes | Parts |
+|---|---|---|---|
+| `SuiteButton` (`src/suite.hpp`) | `Button` | `gloss`, the tone (`chrome`, `gold`, `navy`, `smoke`), `rounded-end` for a pill or circle; lit is `:checked` | face, label, focus (the gold ring); glyphs still drawn in code |
+| `GameButton` (`src/presentation.hpp`) | `Button` | `game-button` and the skin (`slate`, `ivory`, `blue`, `mint`); chosen is `:checked` | face, label, focus |
+| `SettingSlider` (`src/settings_sheet.hpp`) | `TrackBar` | `setting` | track, fill, thumb, focus |
+| `SettingCheck` | `CheckBox` | `setting` | indicator, label, focus; the tick still drawn in code |
+| `CardBackChoice` | `Button` | `card-back`; chosen is `:checked` | face (the ring), focus; the card is content |
+| `HelpGlyph` (`src/help_book.*`) | `Button` | `help-glyph`, with `help-link` or `card-mark` (`set_variant`) | label, underline glyph |
+| `TopicHeading` | `Button` | `topic-heading` | face, label (the +/- as secondary text), focus |
+| `BusinessCard` (`src/business_card.*`) | `Control` | | Canvas art: Rainstar Software's card, drawn by `shared/cards/held_card.*`. |
+
+A subtree takes its skin by class (`set_skin_class(control, ButtonSkin::ivory)`, which
+replaces games_theme and set_theme_override): `.skin-ivory` and the rest give its labels
+and editors the skin's text, fields and fonts. The help and Settings sheets' labels take
+`help-text`, `settings-text` and `settings-heading`. The sheets are printed on the paper
+engine's tile (`src/paper_sheet.*`): made once per window scale when the sheet attaches,
+drawn with `fill_image_pattern`.
+
+What the theme cannot yet say exactly is listed in `docs/TOOLKIT_REQUESTS.md` ("Theme
+gaps for PlaySuite's exact look").
 
 A painted control uses `hovered_visual()` and `focus_cue_visible()` (the toolkit shows
-the focus cue only when the keyboard moved focus) and `client_rectangle()`; it draws
-text with `draw_text_utf8` at a baseline it measures with `measure_text_utf8`.
+the focus cue only when the keyboard moved focus) and `client_rectangle()`; canvas text
+is drawn with `draw_text_utf8` at a baseline measured with `measure_text_utf8`, and a
+control's own text through `gf::paint_text_part_at`, so the theme colours it.
 
 ## Lifecycle, in short
 
@@ -151,7 +168,8 @@ text with `draw_text_utf8` at a baseline it measures with `measure_text_utf8`.
    made in `initialize_control_tree()`, where `gf::on` wiring goes.
 2. `on_attached_to_window()` loads images (`window.load_png`,
    `window.load_bgra32_premultiplied`), starts timers, makes the paper.
-   `on_detaching_from_window(window) noexcept` removes the images and stops the timers.
+   `on_detaching_from_window(gf::SurfaceRoot& window) noexcept` removes the images and stops
+   the timers.
 3. `arrange(bounds)`: `arrange_self(bounds)`, then `set_child_layout(child, rect)` for
    each child, in points.
 4. `on_paint(painter, damage)` draws only this control's own pixels; children paint

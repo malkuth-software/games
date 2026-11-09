@@ -225,7 +225,7 @@ void BusinessCard::initialize_control_tree() {
     if (!in_hand())
         return;
     std::shared_ptr<HelpGlyph> mark = gf::make_control<HelpGlyph>(gf::StableId(std::string(stable_id().value()) + ".close"), "×");
-    (*mark).set_ink(gf::Color::rgba(228, 220, 196));
+    (*mark).set_variant(HelpGlyphVariant::card_mark);
     (*mark).accessible_name = "Put the card away (Escape)";
     (*mark).set_paint_plane(gf::PaintPlane::overlay);
     gf::on((*mark).clicked(), *this, &BusinessCard::put_away);

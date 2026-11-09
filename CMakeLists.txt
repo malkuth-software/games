@@ -59,6 +59,8 @@ elseif(GAMES_BUILD_APPLICATION)
   # GUI.Forms' own Vorbis decoder; forced so an older build folder cannot keep stb.
   set(GUI_FORMS_AUDIO_VORBIS_BACKEND stx CACHE STRING "" FORCE)
   set(GUI_FORMS_BUILD_TEXT_MASKS ON CACHE BOOL "" FORCE)
+  # forms/playsuite.form is compiled at build time.
+  set(GUI_FORMS_BUILD_FORM_COMPILER ON CACHE BOOL "" FORCE)
   set(GUI_FORMS_ENABLE_HARFBUZZ_TEXT ON CACHE BOOL "" FORCE)
   if(WIN32)
     set(GUI_FORMS_ENABLE_SKIA OFF CACHE BOOL "" FORCE)

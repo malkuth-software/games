@@ -69,9 +69,12 @@ Collection::Collection(gf::StableId id, bool dev) : Control(std::move(id)) {
         }
         shelf_open_ = true;
     }
-    set_theme_override(games_theme(ButtonSkin::ivory));
+    set_skin_class(*this, ButtonSkin::ivory);
 }
 Collection::~Collection() = default;
+void Collection::set_development(bool dev) {
+    modules_.dev = dev;
+}
 void Collection::initialize_control_tree() {
     sprites_.request_update = std::bind_front(&Collection::wake, this);
     shelf_ = gf::make_control<ShelfView>(gf::StableId("collection.shelf"), sprites_);
@@ -90,7 +93,7 @@ void Collection::initialize_control_tree() {
     gf::on(model_.settings.invoked(), *this, &Collection::toggle, 3);
     help_link_ = gf::make_control<HelpGlyph>(gf::StableId("collection.help"), "?");
     (*help_link_).font = gf::FontSpec{gf::FontRole::content, 32, 700, false};
-    (*help_link_).set_ink(gf::Color::rgba(240, 192, 84));
+    (*help_link_).set_variant(HelpGlyphVariant::help_link);
     (*help_link_).accessible_name = "PlaySuite help (H)";
     (*help_link_).set_paint_plane(gf::PaintPlane::overlay);
     gf::on((*help_link_).clicked(), *this, &Collection::clicked_help);

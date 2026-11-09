@@ -1,5 +1,7 @@
 #include "collection.hpp"
 #include "dogfood.hpp"
+#include "playsuite_form.hpp"   // generated from forms/playsuite.form
+#include "playsuite_theme.hpp"  // generated from themes/playsuite
 #include "gui_forms/application.hpp"
 #include "gui_forms/paint_framebuffer.hpp"
 #include <fstream>
@@ -197,6 +199,35 @@ struct Ready final {
         }
     }
 };
+// Prints the theme compile's findings: the refusal's errors, or the warnings of a
+// theme that was taken (each a declaration or rule the engine dropped).
+static void report_theme_findings(const std::vector<gf::ThemeCompileDiagnostic>& findings) {
+    for (const gf::ThemeCompileDiagnostic& finding : findings) {
+        std::cerr << "PlaySuite theme: " << finding.code << ' ' << finding.name << " at " << finding.file << ':'
+                  << finding.line << ':' << finding.column;
+        if (!finding.rule.empty()) std::cerr << " in " << finding.rule;
+        if (!finding.property.empty()) std::cerr << " (" << finding.property << ')';
+        if (!finding.detail.empty()) std::cerr << ": " << finding.detail;
+        std::cerr << '\n';
+    }
+}
+// The application: PlaySuite's theme package (themes/playsuite) over Windows
+// Professional, compiled once. A refused package is reported and the suite runs in the
+// base theme rather than not at all; the build has already checked the package, so a
+// refusal means an engine that reads the sheet differently.
+static gf::ApplicationCreateResult create_application() {
+    gf::ApplicationConfig config{};
+    config.theme.base = gf::ThemeBase::windows_professional;
+    config.theme.packages.push_back(games::playsuite_theme());
+    gf::ApplicationCreateResult created = gf::Application::create(std::move(config));
+    report_theme_findings(created.findings);
+    if (created || created.error != gf::ApplicationCreateError::theme_refused) return created;
+    std::cerr << "PlaySuite theme refused; running in the base theme\n";
+    gf::ApplicationConfig plain{};
+    plain.theme.base = gf::ThemeBase::windows_professional;
+    gf::ApplicationCreateResult fallback = gf::Application::create(std::move(plain));
+    return fallback;
+}
 int main(int argc,char** argv) {
     try {
         const games::dogfood::Options arguments = games::dogfood::parse_options(argc,argv);
@@ -215,29 +246,50 @@ int main(int argc,char** argv) {
             throw std::runtime_error("Unknown permanent game ID; use --list-games");
         games::dogfood::DevelopmentState saves(arguments.dev || arguments.smoke || arguments.profile);
         games::initialize_assets(argv[0]);
+        gf::ApplicationCreateResult created = create_application();
+        if (!created) throw std::runtime_error("The application could not be made");
+        gf::Application& application = *created.application;
         std::shared_ptr<RunState> state = std::make_shared<RunState>();
         (*state).options = arguments;
         if (!arguments.script.empty()) (*state).actions = games::dogfood::read_script(arguments.script);
         std::shared_ptr<gf::Control> root;
+        std::unique_ptr<gf::Window> window;
         games::ModuleContext context;
         context.dev = arguments.dev; context.hosted = !arguments.standalone;
         if (arguments.standalone) {
+            // One game alone: its own view is the window's root, made in code.
             (*state).standalone = games::game_descriptor(*games::find_entry(arguments.game)).create(context);
             root = (*(*state).standalone).control();
+            window = std::make_unique<gf::Window>(application,root,gf::Size{1060,680});
         } else {
-            std::shared_ptr<games::Collection> collection = gf::make_control<games::Collection>(gf::StableId("games.table"),arguments.dev);
+            // The suite: forms/playsuite.form's window, whose root is the shell.
+            std::unique_ptr<games::PlaySuiteWindow> suite = std::make_unique<games::PlaySuiteWindow>(application);
+            const std::shared_ptr<games::Collection> collection = (*suite).games_table;
+            (*collection).set_development(arguments.dev);
             (*state).collection = collection; root = collection;
+            window = std::move(suite);
         }
         (*state).root = root;
-        std::unique_ptr<gf::Window> window = std::make_unique<gf::Window>(root,gf::Size{1060,680});
+        // PlaySuite's look is one light look: its theme declares the light scheme only,
+        // and a window in the dark scheme would fall back to GUI.Forms' dark theme.
+        gf::PresentationOverrides light{};
+        light.colour_scheme = gf::ColourScheme::light;
+        (*window).set_presentation_overrides(light);
         gf::ApplicationWindowOptions options;
         options.title = arguments.standalone ? games::game_descriptor(*games::find_entry(arguments.game)).info.title : "PlaySuite";
         options.initial_size = {1060,680}; options.minimum_size = {600,420};
         options.print_metrics_on_close = true; options.ready = Ready{state};
-        const gf::ApplicationResult result = gf::Application::run(std::move(window),std::move(options));
+        const gf::ApplicationResult result = application.run(std::move(window),std::move(options));
         if (result.callback_exception) std::rethrow_exception(result.callback_exception);
-        if ((arguments.smoke || arguments.profile || !arguments.script.empty()) && !(*state).completed) return 1;
-        if ((*state).completed && result.accepted()) std::cout << "Native PlaySuite window smoke passed\n";
+        const bool completed = (*state).completed;
+        // Everything the run made goes before the rendering library ends: the run state
+        // (a standalone game's module), then the application and its resources.
+        state.reset();
+        root.reset();
+        created.application.reset();
+        static_cast<void>(gf::Application::shutdown());
+        if ((arguments.smoke || arguments.profile || !arguments.script.empty()) && !completed) return 1;
+        if (completed && result.accepted()) std::cout << "Native PlaySuite window smoke passed\n";
         return result.accepted() ? 0 : 1;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

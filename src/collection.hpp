@@ -19,7 +19,13 @@ namespace games {
 // change to the games and to the audio volumes, wherever the change came from.
 class Collection final : public gf::Control, public HelpHost {
   public:
+    // `dev` turns on the games' development behaviour (scripts, unlocked levels); the
+    // form-made shell (forms/playsuite.form) is constructed without it and told by
+    // set_development before it is activated.
     explicit Collection(gf::StableId id, bool dev = false);
+    // Sets the development flag the games are created with: before the first game
+    // opens (activate, open_entry), as a game made earlier keeps the flag it had.
+    void set_development(bool dev);
     ~Collection() override;
     static constexpr bool initialize_tree_after_construction = true;
     void initialize_control_tree();

@@ -62,7 +62,7 @@ SudokuView::SudokuView(gf::StableId id) : Control(std::move(id)) {
     accessible_name = "Sudoku. Choose a digit; click a square to set it, right click to make a "
                         "note. Arrow keys move; N toggles notes; Z undoes.";
     game.load(sudoku_path());
-    set_theme_override(games_theme(game.dark ? ButtonSkin::slate : ButtonSkin::blue));
+    set_skin_class(*this, game.dark ? ButtonSkin::slate : ButtonSkin::blue);
     difficulty_ = game.difficulty;
 }
 void SudokuView::initialize_control_tree() {
@@ -475,7 +475,7 @@ void SudokuView::action(gf::ButtonBase& button) {
     }
     if (index == 3) {
         game.dark = !game.dark;
-        set_theme_override(games_theme(game.dark ? ButtonSkin::slate : ButtonSkin::blue));
+        set_skin_class(*this, game.dark ? ButtonSkin::slate : ButtonSkin::blue);
         for (std::size_t i = 0; i < buttons_.size(); ++i)
             if (i < 7 || i > 16)
                 (*std::static_pointer_cast<SuiteButton>(buttons_[i]))
