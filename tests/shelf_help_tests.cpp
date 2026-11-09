@@ -126,7 +126,22 @@ int main() {
             wheel.wheel_delta = {0, -3};
             (*rows).on_pointer(wheel);
             window.perform_layout();
-            assert(wheel.handled && (*rows).scroll_offset() > 0);
+            // A wheel notch glides: nothing moves until the clock steps.
+            assert(wheel.handled && (*rows).scroll_offset() == 0);
+            assert((*rows).step(1.0 / 60, false));
+            const double gliding = (*rows).scroll_offset();
+            assert(gliding > 0 && gliding < 144);
+            while ((*rows).step(1.0 / 60, false)) {
+            }
+            assert((*rows).scroll_offset() > gliding);
+            // Trackpad points move at once.
+            gf::PointerEvent pan;
+            pan.action = gf::PointerAction::wheel;
+            pan.wheel_unit = gf::WheelDeltaUnit::pixels;
+            pan.wheel_delta = {0, 10};
+            const double settled = (*rows).scroll_offset();
+            (*rows).on_pointer(pan);
+            assert(pan.handled && (*rows).scroll_offset() == settled - 10);
         }
     }
     std::shared_ptr<HelpPages> pages = gf::make_control<HelpPages>(gf::StableId("test.help"));

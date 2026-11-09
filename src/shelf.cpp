@@ -448,12 +448,23 @@ bool ShelfRows::step(double dt, bool reduced) {
 void ShelfRows::wheel(gf::PointerEvent& event) {
     if (event.action != gf::PointerAction::wheel || event.handled || !scrollable())
         return;
-    // Wheel notches arrive as small numbers, trackpads as points.
-    const double delta = std::abs(event.wheel_delta.y) <= 8 ? event.wheel_delta.y * 48
-                                                            : event.wheel_delta.y;
-    const double before = offset_;
-    jump_to(offset_ - delta);
-    event.handled = offset_ != before;
+    // Trackpad points move the shelves at once, under the finger. Wheel lines glide: each
+    // notch moves the glide's target 48 points on from where it was going, and step()
+    // eases the shelves there frame by frame (a notch used to jump 48 points in one frame).
+    if (event.wheel_unit == gf::WheelDeltaUnit::pixels) {
+        const double before = offset_;
+        jump_to(offset_ - event.wheel_delta.y);
+        event.handled = offset_ != before;
+        return;
+    }
+    const double before = target_;
+    target_ = std::clamp(target_ - event.wheel_delta.y * 48, 0.0, limit());
+    event.handled = target_ != before;
+    if (event.handled) {
+        arrange_boxes();
+        if (wake)
+            wake();
+    }
 }
 void ShelfRows::on_pointer(gf::PointerEvent& event) {
     wheel(event);
