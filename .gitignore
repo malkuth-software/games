@@ -21,3 +21,4 @@ __pycache__/
 # A GUI.Forms checkout at the workspace root (CI checks the pin out here; a local
 # build may use a worktree at the pin).
 /gui_forms/
+/gui_forms_main/

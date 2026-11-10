@@ -21,7 +21,7 @@ constexpr std::string_view kLine[] = {
     "Let's see {rival} {boast}.",
     "{feel} the {weight}.",
     "{thickness}",
-    "Rainstar Software. {tagline}",
+    "Malkuthsoft. {tagline}",
     "{aside}",
     "{look} the {detail}. {verdict}",
 };

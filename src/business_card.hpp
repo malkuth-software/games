@@ -1,5 +1,5 @@
 #pragma once
-// Rainstar Software's business card: a shell easter egg, not a game. It comes in two kinds.
+// Malkuthsoft's business card: a shell easter egg, not a game. It comes in two kinds.
 //
 // On the page: a small card lying beside the help book's dedication, still, casting its
 // shadow on the paper and rising a little under the pointer. A click (or Enter) on it opens it.
@@ -8,7 +8,7 @@
 // three dimensions (held_card.hpp draws it, lit as it now faces the lamp), so the finish's
 // dimples, the raised letters, the glint of its facets, the sheen of its varnish and the two
 // plies of its cut edge move as it turns; let go, it spins down and settles face up or face
-// down, wherever it was nearer. "Rainstar Software" turns to gold foil under the pointer and a
+// down, wherever it was nearer. "Malkuthsoft" turns to gold foil under the pointer and a
 // click there opens the website; while the pointer is over the card, remarks of the sort made
 // when such cards are compared (card_remarks.hpp) rise around it one at a time and fade.
 // Escape, the close mark, or a click on the black puts it away.
@@ -85,7 +85,8 @@ class BusinessCard final : public gf::Control {
     CardMaterial material_;
     double density_ = 0;
     double built_width_ = 0;
-    gf::Rect company_{};  // "Rainstar Software" on the front, as fractions of the face
+    gf::Rect company_{};  // "Malkuthsoft" on the front, as fractions of the face
+    bool accented_ = false;  // the faces were printed with the name in the accent ink
     std::unique_ptr<GameText> text_;
     bool text_failed_ = false;
     std::vector<Letter> letters_;
@@ -141,6 +142,7 @@ class BusinessCard final : public gf::Control {
     void draw();
     void say();
     void visit();
+    void switch_on_overlay_if_asked(gf::Point local);
     void put_away();
     void hover(gf::Point local);
     void unhover();

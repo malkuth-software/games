@@ -50,7 +50,7 @@ class Collection final : public gf::Control, public HelpHost {
     [[nodiscard]] bool help_open() const {
         return help_ && (*help_).visible.read();
     }
-    // Rainstar Software's business card, opened from help over the whole window.
+    // Malkuthsoft's business card, opened from help over the whole window.
     void show_card();
     void close_card();
     [[nodiscard]] bool card_open() const {
