@@ -55,6 +55,13 @@ if(WIN32)
     endif()
 endif()
 target_link_libraries(games PRIVATE game_ui)
+# The suite's window is forms/playsuite.form (its root the shell, an application type);
+# its look is the theme package themes/playsuite, written by tools/make_theme.py.
+set(GAMES_FORM_TYPES "collection,games::Collection,user_control,collection.hpp")
+gui_forms_add_form(games forms/playsuite.form CLASS PlaySuiteWindow NAMESPACE games DERIVED
+                   TYPES "${GAMES_FORM_TYPES}")
+gui_forms_add_theme(games themes/playsuite FUNCTION playsuite_theme NAMESPACE games
+                    FORMS forms/playsuite.form)
 set_target_properties(games PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME "PlaySuite"
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.malkuthsoft.playsuite"
@@ -167,6 +174,19 @@ add_executable(shelf_help_tests tests/shelf_help_tests.cpp)
 target_link_libraries(shelf_help_tests PRIVATE game_ui)
 add_test(NAME shelf_help COMMAND shelf_help_tests)
 set_tests_properties(shelf_help PROPERTIES ENVIRONMENT "GAMES_ASSET_DIR=${GAMES_RUNTIME_ASSET_DIR}")
+# The theme package compiles with no finding, and the form window is made with the shell.
+add_executable(playsuite_theme_tests tests/playsuite_theme_tests.cpp)
+target_link_libraries(playsuite_theme_tests PRIVATE game_ui)
+gui_forms_add_form(playsuite_theme_tests forms/playsuite.form CLASS PlaySuiteWindow NAMESPACE games DERIVED
+                   TYPES "${GAMES_FORM_TYPES}")
+gui_forms_add_theme(playsuite_theme_tests themes/playsuite FUNCTION playsuite_theme NAMESPACE games
+                    FORMS forms/playsuite.form)
+add_test(NAME playsuite_theme COMMAND playsuite_theme_tests)
+set_tests_properties(playsuite_theme PROPERTIES ENVIRONMENT "GAMES_ASSET_DIR=${GAMES_RUNTIME_ASSET_DIR}")
+# The held-key query the steering games read (games::key_held): focus, release, deactivation.
+add_executable(held_keys_tests tests/held_keys_tests.cpp)
+target_link_libraries(held_keys_tests PRIVATE game_ui)
+add_test(NAME held_keys COMMAND held_keys_tests)
 # The help book's business card: the held card's drawing and picking, and its remarks.
 add_executable(business_card_tests tests/business_card_tests.cpp)
 target_link_libraries(business_card_tests PRIVATE game_ui)

@@ -28,15 +28,15 @@ std::uint64_t seed_now() {
 
 SwitchboxView::SwitchboxView(gf::StableId id, Options opt)
     : Control(std::move(id)), opt_(opt), puzzle_(seed_now()), actor_(seed_now() ^ 0xA5A5) {
-    set_focusable(true);
+    focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     {
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
         set_authored_surface_material(none);
     }
-    set_accessible_name("Switchbox. A girl lives in a box of six switches and flips them back down. Find the order that lights "
-                        "all six lamps. Click a switch or press 1 to 6. F1 help, T top scores, M music, N sound.");
+    accessible_name = "Switchbox. A girl lives in a box of six switches and flips them back down. Find the order that lights "
+                        "all six lamps. Click a switch or press 1 to 6. F1 help, T top scores, M music, N sound.";
     lines_.load(asset_dir() + "/lines/switchbox");
     if (load_save(save_path(opt_.dev), save_) && save_.has_puzzle) static_cast<void>(puzzle_.restore(save_.puzzle));
     for (int i = 0; i < kSwitches; ++i) {
@@ -72,7 +72,7 @@ void SwitchboxView::on_attached_to_window() {
     (*timer_).start();
 }
 
-void SwitchboxView::on_detaching_from_window(gf::Window&) noexcept {
+void SwitchboxView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
     try { persist(); } catch (...) {}
     subs_.clear();
     cancel_cursor_interaction();
@@ -162,7 +162,7 @@ void SwitchboxView::on_paint(gf::Painter& p, gf::Rect) {
 // ------------------------------------------------------------------ game
 void SwitchboxView::play(const std::string& name, float gain, float rate) {
     // Hosted, PlaySuite's Sound master is the only switch.
-    audio_sfx(name, gain, rate, (opt_.hosted || save_.settings.sound) && cab_sound_ && cab_front_ && visible());
+    audio_sfx(name, gain, rate, (opt_.hosted || save_.settings.sound) && cab_sound_ && cab_front_ && visible.read());
 }
 
 void SwitchboxView::flip(int sw) {
@@ -299,7 +299,7 @@ void SwitchboxView::tick() {
         if (bubble_.age > bubble_.dur) bubble_ = Bubble{};
     }
     // one call per tick: switching tracks back and forth would restart the loop
-    audio_music(visible() && cab_front_ ? kMusic : "", (opt_.hosted || save_.settings.music) && cab_music_ && cab_front_);
+    audio_music(visible.read() && cab_front_ ? kMusic : "", (opt_.hosted || save_.settings.music) && cab_music_ && cab_front_);
     audio_tick(dt);
     save_t_ += dt;
     if (save_t_ > 10 || (dirty_ && save_t_ > 2)) { save_t_ = 0; persist(); }
@@ -307,7 +307,7 @@ void SwitchboxView::tick() {
     gf::Window* win = attached_window();
     const bool hidden = win && (*win).occluded();
     const bool front = !win || (*win).active();
-    const bool shown = visible();
+    const bool shown = visible.read();
     const auto pace = std::chrono::milliseconds(hidden || !shown || !cab_front_ ? 500 : front ? 33 : 100);
     if (timer_ && (*timer_).interval() != pace) (*timer_).set_interval(pace);
     if (!shown || !cab_front_) {
@@ -372,7 +372,7 @@ void SwitchboxView::publish() {
 // the system cursor that hides while the game draws its own.
 void SwitchboxView::mischief(double) {
     gf::Window* window = attached_window();
-    if (!cab_front_ || !visible() || window == nullptr || !(*window).active()) {
+    if (!cab_front_ || !visible.read() || window == nullptr || !(*window).active()) {
         cancel_cursor_interaction();
         return;
     }
@@ -479,7 +479,7 @@ void SwitchboxView::on_pointer(gf::PointerEvent& e) {
         if (hold_sw_ >= 0 && stage_.pick_socket(mouse_x_, mouse_y_) != hold_sw_ && stage_.pick_switch(mouse_x_, mouse_y_, st_) != hold_sw_) hold_sw_ = -1;
         const bool over = !hover_.empty() || stage_.pick_switch(mouse_x_, mouse_y_, st_) >= 0 || stage_.pick_socket(mouse_x_, mouse_y_) >= 0 ||
                           (!actor_.hidden() && stage_.pick_head(mouse_x_, mouse_y_, st_.girl));
-        set_cursor(over ? gf::CursorKind::hand : gf::CursorKind::arrow);
+        cursor = over ? gf::CursorKind::hand : gf::CursorKind::arrow;
     }
     if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
         activate();

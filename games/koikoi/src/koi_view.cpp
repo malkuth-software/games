@@ -40,14 +40,14 @@ int group_of(int c) {
 
 KoiView::KoiView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt) {
     cab_front_ = !opt_.hosted;
-    set_focusable(true);
+    focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     {
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
         set_authored_surface_material(none);
     }
-    set_accessible_name("Koi-Koi, the hanafuda game. Match cards by month, collect sets, and decide when to stop.");
+    accessible_name = "Koi-Koi, the hanafuda game. Match cards by month, collect sets, and decide when to stop.";
     slots_.fill(-1);
     {
         // the deck ships as compressed PNG; its cards and both backs decode side by side on worker threads
@@ -92,7 +92,7 @@ void KoiView::on_attached_to_window() {
     (*timer_).start();
 }
 
-void KoiView::on_detaching_from_window(gf::Window&) noexcept {
+void KoiView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
     try { persist(); } catch (...) {}
     if (timer_) (*timer_).stop();
     timer_.reset();
@@ -418,7 +418,7 @@ bool KoiView::load() {
 }
 
 void KoiView::play(const std::string& name, float gain, float rate) {
-    audio_sfx(name, gain, rate, (opt_.hosted || sound_) && cab_sound_ && cab_front_ && visible());
+    audio_sfx(name, gain, rate, (opt_.hosted || sound_) && cab_sound_ && cab_front_ && visible.read());
 }
 
 // ------------------------------------------------------------------ geometry
@@ -575,7 +575,7 @@ void KoiView::run_script() {
 
 void KoiView::request_frame() {
     render_dirty_ = true;
-    if (!timer_ || !visible() || !cab_front_) return;
+    if (!timer_ || !visible.read() || !cab_front_) return;
     if (!(*timer_).enabled()) last_ = std::chrono::steady_clock::now();
     (*timer_).set_interval(std::chrono::milliseconds(16));
     (*timer_).start();
@@ -597,7 +597,7 @@ bool KoiView::visual_work() const {
 }
 
 void KoiView::tick() {
-    if (!visible() || !cab_front_) { if (timer_) (*timer_).stop(); return; }
+    if (!visible.read() || !cab_front_) { if (timer_) (*timer_).stop(); return; }
     const bool was_moving = visual_work();
     const auto now = std::chrono::steady_clock::now();
     const double rdt = std::clamp(std::chrono::duration<double>(now - last_).count(), 0.0, .1);
@@ -624,7 +624,7 @@ void KoiView::tick() {
     }
     for (Banner& b : banners_) b.age += dt;
     banners_.erase(std::remove_if(banners_.begin(), banners_.end(), [](const Banner& b) { return b.age > b.life; }), banners_.end());
-    audio_music(visible() && cab_front_ ? "kk_music" : "", (opt_.hosted || music_) && cab_music_ && cab_front_);
+    audio_music(visible.read() && cab_front_ ? "kk_music" : "", (opt_.hosted || music_) && cab_music_ && cab_front_);
     audio_tick(rdt);
     save_t_ += rdt;
     if (dirty_ && save_t_ > .5) { save_t_ = 0; persist(); }
@@ -633,7 +633,7 @@ void KoiView::tick() {
     static const bool capturing = opt_.dev && std::getenv("KK_PRINT_WID");
     const bool hidden = win && (*win).occluded() && !capturing;
     const bool front = !win || (*win).active();
-    const bool shown = visible();
+    const bool shown = visible.read();
     const auto pace = std::chrono::milliseconds(hidden || !shown || !cab_front_ ? 500 : front ? 16 : 100);
     if (timer_ && (*timer_).interval() != pace) (*timer_).set_interval(pace);
 
@@ -698,7 +698,7 @@ void KoiView::on_pointer(gf::PointerEvent& e) {
         if (previous_button != hover_btn_ || previous_card != c) request_frame();
         const bool mine = c >= 0 && s_.turn == 0 && ((s_.phase == koi::Phase::play && std::find(s_.hand[0].begin(), s_.hand[0].end(), c) != s_.hand[0].end()) ||
                                                       (s_.pending >= 0 && std::find(s_.choices.begin(), s_.choices.end(), c) != s_.choices.end()));
-        set_cursor(!hover_btn_.empty() || mine ? gf::CursorKind::hand : gf::CursorKind::arrow);
+        cursor = !hover_btn_.empty() || mine ? gf::CursorKind::hand : gf::CursorKind::arrow;
     }
     if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
         activate();

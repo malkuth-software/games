@@ -1,6 +1,6 @@
 # GUI.Forms requests from the PlaySuite rework
 
-AGENTS.md asks for reusable capabilities to become GUI.Forms enhancements, coordinated with the toolkit owner. The PlaySuite shell needed several things the pinned toolkit (`7b260cf`) does not offer. Games carries small local versions so the application works today. Each entry below names the local stand-in that a toolkit feature would replace. None of these changes were made to the shared toolkit checkout.
+AGENTS.md asks for reusable capabilities to become GUI.Forms enhancements, coordinated with the toolkit owner. The PlaySuite shell needed several things the toolkit, as pinned when each entry was found (each entry dates itself), did not offer. Games carries small local versions so the application works today. Each entry below names the local stand-in that a toolkit feature would replace. None of these changes were made to the shared toolkit checkout.
 
 ## Proposed toolkit features
 
@@ -185,7 +185,10 @@ enlarging copy.
    `track_inset` (`range_control_rendering.hpp`). The Settings screen overrides
    `on_paint` in `games::SettingSlider` for a gold groove and gloss knob and has to
    repeat that inset. A public track rectangle (or thumb/track recipes in the
-   theme) would let applications restyle it safely. TrackBar also lacks a
+   theme) would let applications restyle it safely. *Closed for the track: GUI.Forms
+   now publishes `TrackBar::value_span_bounds()` and `track_bounds()`, and
+   `SettingSlider` places its groove and knob on the span (2026-11-09); the colours come
+   from themes/playsuite.* TrackBar also lacks a
    hovered-visual accessor such as `ButtonBase::hovered_visual()`. `CheckBox` likewise
    draws its focus as a fixed blue rectangle from the theme; `games::SettingCheck`
    overrides `on_paint` for a gold box and a soft gold focus outline (shown only
@@ -218,6 +221,10 @@ enlarging copy.
    for Pen the Sheep at 2200 x 1440) is the largest cost left outside the game.
    Intersecting the presentation clip with the frame's damage, when the window's
    retained raster already holds the previous generation, would remove most of it.
+   *Addressed by GUI.Forms 92c1065a6 (in the cp25 pin): opaque live surfaces and skipping
+   covered macOS retained paints (`live_surface_damage.hpp`), which also answers item
+   5(b) above. Item 5(a), a small surface scaled by the host, is still open. Not
+   re-measured on the M4 since; re-measure before calling the cost gone.*
 
 ## Hover when the pointer leaves (found with the shelf, 2026-10-10)
 
@@ -236,6 +243,10 @@ enlarging copy.
    then sends `enter` as usual). PlaySuite works around the hidden case by giving
    each box a synthetic `leave` when the shelf hides for a game
    (`ShelfBox::forget_pointer`); it cannot see the window exit.
+   *Window exit answered by GUI.Forms c6baab4df (in the cp25 pin): a host leave clears
+   the window's hover and the control's pointer-over state. The hidden-or-disabled-while-
+   hovered case is unverified, and `ButtonBase::hovered_visual()` still changes only on
+   the control's own `on_pointer(leave)`; `ShelfBox::forget_pointer` stays until checked.*
 
 ## An overlay's share of a live frame (found with the capsule, 2026-10-10)
 
@@ -272,3 +283,88 @@ The help document and the Settings screen are now printed on a generated paper t
    weight; greyscale antialiasing (F007) composes correctly over paper where subpixel
    rendering would fringe. A `Painter` or text-mask option for linear-light compositing
    would let both applications share it. PlaySuite carries no stand-in.
+
+## Theme gaps for PlaySuite's exact look (found migrating to 0.5, 2026-11-08)
+
+PlaySuite's look is now the theme package `themes/playsuite` (`tools/make_theme.py`). The
+controls paint stock parts through the theme; these are what the 0.5 theme language and
+part painting cannot yet say, so the look differs from the painted one or the code still
+draws it. Each names the feature that would close it.
+
+1. **App-defined marks.** The gloss glyphs (back, play, music, sound, motion, more,
+   settings, the red slash of a switched-off master) and the settings box's tick are
+   still stroked in code in the gloss ink, which the code repeats beside the sheet's
+   roles. Needed: a program-registered mark vocabulary (a mark name and its path,
+   drawn in the part's glyph-color), or a mask-image mark the theme can colour.
+2. **Line geometry inside a face.** paint_gloss's shine was a one-unit line two units
+   under the top, kept `radius * .6 + 2` in from each end and faded in over
+   `min(10 units, a quarter of its length)`; GameButton's highlight and lowlight were kept
+   5 and 4 units in. Keylines (used now) run the face's full width with no fade. Needed:
+   either a keyline inset and end fade (`keylines: <colour> inset 4.4px fade 10px`), or
+   sized and positioned gradient layers (`background-size: calc(100% - 8.8px) 1px`; today
+   a gradient ignores sizes and only `100% 100%` is admitted for two lengths, and an
+   expression mixing percent and px is refused).
+3. **Centred strokes.** The painters stroked rims and rings centred on a rect; a theme
+   border lies inside the part. The controls pass the rect grown by half the stroke,
+   which is exact for rings and rims but moves the gloss shine half a unit up (its row
+   counts from the grown edge), and the unchecked and checked settings box need
+   different bounds because their rims differ (1.5 and 1). Needed: `border-position:
+   center` (or `outline` on parts, below), so a part's bounds stay the path.
+4. **Outline on parts.** `outline` and `outline-offset` are admitted on a control only
+   (W107), so each focus ring is a separate `focus` part with a border, placed by the
+   control. Needed: outline on parts, so the ring belongs to the face it surrounds.
+5. **One look in every scheme.** A theme with no variant for the window's scheme falls
+   back to GUI.Forms in that scheme, so PlaySuite forces the light scheme with a window
+   presentation override. Needed: a `color-scheme: only light` (CSS's `only`) that keeps
+   the theme in every scheme.
+6. **Procedural materials.** The shelf's wood, the paper sheet's tile, the felt and the
+   box art are drawn by PlaySuite's own engines and stay canvas art. Needed only if
+   themes should restyle them: program-registered paint sources a background can name.
+7. **Several text shadows, and emboss.** Sudoku's pad numerals draw a highlight and a
+   shadow under the digit and a radial glow behind it; text-shadow is one shadow, on a
+   control. Needed: up to four text shadows (as box-shadow) and `radial-gradient` faces
+   for a button part.
+8. **Live tint.** Zen Construction fades its HUD labels per frame by writing `fore_color`;
+   that stays code. A theme transition cannot follow a value the game computes. Needed:
+   nothing for the theme; recorded so that fore_color stays admitted for live values.
+9. **Fonts beside colours.** The skinned controls keep their FontSpec in code (sizes,
+   weights, the 0.1 and 0.2 letter spacing in em) because a part's font comes from the
+   control; the sheet gives the skins' default label and editor fonts only. Needed:
+   `font-*` and `letter-spacing` on `::part(label)`, so a class can carry a button's type.
+10. **Mint skin subtree.** games_theme had no mint variant (mint was a button skin
+    only); the sheet keeps `.skin-mint` with the dark values for symmetry. No toolkit need.
+
+### Found building against cp25 (ffbdc2a7, 2026-11-09)
+
+The first build of the 0.5 port showed that the package had silently not applied: the
+suite ran in Windows Professional with the theme's findings only on stderr. Fixed here
+(`themes/playsuite` now resolves; `playsuite_theme` checks the rules reach a keyed face
+and that the window has no scheme fallback). Each item names what GUI.Forms could do.
+
+11. **Application palette roles.** Palette roles are a closed set (`ColourRole`); a
+    `:root` declaration of any other name is W107 and dropped, and the rules reading
+    it with `role()` lose that colour. PlaySuite's named colours are now custom properties (`--gloss-navy-edge`),
+    so every one is a literal to forced high contrast: 385 W201 findings
+    (`literal_colour_unremappable`), counted on one line by `main`. Wanted: application-
+    declared colour roles (a name, a pair or a single colour, a high-contrast mapping), so
+    a product theme's own colours stay remappable.
+12. **`::part(name)` needs a part key.** `paint_part` matches named-part rules by
+    `PartPaint::key`'s part name; a part painted with `role` only matches `::role()` rules,
+    with no diagnostic. The header calls the key "identity, not vocabulary". Every skinned
+    part fell back to the base look. `games::skin_part_key` now keys them. Wanted: a part
+    without a key takes its role's name for matching, or the compiler or a debug check
+    warns when a sheet's `::part()` names are never painted keyed.
+13. **Theme `engine` is the theme-language version.** `theme.json`'s `"engine": ">=0.5"`
+    (the product version) was refused with E607 (`current_engine_version` is 0.3), and the
+    build embedded the package without compiling it. Wanted: the embed step
+    (`gui_forms_add_theme`) compiles the package and fails the build on a refusal.
+14. **`gui_forms_add_theme` under `add_subdirectory`.** `GUIFormsThemes.cmake` sets
+    `GUI_FORMS_THEME_EMBED_SCRIPT` in the toolkit's directory scope, so a parent project
+    calling the (global) function runs `cmake -P ""`. PlaySuite sets the variable itself.
+    Wanted: the function finds its script through `CMAKE_CURRENT_FUNCTION_LIST_DIR`.
+15. **A rule holds 64 declarations, the palette included.** The palette (179 colours)
+    was E503; it is now three `:root` blocks, which the engine reads as one palette. No
+    toolkit need; recorded because a single palette block is the natural spelling.
+16. **Stable IDs are kebab case.** Runtime IDs built from save slugs, setting keys and
+    labels (`atom_probe.action.0`, `shelf.Music`, `-1.rules`) now throw. `games::stable_id`
+    spells them (`src/stable_ids.hpp`). No toolkit need.

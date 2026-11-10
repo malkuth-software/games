@@ -136,7 +136,7 @@ class SceneView : public gf::Control, public games::CommandSource {
     void report_trace() const;
 
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
     void on_window_active(bool active);
     void tick();
     void request_frame();

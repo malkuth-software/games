@@ -11,6 +11,7 @@
 #include <fstream>
 #include <map>
 #include <sstream>
+#include "stable_ids.hpp"
 namespace games {
 namespace {
 // Nature Cube's sound for a path that just changed: it grew, shrank or reached its pair.
@@ -42,7 +43,7 @@ class PuzzleScenePart final : public gf::Control {
   public:
     PuzzleScenePart(gf::StableId id, PuzzleView& owner, int part)
         : Control(std::move(id)), owner_(owner), part_(part) {
-        set_hit_test_transparent(true);
+        hit_test_transparent = true;
     }
     void on_paint(gf::Painter& painter, gf::Rect) override {
         if (owner_.surface_) {
@@ -75,7 +76,7 @@ void PuzzleView::refresh_scene() {
         static_cast<void>(prepare_framebuffer());
     for (int index = 0; index < 3; ++index)
         if (scene_parts_[index]) {
-            (*scene_parts_[index]).set_visible(panel_ == 0 && (!surface_ || index == 0));
+            (*scene_parts_[index]).visible = panel_ == 0 && (!surface_ || index == 0);
             if (!surface_)
                 (*scene_parts_[index]).invalidate(gf::Dirty::paint);
         }
@@ -123,10 +124,9 @@ bool PuzzleView::prepare_framebuffer() {
     gf::LiveSurfaceDescription description;
     description.width = (*replacement).width();
     description.height = (*replacement).height();
-    // The framebuffer's own byte order, and opaque: presenting it is a straight copy.
-    description.pixel_format = (*replacement).channel_order() == gf::FramebufferChannelOrder::rgba
-                                   ? gf::LiveSurfacePixelFormat::rgba32_premultiplied_srgb
-                                   : gf::LiveSurfacePixelFormat::bgra32_premultiplied_srgb;
+    // The framebuffer's byte order (BGRA on every host), and opaque: presenting it is a
+    // straight copy.
+    description.pixel_format = gf::LiveSurfacePixelFormat::bgra32_premultiplied_srgb;
     description.opaque = true;
     if (surface_) {
         if (!(*surface_).reconfigure(description))
@@ -142,8 +142,8 @@ bool PuzzleView::prepare_framebuffer() {
     surface_whole_ = false;
     static_pixels_dirty_ = true;
     static_pixels_.clear();
-    (*scene_parts_[1]).set_visible(false);
-    (*scene_parts_[2]).set_visible(false);
+    (*scene_parts_[1]).visible = false;
+    (*scene_parts_[2]).visible = false;
     direct_ = window.queue_live_surface_presentation(scene_parts_[0], surface_);
     if (game.kind == PuzzleKind::gems) {
         render();
@@ -305,9 +305,7 @@ void PuzzleView::present_gems(render::Rect area) {
         unpublished_[3] = area.y1;
         return;
     }
-    const render::Order order = target.channel_order() == gf::FramebufferChannelOrder::rgba
-                                    ? render::Order::rgba
-                                    : render::Order::bgra;
+    const render::Order order = render::Order::bgra;
     const render::Target out{reinterpret_cast<std::uint32_t*>(lease.pixels().data()),
                              static_cast<int>(lease.row_bytes() / 4), width, height, order};
     const render::Target still{reinterpret_cast<std::uint32_t*>(static_pixels_.data()),
@@ -351,9 +349,7 @@ void PuzzleView::present_gem_changes() {
         invalidate_animation(damage);
         return;
     }
-    const render::Order order = target.channel_order() == gf::FramebufferChannelOrder::rgba
-                                    ? render::Order::rgba
-                                    : render::Order::bgra;
+    const render::Order order = render::Order::bgra;
     const render::Target out{reinterpret_cast<std::uint32_t*>(lease.pixels().data()),
                              static_cast<int>(lease.row_bytes() / 4), width, height, order};
     const render::Target still{reinterpret_cast<std::uint32_t*>(static_pixels_.data()),
@@ -396,8 +392,8 @@ static gf::ImageId load_art(gf::Window& window, const std::string& name) {
     return result ? result.image : gf::ImageId{};
 }
 PuzzleView::PuzzleView(gf::StableId id, PuzzleKind kind) : Control(std::move(id)), game(kind) {
-    set_focusable(true);
-    set_accessible_name(puzzle_title(kind));
+    focusable = true;
+    accessible_name = puzzle_title(kind);
     if (!game.load(path())) {
         if (game.kind == PuzzleKind::cube || game.kind == PuzzleKind::solve) {
             PuzzleGame previous(game.kind);
@@ -426,7 +422,7 @@ void PuzzleView::initialize_control_tree() {
     if (game.kind == PuzzleKind::gems || game.kind == PuzzleKind::untangle)
         for (int i = 0; i < 3; ++i) {
             scene_parts_[i] = gf::make_control<PuzzleScenePart>(
-                gf::StableId(std::string(puzzle_slug(game.kind)) + ".scene." + std::to_string(i)),
+                games::stable_id(std::string(puzzle_slug(game.kind)) + ".scene." + std::to_string(i)),
                 *this, i);
             add_child(scene_parts_[i]);
         }
@@ -434,7 +430,7 @@ void PuzzleView::initialize_control_tree() {
                             "Flip",     "Close", "Save name",  "New game"};
     for (int i = 0; i < 9; ++i) {
         buttons_[i] = gf::make_control<GameButton>(
-            gf::StableId(std::string(puzzle_slug(game.kind)) + ".action." + std::to_string(i)),
+            games::stable_id(std::string(puzzle_slug(game.kind)) + ".action." + std::to_string(i)),
             labels[i]);
         add_child(buttons_[i]);
         subscriptions_.push_back(
@@ -445,16 +441,15 @@ void PuzzleView::initialize_control_tree() {
                     gf::Delegate<gf::ButtonBase&>::bind<PuzzleView, &PuzzleView::action>(*this)));
         // New game, Help and Top scores run from the PlaySuite capsule.
         (*buttons_[i])
-            .set_visible(
-                (i == 3 && (game.kind == PuzzleKind::pegs || game.kind == PuzzleKind::atom)) ||
-                false); // Rotate and Flip live in the capsule; R, F and right click work while
+            .visible = (i == 3 && (game.kind == PuzzleKind::pegs || game.kind == PuzzleKind::atom)) ||
+                false; // Rotate and Flip live in the capsule; R, F and right click work while
                         // dragging.
     }
     name_ = gf::make_control<gf::TextBox>(
-        gf::StableId(std::string(puzzle_slug(game.kind)) + ".name"), game.player_name);
-    (*name_).set_maximum_length(24);
-    (*name_).set_accessible_name("Your name for the top scores");
-    (*name_).set_visible(false);
+        games::stable_id(std::string(puzzle_slug(game.kind)) + ".name"), game.player_name);
+    (*name_).maximum_length = 24;
+    (*name_).accessible_name = "Your name for the top scores";
+    (*name_).visible = false;
     add_child(name_);
 }
 void PuzzleView::on_attached_to_window() {
@@ -471,7 +466,7 @@ void PuzzleView::on_attached_to_window() {
         guess_[i] = game.state.marks[i];
     clock_start_ = gf::FrameClock::now();
 }
-void PuzzleView::on_detaching_from_window(gf::Window& window) noexcept {
+void PuzzleView::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
     persist();
     framebuffer_.reset();
     surface_.reset();
@@ -540,7 +535,7 @@ void PuzzleView::arrange(gf::Rect b) {
         board_ = {24, 82, b.width - 332, b.height - 139};
         set_child_layout(buttons_[3],
                          {board_.x + board_.width - 151, board_.y + board_.height - 57, 124, 36});
-        (*buttons_[3]).set_text("Check code");
+        (*buttons_[3]).text = "Check code";
     }
     popup_ = {std::max(8.0, b.width * .5 - 320), 60, std::min(640.0, b.width - 16),
               std::min(530.0, b.height - 70)};
@@ -771,9 +766,7 @@ void PuzzleView::render() {
         raster_.cube(game, yaw_, pitch_, hover_);
     else if (game.kind == PuzzleKind::gems) {
         // Drawn in the order the window's buffer takes, so laying it is a straight blend.
-        const bool rgba = framebuffer_ &&
-                          (*framebuffer_).channel_order() == gf::FramebufferChannelOrder::rgba;
-        const render::Order order = rgba ? render::Order::rgba : render::Order::bgra;
+        const render::Order order = render::Order::bgra;
         if (order != gem_order_)
             gem_layer_whole_ = false;
         gem_order_ = order;
@@ -2141,7 +2134,7 @@ void PuzzleView::solve_draw(gf::Painter& p, const SolveSprite& sprite, double x,
                   sprite.height / solve_scale_},
                  opacity);
 }
-void PuzzleView::solve_release_images(gf::Window& window) {
+void PuzzleView::solve_release_images(gf::SurfaceRoot& window) {
     for (SolveSprite& sprite : solve_board_sprites_)
         if (sprite.image.value)
             static_cast<void>(window.remove_image(sprite.image));
@@ -2734,13 +2727,13 @@ void PuzzleView::panel(int kind) {
     gem_layer_whole_ = false;  // the board, covered or uncovered, is drawn whole once
     refresh_scene();
     for (int i = 0; i < 6; ++i)
-        (*buttons_[i]).set_enabled(!kind);
-    (*buttons_[6]).set_visible(kind != 0);
-    (*buttons_[7]).set_visible(kind == 2 && game.qualifies());
-    (*buttons_[8]).set_visible(kind == 2 && game.state.over);
-    (*name_).set_visible(kind == 2 && game.qualifies());
+        (*buttons_[i]).enabled = !kind;
+    (*buttons_[6]).visible = kind != 0;
+    (*buttons_[7]).visible = kind == 2 && game.qualifies();
+    (*buttons_[8]).visible = kind == 2 && game.state.over;
+    (*name_).visible = kind == 2 && game.qualifies();
     if (kind == 2)
-        (*name_).set_text(game.player_name);
+        (*name_).text = game.player_name;
     if (attached_window())
         static_cast<void>(
             (*attached_window()).request_focus(kind ? buttons_[6] : shared_from_this()));
@@ -2901,7 +2894,7 @@ void PuzzleView::action(gf::ButtonBase& button) {
     }
     if (index == 6)
         panel(0);
-    if (index == 7 && game.record(std::string((*name_).text()))) {
+    if (index == 7 && game.record(std::string((*name_).text.read()))) {
         persist();
         sound_play("ui_name_confirm", sound_);
         panel(2);

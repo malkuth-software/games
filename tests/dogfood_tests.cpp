@@ -26,9 +26,9 @@ int main() {
         try { static_cast<void>(read_script(script)); } catch(const std::runtime_error&) { failed=true; }
         assert(failed);
     }
-    { std::ofstream output(script); output<<"# native smoke\n0 help\n40 key escape\n80 click 100 200\n100 resize 600 420\n150 action auto12\n200 capture output frame.ppm\n1000 quit\n"; }
+    { std::ofstream output(script); output<<"# native smoke\n0 help\n40 key escape\n80 click 100 200\n100 resize 600 420\n150 action auto12\n200 capture output frame.ppm\n300 press up\n400 release up\n1000 quit\n"; }
     const std::vector<Action> actions=read_script(script);
-    assert(actions.size()==7 && actions.back().verb=="quit" && actions[2].x==100 && actions[4].argument=="auto12" && actions[5].argument=="output frame.ppm");
+    assert(actions.size()==9 && actions.back().verb=="quit" && actions[6].verb=="press" && actions[7].argument=="up" && actions[2].x==100 && actions[4].argument=="auto12" && actions[5].argument=="output frame.ppm");
     std::filesystem::remove(script);
     std::cout<<"Native script parsing, bounds and development-mode requirements pass.\n";
 }

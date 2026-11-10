@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include "stable_ids.hpp"
 namespace games {
 namespace {
 constexpr gf::Color rgb(int r, int g, int b, int a = 255) {
@@ -89,8 +90,8 @@ void paint_tag(gf::Painter& p, TextSprites& sprites, const std::string& name, do
 
 ShelfBox::ShelfBox(gf::StableId id, Entry entry, TextSprites& sprites)
     : Button(std::move(id), entry_info(entry).title), entry_(entry), sprites_(sprites) {
-    set_use_mnemonic(false);
-    set_accessible_name(std::string(entry_info(entry).title) + ". " + entry_info(entry).blurb);
+    use_mnemonic = false;
+    accessible_name = std::string(entry_info(entry).title) + ". " + entry_info(entry).blurb;
 }
 void ShelfBox::on_focus_changed(bool has_focus) {
     gf::Button::on_focus_changed(has_focus);
@@ -111,13 +112,13 @@ void ShelfBox::forget_pointer() {
     leave.action = gf::PointerAction::leave;
     gf::Button::on_pointer(leave);
     // The shelf is going away, so there are no frames to settle in: settle now.
-    lift_ = selected() && focus_cue_visible() ? 1.0 : 0.0;
+    lift_ = selected.read() && focus_cue_visible() ? 1.0 : 0.0;
     invalidate(gf::Dirty::paint);
 }
 bool ShelfBox::step(double dt, bool reduced) {
     // The game last open stays marked by its gold rim; it stands up off the shelf only while
     // the keys are moving the selection, or under the pointer.
-    const double target = selected() && focus_cue_visible() ? 1.0 : hot() ? .55 : 0.0;
+    const double target = selected.read() && focus_cue_visible() ? 1.0 : hot() ? .55 : 0.0;
     const double next = reduced ? target : lift_ + (target - lift_) * std::min(1.0, dt * 13);
     const bool moving = std::abs(next - target) > .002;
     if (std::abs(next - lift_) > 1e-4) {
@@ -138,7 +139,7 @@ void ShelfBox::on_paint(gf::Painter& p, gf::Rect) {
     // Shadow falls onto the wall behind; it softens as the box comes forward.
     p.draw_box_shadow({c.x + depth * .5, c.y - rise, c.width, c.height}, 2, {3 + lift_ * 2, 2 + lift_ * 5},
                       5 + lift_ * 6, 0, rgb(0, 0, 0, 150));
-    if (selected())
+    if (selected.read())
         p.draw_box_shadow(c, 3, {0, 0}, 14, 2, with_alpha(gold, 150));
     // Right side, in shade, darker toward the back.
     paint_polygon(p,
@@ -192,8 +193,8 @@ void ShelfBox::on_paint(gf::Painter& p, gf::Rect) {
     p.fill_linear_gradient(c, {c.x, c.y}, {c.x + c.width, c.y + c.height}, sheen);
     p.restore();
     p.draw_line({c.x + .5, c.y}, {c.x + .5, c.y + c.height}, rgb(255, 255, 255, 70), 1);
-    p.stroke_rect(c, selected() ? gold : rgb(0, 0, 0, 160), selected() ? 2 : 1);
-    if (focus_cue_visible() && !selected())
+    p.stroke_rect(c, selected.read() ? gold : rgb(0, 0, 0, 160), selected.read() ? 2 : 1);
+    if (focus_cue_visible() && !selected.read())
         p.stroke_rect({c.x - 3, c.y - 3, c.width + 6, c.height + 6}, with_alpha(gold, 200), 1);
 }
 
@@ -267,14 +268,14 @@ bool shelved_before(Entry a, Entry b) {
 }
 } // namespace
 ShelfArrow::ShelfArrow(gf::StableId id, bool up) : Button(std::move(id)), up_(up) {
-    set_accessible_name(up ? "Move the shelves up" : "Move the shelves down");
+    accessible_name = up ? "Move the shelves up" : "Move the shelves down";
     // The keyboard already moves through the shelves; the arrows are for the pointer.
-    set_focusable(false);
+    focusable = false;
 }
 void ShelfArrow::on_paint(gf::Painter& p, gf::Rect) {
     const gf::Rect b = client_rectangle();
-    const bool hot = hovered_visual() && enabled(), down = pressed_visual() && enabled();
-    const double opacity = enabled() ? 1 : .36;
+    const bool hot = hovered_visual() && enabled.read(), down = pressed_visual() && enabled.read();
+    const double opacity = enabled.read() ? 1 : .36;
     // The candy fills the button less a little room for its shadow (60 in 64 by 62).
     const double size = std::min(b.width * 60 / 64, b.height * 60 / 62), unit = size / 60;
     const gf::Rect candy{(b.width - size) * .5, (b.height - size) * .5 - unit + (down ? 2 * unit : 0),
@@ -303,8 +304,8 @@ void ShelfArrow::on_paint(gf::Painter& p, gf::Rect) {
     paint_polygon(p, inside, faded(light, opacity));
 }
 ShelfRows::ShelfRows(gf::StableId id) : Control(std::move(id)) {
-    set_focusable(false);
-    set_accessible_name("Game shelves");
+    focusable = false;
+    accessible_name = "Game shelves";
 }
 void ShelfRows::add_arrows() {
     up_ = gf::make_control<ShelfArrow>(gf::StableId("shelf.rows.up"), true);
@@ -416,8 +417,8 @@ void ShelfRows::arrange_boxes() {
     // An arrow dims when its end is reached (judged by where the glide is going, so it
     // does not flicker during one).
     if (up_) {
-        (*up_).set_enabled(target_ > .5);
-        (*down_).set_enabled(target_ < limit() - .5);
+        (*up_).enabled = target_ > .5;
+        (*down_).enabled = target_ < limit() - .5;
     }
     invalidate(gf::Dirty::paint);
 }
@@ -447,12 +448,23 @@ bool ShelfRows::step(double dt, bool reduced) {
 void ShelfRows::wheel(gf::PointerEvent& event) {
     if (event.action != gf::PointerAction::wheel || event.handled || !scrollable())
         return;
-    // Wheel notches arrive as small numbers, trackpads as points.
-    const double delta = std::abs(event.wheel_delta.y) <= 8 ? event.wheel_delta.y * 48
-                                                            : event.wheel_delta.y;
-    const double before = offset_;
-    jump_to(offset_ - delta);
-    event.handled = offset_ != before;
+    // Trackpad points move the shelves at once, under the finger. Wheel lines glide: each
+    // notch moves the glide's target 48 points on from where it was going, and step()
+    // eases the shelves there frame by frame (a notch used to jump 48 points in one frame).
+    if (event.wheel_unit == gf::WheelDeltaUnit::pixels) {
+        const double before = offset_;
+        jump_to(offset_ - event.wheel_delta.y);
+        event.handled = offset_ != before;
+        return;
+    }
+    const double before = target_;
+    target_ = std::clamp(target_ - event.wheel_delta.y * 48, 0.0, limit());
+    event.handled = target_ != before;
+    if (event.handled) {
+        arrange_boxes();
+        if (wake)
+            wake();
+    }
 }
 void ShelfRows::on_pointer(gf::PointerEvent& event) {
     wheel(event);
@@ -545,14 +557,14 @@ void LaunchCurtain::on_paint(gf::Painter& p, gf::Rect) {
 }
 ShelfView::ShelfView(gf::StableId id, TextSprites& sprites)
     : Control(std::move(id)), sprites_(sprites) {
-    set_focusable(false);
+    focusable = false;
 }
 void ShelfView::initialize_control_tree() {
     rows_ = gf::make_control<ShelfRows>(gf::StableId("shelf.rows"));
     (*rows_).sprites = &sprites_;
     add_child(rows_);
     for (int i = 0; i < entry_count; ++i) {
-        boxes_[i] = gf::make_control<ShelfBox>(gf::StableId("shelf.box." + std::to_string(static_cast<int>(entries[i]))),
+        boxes_[i] = gf::make_control<ShelfBox>(games::stable_id("shelf.box." + std::to_string(static_cast<int>(entries[i]))),
                                                entries[i], sprites_);
         (*boxes_[i]).focused = std::bind(&ShelfView::focused_box, this, entries[i]);
         (*boxes_[i]).wake = std::bind_front(&ShelfView::request_animation, this);
@@ -570,7 +582,7 @@ void ShelfView::initialize_control_tree() {
         add_child(switches_[i]);
     }
     curtain_ = gf::make_control<LaunchCurtain>(gf::StableId("shelf.curtain"));
-    (*curtain_).set_visible(false);
+    (*curtain_).visible = false;
     add_child(curtain_);
     select(selection_);
 }
@@ -598,7 +610,7 @@ void ShelfView::launch(Entry entry) {
     const gf::Point origin = point_from_window((*box).point_to_window({0, 0}));
     (*curtain_).from = {origin.x, origin.y + 16, r.width * .93, r.height - 16};
     (*curtain_).progress = 0;
-    (*curtain_).set_visible(true);
+    (*curtain_).visible = true;
     last_ = std::chrono::steady_clock::now();
 }
 void ShelfView::on_attached_to_window() {
@@ -610,7 +622,7 @@ void ShelfView::on_attached_to_window() {
     last_ = std::chrono::steady_clock::now();
     (*timer_).start();
 }
-void ShelfView::on_detaching_from_window(gf::Window& window) noexcept {
+void ShelfView::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
     if (timer_)
         (*timer_).stop();
     timer_.reset();
@@ -621,7 +633,7 @@ void ShelfView::on_detaching_from_window(gf::Window& window) noexcept {
     wood_scale_ = 0;
 }
 void ShelfView::request_animation() {
-    if (!timer_ || !visible())
+    if (!timer_ || !visible.read())
         return;
     if (!(*timer_).enabled())
         last_ = std::chrono::steady_clock::now();
@@ -635,7 +647,7 @@ void ShelfView::tick() {
     const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
     const double dt = std::clamp(std::chrono::duration<double>(now - last_).count(), 0.0, .1);
     last_ = now;
-    if (!visible()) {
+    if (!visible.read()) {
         if (timer_)
             (*timer_).stop();
         return;
@@ -659,7 +671,7 @@ void ShelfView::tick() {
         (*curtain_).invalidate(gf::Dirty::paint);
         if (launch_t_ >= 1.0) {
             launching_ = false;
-            (*curtain_).set_visible(false);
+            (*curtain_).visible = false;
             (*curtain_).progress = 0;
             // The shelf hides for the game: no box keeps the pointer it had.
             for (const std::shared_ptr<ShelfBox>& box : boxes_)
@@ -691,7 +703,7 @@ void ShelfView::select(Entry entry) {
     shown_ = entry;
     for (const std::shared_ptr<ShelfBox>& box : boxes_)
         if (box)
-            (*box).set_selected((*box).entry() == entry);
+            (*box).selected = (*box).entry() == entry;
     invalidate(gf::Dirty::paint);
 }
 void ShelfView::focus_selection() {

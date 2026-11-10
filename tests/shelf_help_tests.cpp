@@ -1,3 +1,4 @@
+#include "stable_ids.hpp"
 #include "game_module.hpp"
 #include "gui_forms/window.hpp"
 #include "help_book.hpp"
@@ -49,7 +50,7 @@ int main() {
         assert((*rows).children().size() == entries.size() + 2); // every box and two arrows
         // The credits live in help now; the shelf gives their room to the games.
         assert(!find_control(*shelf, "shelf.credits"));
-        const std::shared_ptr<gf::Control> music = find_control(*shelf, "shelf.Music");
+        const std::shared_ptr<gf::Control> music = find_control(*shelf, "shelf.music");
         assert(music);
         const gf::Rect music_bounds = (*music).committed_arranged_bounds();
         for (Entry entry : entries) {
@@ -105,19 +106,19 @@ int main() {
             std::dynamic_pointer_cast<gf::Button>(find_control(*shelf, "shelf.rows.up"));
         const std::shared_ptr<gf::Button> down =
             std::dynamic_pointer_cast<gf::Button>(find_control(*shelf, "shelf.rows.down"));
-        assert(up && down && (*up).visible() && (*down).visible() && !(*up).enabled());
-        assert((*down).enabled() == (*rows).scrollable());
+        assert(up && down && (*up).visible.read() && (*down).visible.read() && !(*up).enabled.read());
+        assert((*down).enabled.read() == (*rows).scrollable());
         if ((*rows).scrollable()) {
             assert((*down).perform_click());
             while ((*rows).step(1.0 / 60, false)) {
             }
             window.perform_layout();
-            assert((*rows).scroll_offset() > 0 && (*up).enabled());
+            assert((*rows).scroll_offset() > 0 && (*up).enabled.read());
             assert((*up).perform_click());
             while ((*rows).step(1.0 / 60, false)) {
             }
             window.perform_layout();
-            assert((*rows).scroll_offset() == 0 && !(*up).enabled() && (*down).enabled());
+            assert((*rows).scroll_offset() == 0 && !(*up).enabled.read() && (*down).enabled.read());
         }
         if ((*rows).scrollable()) {
             gf::PointerEvent wheel;
@@ -125,7 +126,22 @@ int main() {
             wheel.wheel_delta = {0, -3};
             (*rows).on_pointer(wheel);
             window.perform_layout();
-            assert(wheel.handled && (*rows).scroll_offset() > 0);
+            // A wheel notch glides: nothing moves until the clock steps.
+            assert(wheel.handled && (*rows).scroll_offset() == 0);
+            assert((*rows).step(1.0 / 60, false));
+            const double gliding = (*rows).scroll_offset();
+            assert(gliding > 0 && gliding < 144);
+            while ((*rows).step(1.0 / 60, false)) {
+            }
+            assert((*rows).scroll_offset() > gliding);
+            // Trackpad points move at once.
+            gf::PointerEvent pan;
+            pan.action = gf::PointerAction::wheel;
+            pan.wheel_unit = gf::WheelDeltaUnit::pixels;
+            pan.wheel_delta = {0, 10};
+            const double settled = (*rows).scroll_offset();
+            (*rows).on_pointer(pan);
+            assert(pan.handled && (*rows).scroll_offset() == settled - 10);
         }
     }
     std::shared_ptr<HelpPages> pages = gf::make_control<HelpPages>(gf::StableId("test.help"));
@@ -138,17 +154,18 @@ int main() {
         (*pages).select(static_cast<int>(entry), "rules");
         window.perform_layout();
         const std::shared_ptr<gf::Control> body = find_control(*pages, prefix + "rules");
-        assert(body && (*body).visible());
+        assert(body && (*body).visible.read());
         assert(!help_text(entry).empty());
         const GameDescriptor& descriptor = game_descriptor(entry);
         topic_count += 1 + descriptor.help_topics.size();
         for (const HelpTopic& topic : descriptor.help_topics) {
             (*pages).select(static_cast<int>(entry), topic.id);
             window.perform_layout();
-            const std::shared_ptr<gf::Control> extra = find_control(*pages, prefix + topic.id);
-            assert(extra && (*extra).visible() && !(*body).visible());
+            const std::shared_ptr<gf::Control> extra = find_control(*pages, std::string(games::stable_id(prefix + topic.id).value()));
+            assert(extra && (*extra).visible.read() && !(*body).visible.read());
             const std::shared_ptr<gf::Control> heading = find_control(
-                *pages, "help.topic." + std::to_string(static_cast<int>(entry)) + "." + topic.id);
+                *pages, std::string(games::stable_id("help.topic." + std::to_string(static_cast<int>(entry)) + "." +
+                                                     topic.id).value()));
             // The chosen topic opens first, straight under the dedication and credits (and
             // the business card beside them, which the book lays over the pages).
             const gf::Rect credits =
@@ -159,7 +176,7 @@ int main() {
             assert(std::abs((*heading).committed_arranged_bounds().y - first_topic_y) < .01);
         }
         (*pages).select(static_cast<int>(entry), "missing-topic");
-        assert((*body).visible());
+        assert((*body).visible.read());
         // A game's help holds the suite's two pages and that game's own, under the two
         // shared credit lines; no other game's.
         assert((*pages).children().size() == (2 + 1 + descriptor.help_topics.size()) * 2 + 2);
@@ -167,7 +184,7 @@ int main() {
     (*pages).select(-1, "about");
     // On the shelf the book holds every game's pages.
     assert((*pages).children().size() == topic_count * 2 + 2); // and two credit lines
-    assert((*find_control(*pages, "help.body.-1.about")).visible());
+    assert((*find_control(*pages, "help.body.suite.about")).visible.read());
     assert(help_about().find(std::to_string(entry_count) + " games") != std::string::npos);
     // The dedication and credits head the document, above every topic, whatever is selected.
     const std::shared_ptr<gf::Control> dedication = find_control(*pages, "help.front.dedication");
@@ -176,10 +193,10 @@ int main() {
     // The sponsor's address and website are on the business card now, not in the text.
     assert(!find_control(*pages, "help.front.contact") && !find_control(*pages, "help.front.website"));
     window.perform_layout();
-    const double first_heading = (*find_control(*pages, "help.topic.-1.about")).committed_arranged_bounds().y;
+    const double first_heading = (*find_control(*pages, "help.topic.suite.about")).committed_arranged_bounds().y;
     assert((*dedication).committed_arranged_bounds().y < first_heading);
     assert((*credits).committed_arranged_bounds().y < first_heading);
     (*pages).select(-123, "missing-topic");
-    assert((*find_control(*pages, "help.body.-1.rules")).visible());
+    assert((*find_control(*pages, "help.body.suite.rules")).visible.read());
     std::cout << "Native shelves and descriptor-owned help passed\n";
 }

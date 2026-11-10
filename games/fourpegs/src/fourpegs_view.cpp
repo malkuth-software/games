@@ -47,16 +47,16 @@ void mini_symbol(Canvas& c, int color, double x, double y, double r, Col col) {
 }  // namespace
 
 FourPegsView::FourPegsView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt), board_(seed_now()), actor_(seed_now() ^ 0x5EED) {
-    set_focusable(true);
+    focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     {
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
         set_authored_surface_material(none);
     }
-    set_accessible_name("Four Pegs. A composed gentleman has locked his plan behind a code of four pegs in six colours. "
+    accessible_name = "Four Pegs. A composed gentleman has locked his plan behind a code of four pegs in six colours. "
                         "Name it in ten attempts. Drag or click pegs into the four sockets, then press Check. "
-                        "Keys: 1 to 6 place a peg, Backspace removes one, Enter checks. N or F2 starts a new game. F1 help, T top scores, M music, S sound.");
+                        "Keys: 1 to 6 place a peg, Backspace removes one, Enter checks. N or F2 starts a new game. F1 help, T top scores, M music, S sound.";
     bool resumed = false;
     if (load_save(save_path(opt_.dev), save_) && save_.has_board && board_.restore(save_.board)) {
         resumed = true;
@@ -96,7 +96,7 @@ void FourPegsView::on_attached_to_window() {
     (*timer_).start();
 }
 
-void FourPegsView::on_detaching_from_window(gf::Window&) noexcept {
+void FourPegsView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
     try { persist(); } catch (...) {}
     if (timer_) (*timer_).stop();
     timer_.reset();
@@ -182,7 +182,7 @@ void FourPegsView::on_paint(gf::Painter& p, gf::Rect) {
 // ------------------------------------------------------------------ game
 void FourPegsView::play(const std::string& name, float gain, float rate) {
     // Hosted, PlaySuite's Sound master is the only switch.
-    audio_sfx(name, gain, rate, (opt_.hosted || save_.settings.sound) && cab_sound_ && cab_front_ && visible());
+    audio_sfx(name, gain, rate, (opt_.hosted || save_.settings.sound) && cab_sound_ && cab_front_ && visible.read());
 }
 
 void FourPegsView::new_game() {
@@ -310,7 +310,7 @@ void FourPegsView::doom_tick(double dt) {
 void FourPegsView::music_tick() {
     const bool on = (opt_.hosted || save_.settings.music) && cab_music_ && cab_front_;
     const bool silent = panel_ == Panel::gameover || blackout_ > 0;
-    audio_music_on_bar(visible() && cab_front_ && !silent ? kTier[doom_t_ >= 0 ? 3 : tier_] : "", on);
+    audio_music_on_bar(visible.read() && cab_front_ && !silent ? kTier[doom_t_ >= 0 ? 3 : tier_] : "", on);
     st_.console.alarm += ((tier_ == 3 ? 1.0 : tier_ == 2 ? .3 : 0.0) - st_.console.alarm) * .05;
 }
 
@@ -379,7 +379,7 @@ void FourPegsView::tick() {
     gf::Window* win = attached_window();
     const bool hidden = win && (*win).occluded();
     const bool front = !win || (*win).active();
-    const bool shown = visible();
+    const bool shown = visible.read();
     const auto pace = std::chrono::milliseconds(hidden || !shown || !cab_front_ ? 500 : front ? 33 : 100);
     if (timer_ && (*timer_).interval() != pace) (*timer_).set_interval(pace);
     if (hidden || !shown || lair_.r.rgb.empty() || frame_.px.empty()) return;
@@ -470,7 +470,7 @@ void FourPegsView::on_pointer(gf::PointerEvent& e) {
         }
         if (dragging_) { V3 w; if (lair_.console_point(mouse_x_, mouse_y_, w)) cs.drag_at = w; }
         const bool over = !hover_.empty() || cs.hover_palette >= 0 || cs.hover_socket >= 0 || lair_.pick_check(mouse_x_, mouse_y_);
-        set_cursor(dragging_ ? gf::CursorKind::hand : over ? gf::CursorKind::hand : gf::CursorKind::arrow);
+        cursor = dragging_ ? gf::CursorKind::hand : over ? gf::CursorKind::hand : gf::CursorKind::arrow;
     }
     if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
         activate();

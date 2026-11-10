@@ -186,7 +186,7 @@ class PuzzleView final : public gf::Control, public CommandSource {
                       double margin);
     void solve_draw(gf::Painter& p, const SolveSprite& sprite, double x, double y,
                     double opacity = 1) const;
-    void solve_release_images(gf::Window& window);
+    void solve_release_images(gf::SurfaceRoot& window);
     [[nodiscard]] double solve_unit() const;
     [[nodiscard]] int solve_atom_at(gf::Point local) const;
     [[nodiscard]] std::vector<PieceCell> solve_placed(int piece, int& x, int& y) const;
@@ -245,7 +245,7 @@ class PuzzleView final : public gf::Control, public CommandSource {
     std::array<gf::Rect, 21> clues_{};
     std::filesystem::path path() const;
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window&) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot&) noexcept override;
     void action(gf::ButtonBase& button);
     void tick();
     void render();

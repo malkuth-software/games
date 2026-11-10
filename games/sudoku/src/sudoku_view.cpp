@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include "stable_ids.hpp"
 namespace games {
 // The PlaySuite capsule floats above the board.
 static constexpr double kTop = 54;
@@ -20,10 +21,10 @@ class PadNumeral final : public gf::Button {
     bool chosen = false, dark = false;
     void on_paint(gf::Painter& p, gf::Rect) override {
         const gf::Rect r = client_rectangle();
-        const bool hot = (hovered_visual() || pressed_visual()) && enabled();
+        const bool hot = (hovered_visual() || pressed_visual()) && enabled.read();
         const gf::Color gold = gf::Color::rgba(255, 196, 72);
         const gf::Color white = gf::Color::rgba(255, 255, 255);
-        const gf::Color sunk = !enabled() ? (dark ? gf::Color::rgba(255, 255, 255, 12)
+        const gf::Color sunk = !enabled.read() ? (dark ? gf::Color::rgba(255, 255, 255, 12)
                                                   : gf::Color::rgba(28, 60, 110, 22))
                                           : (dark ? gf::Color::rgba(160, 196, 240, 70)
                                                   : gf::Color::rgba(40, 76, 130, 70));
@@ -39,16 +40,16 @@ class PadNumeral final : public gf::Button {
         }
         const gf::FontSpec f{gf::FontRole::content, std::min(r.height * .86, r.width * .8), 700,
                              false};
-        const gf::Size m = p.measure_text_utf8(text(), f);
+        const gf::Size m = p.measure_text_utf8(text.read(), f);
         const gf::Point at{(r.width - m.width) * .5, r.height * .5 + f.size * .36};
         // Pressed into the paper: a light edge below, a shadow above.
-        if (!chosen && !hot && enabled())
-            p.draw_text_utf8({at.x, at.y + 1}, text(), f,
+        if (!chosen && !hot && enabled.read())
+            p.draw_text_utf8({at.x, at.y + 1}, text.read(), f,
                              dark ? gf::Color::rgba(0, 0, 0, 90) : gf::Color::rgba(255, 255, 255, 160));
         if (chosen || hot)
-            p.draw_text_utf8({at.x, at.y + 1.5}, text(), f,
+            p.draw_text_utf8({at.x, at.y + 1.5}, text.read(), f,
                              chosen ? gf::Color::rgba(120, 70, 0, 150) : gf::Color::rgba(10, 30, 70, 120));
-        p.draw_text_utf8(at, text(), f, ink);
+        p.draw_text_utf8(at, text.read(), f, ink);
         if (focus_cue_visible())
             p.stroke_rounded_rect({2, 2, r.width - 4, r.height - 4}, 6, ink, 1.5);
     }
@@ -58,11 +59,11 @@ static std::filesystem::path sudoku_path() {
     return cabinet_path().parent_path() / "sudoku-v1.txt";
 }
 SudokuView::SudokuView(gf::StableId id) : Control(std::move(id)) {
-    set_focusable(true);
-    set_accessible_name("Sudoku. Choose a digit; click a square to set it, right click to make a "
-                        "note. Arrow keys move; N toggles notes; Z undoes.");
+    focusable = true;
+    accessible_name = "Sudoku. Choose a digit; click a square to set it, right click to make a "
+                        "note. Arrow keys move; N toggles notes; Z undoes.";
     game.load(sudoku_path());
-    set_theme_override(games_theme(game.dark ? ButtonSkin::slate : ButtonSkin::blue));
+    set_skin_class(*this, game.dark ? ButtonSkin::slate : ButtonSkin::blue);
     difficulty_ = game.difficulty;
 }
 void SudokuView::initialize_control_tree() {
@@ -73,17 +74,17 @@ void SudokuView::initialize_control_tree() {
                             "Erase",    "Close", "Save name",  "New game"};
     for (int i = 0; i < 20; ++i) {
         if (i >= 7 && i <= 16) {
-            buttons_[i] = gf::make_control<PadNumeral>(gf::StableId("sudoku." + std::to_string(i)),
+            buttons_[i] = gf::make_control<PadNumeral>(games::stable_id("sudoku." + std::to_string(i)),
                                                        i == 16 ? "×" : labels[i]);
         } else {
             std::shared_ptr<SuiteButton> button = gf::make_control<SuiteButton>(
-                gf::StableId("sudoku." + std::to_string(i)), labels[i],
+                games::stable_id("sudoku." + std::to_string(i)), labels[i],
                 game.dark ? GlossTone::smoke : GlossTone::chrome);
             (*button).set_radius(4);
-            (*button).set_font({gf::FontRole::content, 14.0, 700, false});
+            (*button).font = gf::FontSpec{gf::FontRole::content, 14.0, 700, false};
             buttons_[i] = button;
         }
-        (*buttons_[i]).set_accessible_name(labels[i]);
+        (*buttons_[i]).accessible_name = labels[i];
         add_child(buttons_[i]);
         subscriptions_.push_back(
             (*buttons_[i])
@@ -93,14 +94,14 @@ void SudokuView::initialize_control_tree() {
                     gf::Delegate<gf::ButtonBase&>::bind<SudokuView, &SudokuView::action>(*this)));
         // New game, Undo, Notes, theme, difficulty, Help and Top scores run from the capsule.
         if (i >= 17 || i < 7)
-            (*buttons_[i]).set_visible(false);
+            (*buttons_[i]).visible = false;
     }
     const char* levels[] = {"Easy", "Medium", "Hard"};
-    (*buttons_[4]).set_text(levels[difficulty_]);
+    (*buttons_[4]).text = levels[difficulty_];
     name_ = gf::make_control<gf::TextBox>(gf::StableId("sudoku.name"), game.player_name);
-    (*name_).set_maximum_length(24);
-    (*name_).set_accessible_name("Your name for the top scores");
-    (*name_).set_visible(false);
+    (*name_).maximum_length = 24;
+    (*name_).accessible_name = "Your name for the top scores";
+    (*name_).visible = false;
     add_child(name_);
 }
 void SudokuView::on_attached_to_window() {
@@ -108,7 +109,7 @@ void SudokuView::on_attached_to_window() {
     subscriptions_.push_back((*timer_).tick().subscribe(
         *this, gf::Delegate<>::bind<SudokuView, &SudokuView::tick>(*this)));
 }
-void SudokuView::on_detaching_from_window(gf::Window&) noexcept {
+void SudokuView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
     persist();
     if (timer_)
         (*timer_).stop();
@@ -168,8 +169,8 @@ void SudokuView::refresh_pad() {
             numeral.dark = game.dark;
             numeral.invalidate(gf::Dirty::paint);
         }
-        if (numeral.enabled() != usable)
-            numeral.set_enabled(usable);
+        if (numeral.enabled.read() != usable)
+            numeral.enabled = usable;
     }
 }
 void SudokuView::on_paint(gf::Painter& p, gf::Rect) {
@@ -331,13 +332,13 @@ void SudokuView::panel(int kind) {
         return;
     panel_ = kind;
     for (int i = 0; i < 17; ++i)
-        (*buttons_[i]).set_enabled(!kind && !busy_);
-    (*buttons_[17]).set_visible(kind != 0);
-    (*buttons_[18]).set_visible(kind == 2 && game.qualifies());
-    (*buttons_[19]).set_visible(kind == 2 && game.over);
-    (*name_).set_visible(kind == 2 && game.qualifies());
+        (*buttons_[i]).enabled = !kind && !busy_;
+    (*buttons_[17]).visible = kind != 0;
+    (*buttons_[18]).visible = kind == 2 && game.qualifies();
+    (*buttons_[19]).visible = kind == 2 && game.over;
+    (*name_).visible = kind == 2 && game.qualifies();
     if (kind == 2)
-        (*name_).set_text(game.player_name);
+        (*name_).text = game.player_name;
     refresh_pad();
     if (attached_window())
         static_cast<void>(
@@ -471,11 +472,11 @@ void SudokuView::action(gf::ButtonBase& button) {
     }
     if (index == 2) {
         notes_ = !notes_;
-        (*buttons_[2]).set_text(notes_ ? "Notes on" : "Notes");
+        (*buttons_[2]).text = notes_ ? "Notes on" : "Notes";
     }
     if (index == 3) {
         game.dark = !game.dark;
-        set_theme_override(games_theme(game.dark ? ButtonSkin::slate : ButtonSkin::blue));
+        set_skin_class(*this, game.dark ? ButtonSkin::slate : ButtonSkin::blue);
         for (std::size_t i = 0; i < buttons_.size(); ++i)
             if (i < 7 || i > 16)
                 (*std::static_pointer_cast<SuiteButton>(buttons_[i]))
@@ -486,7 +487,7 @@ void SudokuView::action(gf::ButtonBase& button) {
     if (index == 4) {
         difficulty_ = (difficulty_ + 1) % 3;
         const char* levels[] = {"Easy", "Medium", "Hard"};
-        (*buttons_[4]).set_text(levels[difficulty_]);
+        (*buttons_[4]).text = levels[difficulty_];
     }
     if (index == 5)
         panel(1);
@@ -499,7 +500,7 @@ void SudokuView::action(gf::ButtonBase& button) {
     if (index == 17)
         panel(0);
     if (index == 18) {
-        if (game.record(std::string((*name_).text()))) {
+        if (game.record(std::string((*name_).text.read()))) {
             persist();
             panel(2);
         }

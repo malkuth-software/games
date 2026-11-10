@@ -8,18 +8,23 @@
 #include "runtime_paths.hpp"
 #include "suite_settings.hpp"
 
+#include "gui_forms/diagnostics/invalidation_overlay/invalidation_overlay.hpp"
 #include "gui_forms/window.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <optional>
+#include "stable_ids.hpp"
 
 namespace games {
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
-constexpr std::string_view kCompany = "RAINSTAR SOFTWARE";
+constexpr std::string_view kCompany = "MALKUTHSOFT";
+// Which of the company's letters print in the accent ink while the invalidation overlay is on
+// (the hidden diagnostic: D held, right click on the name). 0: every letter.
+constexpr char kAccentLetter = 0;
 // The card's proportions: three and a half inches by two, and a duplexed stock of 32 points,
 // two plies pressed together, as thick as a ninetieth of its width.
 constexpr double kAspect = 2.0 / 3.5;
@@ -49,7 +54,7 @@ constexpr int kRemarksAtOnce = 3;
 constexpr double kFirstRemark = .45, kRemarkGapMin = 1.3, kRemarkGapSpread = 1.2;
 const gf::FontSpec kRemarkFont{gf::FontRole::content, 16, 400, true};
 const gf::FontSpec kHintFont{gf::FontRole::content, 13, 400, false};
-constexpr std::string_view kHint = "Drag to turn it.   Rainstar Software opens the website.   Escape puts it away.";
+constexpr std::string_view kHint = "Drag to turn it.   Malkuthsoft opens the website.   Escape puts it away.";
 
 double linear_of(double srgb) {
     const double v = srgb <= .04045 ? srgb / 12.92 : std::pow((srgb + .055) / 1.055, 2.4);
@@ -79,9 +84,11 @@ gf::Rect inflated(const gf::Rect& r, double by) {
 }
 
 // Ink laid into a face from a shaped mask whose logical top-left is at (`left`, `top`) points:
-// coverage into `ink`, and into `foil` too when the lettering turns to gold.
+// coverage into `ink`, into `foil` too when the lettering turns to gold, and into `accent` when
+// it prints in the accent ink (`accent` is then as long as `ink`).
 void lay_ink(const TextImage& text, double left, double top, double density, int width, int height,
-             std::vector<float>& ink, std::vector<float>& foil, bool gilded) {
+             std::vector<float>& ink, std::vector<float>& foil, bool gilded, std::vector<float>& accent,
+             bool accented) {
     if (!text.mask.has_value())
         return;
     const gui_forms::TextMaskMetrics m = text.mask.metrics();
@@ -104,6 +111,8 @@ void lay_ink(const TextImage& text, double left, double top, double density, int
             ink[i] = std::max(ink[i], c);
             if (gilded)
                 foil[i] = std::max(foil[i], c > 0 ? 1.0F : 0.0F);
+            if (accented)
+                accent[i] = std::max(accent[i], c > 0 ? 1.0F : 0.0F);
         }
     }
 }
@@ -137,9 +146,11 @@ void blur(std::vector<float>& values, int width, int height, int radius) {
 }
 
 // One face: the bone stock, the finish's dimples, the raised ink and the glint facets, `grain`
-// texels between facets. `ink` and `foil` are per texel; empty for a plain face.
+// texels between facets. `ink`, `foil` and `accent` are per texel; empty for a plain face
+// (`accent` also when nothing prints in the accent ink).
 CardFaceMap print_face(int width, int height, double density, double grain, std::uint32_t seed,
-                       const std::vector<float>& finish, const std::vector<float>& ink, const std::vector<float>& foil) {
+                       const std::vector<float>& finish, const std::vector<float>& ink, const std::vector<float>& foil,
+                       const std::vector<float>& accent) {
     CardFaceMap map;
     map.width = width;
     map.height = height;
@@ -184,6 +195,7 @@ CardFaceMap print_face(int width, int height, double density, double grain, std:
                 sy += kInkHeight * (rise[down] - rise[up]) * .5 * density;
                 t.ink = ink[i];
                 t.foil = foil[i];
+                t.accent = accent.empty() ? 0.0F : accent[i];
             }
             t.slope_x = static_cast<float>(sx);
             t.slope_y = static_cast<float>(sy);
@@ -198,14 +210,14 @@ BusinessCard::BusinessCard(gf::StableId id, Kind kind)
     : Control(std::move(id)), kind_(kind),
       remarks_(static_cast<std::uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count())) {
     set_paint_plane(gf::PaintPlane::overlay);
-    set_focusable(true);
+    focusable = true;
     if (kind_ == Kind::page) {
-        set_accessible_name("Rainstar Software business card");
-        set_accessible_description("Opens the card (Enter).");
+        accessible_name = "Malkuthsoft business card";
+        accessible_description = "Opens the card (Enter).";
     } else {
-        set_accessible_name("Rainstar Software business card, in the hand");
-        set_accessible_description(std::string(contact) + ". Enter opens " + std::string(website) +
-                                   "; the arrow keys turn the card; Escape puts it away.");
+        accessible_name = "Malkuthsoft business card, in the hand";
+        accessible_description = std::string(contact) + ". Enter opens " + std::string(website) +
+                                   "; the arrow keys turn the card; Escape puts it away.";
     }
     for (int c = 0; c < 3; ++c) {
         material_.edge[c] = linear_of(kStock.colour[c]) * .78;
@@ -224,9 +236,9 @@ BusinessCard::~BusinessCard() = default;
 void BusinessCard::initialize_control_tree() {
     if (!in_hand())
         return;
-    std::shared_ptr<HelpGlyph> mark = gf::make_control<HelpGlyph>(gf::StableId(std::string(stable_id().value()) + ".close"), "×");
-    (*mark).set_ink(gf::Color::rgba(228, 220, 196));
-    (*mark).set_accessible_name("Put the card away (Escape)");
+    std::shared_ptr<HelpGlyph> mark = gf::make_control<HelpGlyph>(games::stable_id(std::string(stable_id().value()) + ".close"), "×");
+    (*mark).set_variant(HelpGlyphVariant::card_mark);
+    (*mark).accessible_name = "Put the card away (Escape)";
     (*mark).set_paint_plane(gf::PaintPlane::overlay);
     gf::on((*mark).clicked(), *this, &BusinessCard::put_away);
     close_mark_ = mark;
@@ -343,7 +355,7 @@ void BusinessCard::on_attached_to_window() {
     wake();
 }
 
-void BusinessCard::on_detaching_from_window(gf::Window& window) noexcept {
+void BusinessCard::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
     if (timer_)
         (*timer_).stop();
     timer_.reset();
@@ -420,6 +432,11 @@ void BusinessCard::build_faces() {
         return;
     const std::size_t count = static_cast<std::size_t>(width) * height;
     std::vector<float> ink(count, 0.0F), foil(count, 0.0F);
+    // The accent layer: only while the invalidation overlay is on.
+    accented_ = gf::invalidation_overlay_default();
+    std::vector<float> accent;
+    if (accented_)
+        accent.assign(count, 0.0F);
     // The company in spaced capitals, centred.
     const double size = kCompanySize * height_points;
     double run = 0;
@@ -447,7 +464,8 @@ void BusinessCard::build_faces() {
         }
         for (const Letter& letter : letters_)
             if (letter.text[0] == c && letter.image.mask.has_value()) {
-                lay_ink(letter.image, x, top, density_, width, height, ink, foil, true);
+                const bool accented = accented_ && (kAccentLetter == 0 || c == kAccentLetter);
+                lay_ink(letter.image, x, top, density_, width, height, ink, foil, true, accent, accented);
                 x += letter.image.mask.metrics().logical_width + kCompanyTracking * size;
             }
     }
@@ -458,7 +476,7 @@ void BusinessCard::build_faces() {
     if (address_.image.mask.has_value()) {
         const gui_forms::TextMaskMetrics m = address_.image.mask.metrics();
         lay_ink(address_.image, (width_ - m.logical_width) / 2, kAddressMiddle * height_points - m.logical_height / 2,
-                density_, width, height, ink, foil, false);
+                density_, width, height, ink, foil, false, accent, false);
     }
     // The finish the Settings screen chooses for the playing cards, at their fineness: dimples
     // and glint facets as many device pixels apart as on the table (card_press.cpp), here in
@@ -480,8 +498,8 @@ void BusinessCard::build_faces() {
         s *= gain;
     material_.sparkle = chosen.card_sparkle;
     material_.sheen = chosen.card_glare / .7;
-    front_ = card_face_levels(print_face(width, height, density_, std::max(1.0, grain), 1931U, finish, ink, foil));
-    back_ = card_face_levels(print_face(width, height, density_, std::max(1.0, grain), 2207U, finish, {}, {}));
+    front_ = card_face_levels(print_face(width, height, density_, std::max(1.0, grain), 1931U, finish, ink, foil, accent));
+    back_ = card_face_levels(print_face(width, height, density_, std::max(1.0, grain), 2207U, finish, {}, {}, {}));
     built_width_ = width_;
     stale_ = true;
 }
@@ -663,6 +681,25 @@ void BusinessCard::say() {
     }
 }
 
+// The hidden diagnostic: D held while the company's name is right-clicked on the card in the
+// hand switches on GUI.Forms' invalidation overlay (a red outline over every redone area) for
+// the rest of the program's session. Nothing turns it off; the name prints in the accent ink
+// from then on, and the settings sheet shows it.
+void BusinessCard::switch_on_overlay_if_asked(gf::Point local) {
+    const gf::SurfaceRoot* root = attached_surface_root();
+    if (!in_hand() || root == nullptr || !(*root).is_key_down(gf::PhysicalKey::d))
+        return;
+    bool company = false;
+    const bool hit = card_hit(local, company);
+    if (!hit || !company || gf::invalidation_overlay_default())
+        return;
+    gf::set_invalidation_overlay_default(true);
+    // The faces are printed again with the name in the accent ink.
+    build_faces();
+    invalidate(gf::Dirty::paint);
+    wake();
+}
+
 void BusinessCard::visit() {
     open_link("https://" + std::string(website) + "/");
 }
@@ -709,9 +746,9 @@ void BusinessCard::hover(gf::Point local) {
     if (pointing != over_company_) {
         over_company_ = pointing;
         if (pointing)
-            set_cursor(gf::CursorKind::hand);
+            cursor = gf::CursorKind::hand;
         else
-            set_cursor(std::nullopt);
+            cursor = std::nullopt;
     }
     wake();
 }
@@ -720,7 +757,7 @@ void BusinessCard::unhover() {
     hovering_ = false;
     if (over_company_) {
         over_company_ = false;
-        set_cursor(std::nullopt);
+        cursor = std::nullopt;
     }
     wake();
 }
@@ -737,6 +774,11 @@ void BusinessCard::on_pointer(gf::PointerEvent& e) {
     if (e.action == gf::PointerAction::leave) {
         if (!pressed_on_card_)
             unhover();
+        return;
+    }
+    if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::secondary) {
+        switch_on_overlay_if_asked(local);
+        e.handled = true;
         return;
     }
     if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {

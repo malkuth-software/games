@@ -6,14 +6,14 @@
 #include <functional>
 namespace games {
 // Visually a text link; retains keyboard and accessibility semantics.
+// Which ink a HelpGlyph takes from themes/playsuite: the help sheet's brown-gold (plain),
+// the shelf's brighter help link, or the business card's pale mark.
+enum class HelpGlyphVariant { plain, help_link, card_mark };
 class HelpGlyph final : public gf::Button {
   public:
     HelpGlyph(gf::StableId id, std::string glyph);
-    void set_ink(gf::Color ink);
+    void set_variant(HelpGlyphVariant variant);
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-
-  private:
-    gf::Color ink_ = gf::Color::rgba(184, 137, 42);
 };
 class HelpPages final : public gf::ScrollableControl {
   public:
@@ -74,6 +74,6 @@ class HelpBook final : public gf::Control {
     void wheel_over_card(gf::PointerEvent& event);
     void card_clicked();
     void visibility(bool shown);
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
 };
 } // namespace games

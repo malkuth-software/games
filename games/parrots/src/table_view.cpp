@@ -59,15 +59,15 @@ V3 bezier(V3 a, V3 c, V3 b, double t) { return a * ((1 - t) * (1 - t)) + c * (2 
 
 TableView::TableView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt), rng_(seed_now()) {
     cab_front_ = !opt_.hosted;
-    set_focusable(true);
+    focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     {
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
         set_authored_surface_material(none);
     }
-    set_accessible_name("The Paradoxiary. Parrots in a glasshouse aviary: one or two lie, two know the truth, and the rest only chatter. "
-                        "Click a bird to hear it, ask the question bird one question, mark the birds, and name the culprit.");
+    accessible_name = "The Paradoxiary. Parrots in a glasshouse aviary: one or two lie, two know the truth, and the rest only chatter. "
+                        "Click a bird to hear it, ask the question bird one question, mark the birds, and name the culprit.";
     if (!load()) {
         load_old_records();
         new_table(1, seed_now(), true);
@@ -100,7 +100,7 @@ void TableView::on_attached_to_window() {
     (*timer_).start();
 }
 
-void TableView::on_detaching_from_window(gf::Window&) noexcept {
+void TableView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
     try { persist(); } catch (...) {}
     if (timer_) (*timer_).stop();
     timer_.reset();
@@ -472,7 +472,7 @@ void TableView::load_old_records() {
 
 // ------------------------------------------------------------------ the frame
 void TableView::play(const std::string& name, float gain, float rate) {
-    audio_sfx(name, gain, rate, (opt_.hosted || sound_) && cab_sound_ && cab_front_ && visible());
+    audio_sfx(name, gain, rate, (opt_.hosted || sound_) && cab_sound_ && cab_front_ && visible.read());
 }
 
 void TableView::run_script() {
@@ -601,7 +601,7 @@ void TableView::pose_birds(double dt) {
 }
 
 void TableView::tick() {
-    if (!visible() || !cab_front_) { last_ = std::chrono::steady_clock::now(); return; }
+    if (!visible.read() || !cab_front_) { last_ = std::chrono::steady_clock::now(); return; }
     const auto now = std::chrono::steady_clock::now();
     const double dt = std::clamp(std::chrono::duration<double>(now - last_).count(), 0.0, .25);
     last_ = now;
@@ -639,7 +639,7 @@ void TableView::tick() {
     st_.confetti = phase_ == Phase::verdict && won_ && !cab_reduced_ ? std::min(1.0, phase_t_ / .5) : 0;
     {
         const bool on = (opt_.hosted || music_) && cab_music_ && cab_front_;
-        audio_live_music(visible() && cab_front_ && on);
+        audio_live_music(visible.read() && cab_front_ && on);
     }
     audio_tick(dt);
     save_t_ += dt;
@@ -648,7 +648,7 @@ void TableView::tick() {
     static const bool capturing = opt_.dev && std::getenv("PT_PRINT_WID");
     const bool hidden = win && (*win).occluded() && !capturing;
     const bool front = !win || (*win).active();
-    const bool shown = visible();
+    const bool shown = visible.read();
     // busy (birds flying, a bird talking, the verdict): thirty a second; a quiet aviary breathes at fifteen
     bool busy = phase_ == Phase::arrive || phase_ == Phase::aim || phase_ == Phase::shot || (phase_ == Phase::verdict && phase_t_ < 6);
     for (double tk : talk_) busy = busy || tk > 0;
@@ -724,7 +724,7 @@ void TableView::on_pointer(gf::PointerEvent& e) {
     if (e.action == gf::PointerAction::move) {
         hover_ = hit();
         hover_bird_ = hover_.empty() && panel_ == Panel::none && !in_popup() && mouse_y_ > top_h_ ? aviary_.pick_bird(mouse_x_, mouse_y_, st_) : -1;
-        set_cursor(phase_ == Phase::aim && hover_.empty() ? gf::CursorKind::crosshair : !hover_.empty() || hover_bird_ >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow);
+        cursor = phase_ == Phase::aim && hover_.empty() ? gf::CursorKind::crosshair : !hover_.empty() || hover_bird_ >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
     }
     if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::secondary) {
         activate();

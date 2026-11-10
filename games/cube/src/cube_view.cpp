@@ -77,9 +77,9 @@ render::Color rgb(std::uint32_t color) {
 
 CubeView::CubeView(gf::StableId id, Options options) : Control(std::move(id)), options_(options) {
     front_ = !options_.hosted;
-    set_focusable(true);
+    focusable = true;
     set_style(gf::ControlStyles::opaque, true);
-    set_accessible_name("Nature Cube. Join each coloured pair with a line across three faces of a cube.");
+    accessible_name = "Nature Cube. Join each coloured pair with a line across three faces of a cube.";
     if (!restore()) {
         // A first game: deal it now if it is quick, otherwise in the background while the
         // lake shows; the cube arrives as soon as it is ready.
@@ -272,12 +272,10 @@ void CubeView::on_attached_to_window() {
     subscriptions_.push_back(
         (*timer_).tick().subscribe(*this, gf::Delegate<>::bind<CubeView, &CubeView::tick>(*this)));
     if (!environment_loaded_) {
-        // Prepared once in the window's byte order, darkened and lifted as the glass shows it.
+        // Prepared once in the window's byte order (BGRA on every host), darkened and lifted
+        // as the glass shows it.
         const std::vector<std::uint8_t> gpix = read_bytes(games::asset_directory() + "/nature-lake.gpix");
-        const render::Order order = gf::native_live_surface_pixel_format() == gf::LiveSurfacePixelFormat::rgba32_premultiplied_srgb
-                                        ? render::Order::rgba
-                                        : render::Order::bgra;
-        environment_loaded_ = panorama_.load_gpix(gpix, order, .82F, 35);
+        environment_loaded_ = panorama_.load_gpix(gpix, render::Order::bgra, .82F, 35);
     }
     if (lake_.width == 0) {
         const std::vector<std::uint8_t> png = read_bytes(games::asset_directory() + "/nature-lake.png");
@@ -287,7 +285,7 @@ void CubeView::on_attached_to_window() {
     request_frame();
 }
 
-void CubeView::on_detaching_from_window(gf::Window&) noexcept {
+void CubeView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
     try {
         persist();
     } catch (...) {
@@ -496,7 +494,7 @@ void CubeView::on_paint(gf::Painter& painter, gf::Rect) {
 
 void CubeView::request_frame() {
     render_dirty_ = true;
-    if (!timer_ || !visible() || !front_) {
+    if (!timer_ || !visible.read() || !front_) {
         return;
     }
     if (!(*timer_).enabled()) {
@@ -522,7 +520,7 @@ bool CubeView::settled() const {
 }
 
 void CubeView::tick() {
-    if (!visible() || !front_) {
+    if (!visible.read() || !front_) {
         if (timer_) {
             (*timer_).stop();
         }
@@ -881,7 +879,7 @@ void CubeView::on_pointer(gf::PointerEvent& event) {
             hover_ = cell;
             const bool live = cell >= 0 && (session_.puzzle.pair_of[static_cast<std::size_t>(cell)] >= 0 ||
                                             owner(session_.play, cell) >= 0);
-            set_cursor(live || tracing_ ? gf::CursorKind::hand : gf::CursorKind::arrow);
+            cursor = live || tracing_ ? gf::CursorKind::hand : gf::CursorKind::arrow;
             request_frame();
         }
         return;

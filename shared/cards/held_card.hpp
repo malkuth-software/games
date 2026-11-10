@@ -1,6 +1,6 @@
 #pragma once
 // One card held up in the room and turned by hand, for any card the suite shows in three
-// dimensions (Rainstar Software's business card is the first). The card is a slab of stock;
+// dimensions (Malkuthsoft's business card is the first). The card is a slab of stock;
 // each face is a set of maps made once at a size (the stock's colour, its ink, its relief and
 // its glint facets) at every level of detail. Every time the card moves its picture is made
 // anew a device pixel at a time: the eye's ray through the pixel is met with the slab, the face
@@ -44,6 +44,7 @@ struct CardTexel {
     float blue = 0;      // the stock, linear light
     float ink = 0;       // 0 bare stock .. 1 ink
     float foil = 0;      // 0 .. 1: of the ink here, how much turns to gold foil when asked
+    float accent = 0;    // 0 .. 1: of the ink here, how much is printed in the accent colour
     float slope_x = 0;
     float slope_y = 0;   // the surface's rise over run, across and down
     float facet_x = 0;
@@ -70,7 +71,7 @@ struct PackedTexel {
     std::int8_t facet_x = 0;
     std::int8_t facet_y = 0;
     std::uint8_t facet = 0;
-    std::uint8_t spare = 0;
+    std::uint8_t accent = 0;
 };
 static_assert(sizeof(PackedTexel) == 16);
 struct CardFaceLevel {
@@ -92,6 +93,7 @@ void scatter_card_facets(CardFaceMap& map, double grain, std::uint32_t seed);
 struct CardMaterial {
     double ink[3] = {.010, .009, .008};  // the ink's colour, linear light: a warm black
     double foil[3] = {1.0, .62, .13};    // gold foil's reflectance, linear light
+    double accent[3] = {.62, .012, .010};  // the accent ink's colour, linear light: a deep red
     double edge[3] = {.55, .52, .45};    // the stock's cut edge, linear light
     double seam = .35;                   // how much darker the line is where the two plies meet
     bool gilt_edge = false;              // the edges painted gold

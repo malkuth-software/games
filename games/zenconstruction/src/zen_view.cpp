@@ -1,3 +1,4 @@
+#include "held_keys.hpp"
 #include "help_route.hpp"
 #include "zen_view.hpp"
 #include "runtime_paths.hpp"
@@ -16,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include "stable_ids.hpp"
 
 namespace zc {
 
@@ -88,14 +90,14 @@ const char* const kJiggle[] = {"A good shake!", "Let's see what's underneath."};
 }  // namespace
 
 ZenView::ZenView(gf::StableId id, Options options) : Control(std::move(id)), options_(options) {
-    set_focusable(true);
+    focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     {
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
         set_authored_surface_material(none);
     }
-    set_accessible_name("Rock Stack. Stack rocks from the bowl with a little crane.");
+    accessible_name = "Rock Stack. Stack rocks from the bowl with a little crane.";
     camera_goal_ = camera_.target;
     if (!load()) {
         seed_entry_ = fresh_seed();
@@ -129,7 +131,7 @@ void ZenView::on_attached_to_window() {
     hud_panel_ = -1;  // a panel already open takes the keyboard now there is a window
 }
 
-void ZenView::on_detaching_from_window(gf::Window&) noexcept {
+void ZenView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
     try {
         persist();
     } catch (...) {
@@ -461,19 +463,29 @@ void ZenView::react(const RunEvents& events) {
 
 // ---------------------------------------------------------------- play
 
+// A key the crane reads is held when the window has it down while the focus is in this
+// view (games::key_held), or while a development script holds it (hold=).
+bool ZenView::held(std::uint32_t key) const {
+    if (key < scripted_keys_.size() && scripted_keys_[key]) {
+        return true;
+    }
+    const bool result = games::key_held(*this, key);
+    return result;
+}
+
 CraneInput ZenView::gather_input() const {
     CraneInput input;
     if (panel_ != Panel::none) {
         return input;
     }
-    input.right = (keys_[kKeyRight] ? 1.0 : 0.0) - (keys_[kKeyLeft] ? 1.0 : 0.0);
-    input.forward = (keys_[kKeyUp] ? 1.0 : 0.0) - (keys_[kKeyDown] ? 1.0 : 0.0);
-    input.up = ((keys_[kKeyW] || keys_[kKeyPageUp]) ? 1.0 : 0.0) - ((keys_[kKeyS] || keys_[kKeyPageDown]) ? 1.0 : 0.0);
-    input.yaw = (keys_[kKeyQ] ? 1.0 : 0.0) - (keys_[kKeyE] ? 1.0 : 0.0);     // turn, about the vertical
-    input.pitch = (keys_[kKeyR] ? 1.0 : 0.0) - (keys_[kKeyF] ? 1.0 : 0.0);   // tip, toward or away from the crane
-    input.roll = (keys_[kKeyZ] ? 1.0 : 0.0) - (keys_[kKeyC] ? 1.0 : 0.0);
-    input.fast = keys_[kKeyShiftLeft] || keys_[kKeyShiftRight];
-    input.fine = keys_[kKeyAltLeft] || keys_[kKeyAltRight];
+    input.right = (held(kKeyRight) ? 1.0 : 0.0) - (held(kKeyLeft) ? 1.0 : 0.0);
+    input.forward = (held(kKeyUp) ? 1.0 : 0.0) - (held(kKeyDown) ? 1.0 : 0.0);
+    input.up = ((held(kKeyW) || held(kKeyPageUp)) ? 1.0 : 0.0) - ((held(kKeyS) || held(kKeyPageDown)) ? 1.0 : 0.0);
+    input.yaw = (held(kKeyQ) ? 1.0 : 0.0) - (held(kKeyE) ? 1.0 : 0.0);     // turn, about the vertical
+    input.pitch = (held(kKeyR) ? 1.0 : 0.0) - (held(kKeyF) ? 1.0 : 0.0);   // tip, toward or away from the crane
+    input.roll = (held(kKeyZ) ? 1.0 : 0.0) - (held(kKeyC) ? 1.0 : 0.0);
+    input.fast = held(kKeyShiftLeft) || held(kKeyShiftRight);
+    input.fine = held(kKeyAltLeft) || held(kKeyAltRight);
     return input;
 }
 
@@ -569,7 +581,7 @@ void ZenView::update_hover() {
 
 void ZenView::play(const std::string& name, float gain, float rate, float pan) {
     // Hosted, PlaySuite's Sound and Music masters are the only switches.
-    audio_sfx(name, gain, rate, (options_.hosted || sound_) && cab_sound_ && cab_front_ && visible(), pan);
+    audio_sfx(name, gain, rate, (options_.hosted || sound_) && cab_sound_ && cab_front_ && visible.read(), pan);
 }
 
 // The beds and the odd sounds: the brook always; the motor whining up with
@@ -577,7 +589,7 @@ void ZenView::play(const std::string& name, float gain, float rate, float pan) {
 // while it holds a rock, spinning down when it stops; sounds due now; a
 // bird in the trees every half minute or so.
 void ZenView::step_sound(double dt) {
-    const bool sound_on = (options_.hosted || sound_) && cab_sound_ && cab_front_ && visible();
+    const bool sound_on = (options_.hosted || sound_) && cab_sound_ && cab_front_ && visible.read();
     // the creek: its rush, the babble of bubbles over it, wind in the reeds
     // (loops of 37, 40 and 53 seconds, so together they never repeat)
     audio_bed("zc_rush", .13f, 1.f, sound_on);
@@ -669,7 +681,7 @@ void ZenView::tick() {
     t_ += dt;
     run_script();
     adopt_pending();
-    const bool front = cab_front_ && visible();
+    const bool front = cab_front_ && visible.read();
     if (front) {
         step_play(dt);
         update_camera(dt);
@@ -703,7 +715,7 @@ void ZenView::tick() {
     static const bool capturing = options_.dev && std::getenv("ZC_PRINT_WID") != nullptr;
     const bool hidden = window != nullptr && (*window).occluded() && !capturing;
     const bool active = window == nullptr || (*window).active();
-    const bool shown = visible();
+    const bool shown = visible.read();
     // the brook keeps flowing at a gentle rate when nothing else moves
     since_render_ += dt;
     const bool busy = pending_.valid() || (run_ && (!(*run_).quiet() || (*run_).busy()));
@@ -868,7 +880,7 @@ void ZenView::on_pointer(gf::PointerEvent& e) {
         } else {
             update_hover();
         }
-        set_cursor(hover_ok_ ? gf::CursorKind::hand : gf::CursorKind::arrow);
+        cursor = hover_ok_ ? gf::CursorKind::hand : gf::CursorKind::arrow;
         return;
     }
     if (e.action == gf::PointerAction::down) {
@@ -912,9 +924,6 @@ void ZenView::on_key(gf::KeyEvent& e) {
     }
     const std::uint32_t k = e.physical_key;
     const bool down = e.action == gf::KeyAction::down;
-    if (k < 256) {
-        keys_[k] = down;
-    }
     if (!down) {
         e.handled = true;
         return;
@@ -1019,7 +1028,7 @@ void ZenView::run_script() {
         } else if (c.rfind("type=", 0) == 0) {
             name_entry_ = c.substr(5);
             if (hud_.name) {
-                (*hud_.name).set_text(name_entry_);
+                (*hud_.name).text = name_entry_;
             }
         } else if (c.rfind("hold=", 0) == 0) {
             // hold a key for a while: hold=up,1.5 (up down left right w s q e r f z c)
@@ -1031,13 +1040,13 @@ void ZenView::run_script() {
             const std::uint32_t codes[12] = {kKeyUp, kKeyDown, kKeyLeft, kKeyRight, kKeyW, kKeyS, kKeyQ, kKeyE, kKeyR, kKeyF, kKeyZ, kKeyC};
             for (int k = 0; k < 12; k += 1) {
                 if (name == names[k]) {
-                    keys_[codes[k]] = true;
+                    scripted_keys_[codes[k]] = true;
                     script_.push_back(std::pair<double, std::string>(t_ + seconds, "free=" + std::to_string(codes[k])));
                     std::stable_sort(script_.begin(), script_.end(), script_before);
                 }
             }
         } else if (c.rfind("free=", 0) == 0) {
-            keys_[std::atoi(c.c_str() + 5) & 255] = false;
+            scripted_keys_[static_cast<std::size_t>(std::atoi(c.c_str() + 5) & 255)] = false;
         }
     }
 }
@@ -1121,37 +1130,29 @@ const char* const kHelp[] = {
     "To take the stack apart, click its top rock. Rocks that fall are tidied back into the bowl. Drag to look around; scroll to zoom.",
     "Every site is saved. Sites lets you go back to one; Start over (hold it) puts every rock back in the bowl. Jiggle (or J) shakes the bowl so its rocks settle another way."};
 
-// A font only when it differs, so laying out never asks for another layout.
+// Property writes compare first: an equal font, text, visibility or enabled state
+// marks nothing, so laying out never asks for another layout.
 void font(gf::Label& label, double size, int weight = 400, bool italic = false) {
-    const gf::FontSpec f{gf::FontRole::content, size, static_cast<std::uint16_t>(weight), italic};
-    if (!label.has_font_override() || !(label.font() == f)) {
-        label.set_font(f);
-    }
+    label.font = gf::FontSpec{gf::FontRole::content, size, static_cast<std::uint16_t>(weight), italic};
 }
-void set_words(gf::Label& label, const std::string& text) {
-    if (label.text() != text) {
-        label.set_text(text);
-    }
+void set_words(gf::Label& label, const std::string& words) {
+    label.text = words;
 }
 void show(gf::Control& control, bool shown) {
-    if (control.visible() != shown) {
-        control.set_visible(shown);
-    }
+    control.visible = shown;
 }
-void enable(gf::Control& control, bool enabled) {
-    if (control.enabled() != enabled) {
-        control.set_enabled(enabled);
-    }
+void enable(gf::Control& control, bool usable) {
+    control.enabled = usable;
 }
 gf::Size size_of(gf::Label& label, double wrap) { return label.measure({wrap > 0 ? wrap : 1e6, 1e6}); }
 }  // namespace
 
 std::shared_ptr<games::SuiteButton> ZenView::make_button(const std::string& id, const std::string& label, games::GlossTone tone) {
-    std::shared_ptr<games::SuiteButton> b = gf::make_control<games::SuiteButton>(gf::StableId("zc." + id), label, tone);
+    std::shared_ptr<games::SuiteButton> b = gf::make_control<games::SuiteButton>(games::stable_id("zc." + id), label, tone);
     (*b).set_radius(7);
-    (*b).set_accessible_name(label);
+    (*b).accessible_name = label;
     (*b).set_paint_plane(gf::PaintPlane::overlay);
-    (*b).set_visible(false);
+    (*b).visible = false;
     add_child(b);
     gf::on((*b).clicked(), *this, &ZenView::clicked, static_cast<int>(button_ids_.size()));
     button_ids_.push_back(id);
@@ -1159,15 +1160,15 @@ std::shared_ptr<games::SuiteButton> ZenView::make_button(const std::string& id, 
 }
 
 std::shared_ptr<gf::Label> ZenView::make_label(const std::string& id, double size, int weight, bool italic, gf::Color colour, bool wrap) {
-    std::shared_ptr<gf::Label> l = gf::make_control<Words>(gf::StableId("zc." + id));
+    std::shared_ptr<gf::Label> l = gf::make_control<Words>(games::stable_id("zc." + id));
     font(*l, size, weight, italic);
-    (*l).set_foreground(colour);
-    (*l).set_use_mnemonic(false);
+    (*l).fore_color = colour;
+    (*l).use_mnemonic = false;
     if (wrap) {
-        (*l).set_text_wrapping(gf::TextWrapping::word);
+        (*l).text_wrapping = gf::TextWrapping::word;
     }
     (*l).set_paint_plane(gf::PaintPlane::overlay);
-    (*l).set_visible(false);
+    (*l).visible = false;
     add_child(l);
     return l;
 }
@@ -1177,34 +1178,34 @@ void ZenView::initialize_control_tree() {
     const gf::Color muted = ink(hex(0x6A5A44));
     // the site's card, top left
     hud_.card = gf::make_control<Paper>(gf::StableId("zc.card"), 10, paper(.9), 1.5);
-    (*hud_.card).set_visible(false);
+    (*hud_.card).visible = false;
     add_child(hud_.card);
     hud_.company = make_label("company", 17, 700, true, ink(kInk));
     hud_.line = make_label("line", 12, 400, false, brown);
     // a line from the worksite, bottom left
     hud_.say = gf::make_control<Paper>(gf::StableId("zc.say"), 10, gf::Color::rgba(0xFF, 0xFC, 0xF3, 242), 1.2, true);
-    (*hud_.say).set_visible(false);
+    (*hud_.say).visible = false;
     add_child(hud_.say);
     hud_.say_text = make_label("say.text", 13, 400, false, ink(kInk), true);
     // what the keys do now
     hud_.hint = gf::make_control<Words>(gf::StableId("zc.hint"));
-    (*hud_.hint).set_text_wrapping(gf::TextWrapping::word);
-    (*hud_.hint).set_use_mnemonic(false);
-    (*hud_.hint).set_foreground(gf::Color::rgba(255, 255, 255, 235));
+    (*hud_.hint).text_wrapping = gf::TextWrapping::word;
+    (*hud_.hint).use_mnemonic = false;
+    (*hud_.hint).fore_color = gf::Color::rgba(255, 255, 255, 235);
     (*hud_.hint).set_paint_plane(gf::PaintPlane::overlay);
-    (*hud_.hint).set_visible(false);
+    (*hud_.hint).visible = false;
     add_child(hud_.hint);
     hud_.slings = gf::make_control<SlingMeter>(gf::StableId("zc.slings"));
-    (*hud_.slings).set_visible(false);
+    (*hud_.slings).visible = false;
     add_child(hud_.slings);
     // the top-right row; hosted, the capsule has Music, Help, New site and Sites
     hud_.music = make_button("music", music_ ? "Music" : "Quiet", games::GlossTone::chrome);
     hud_.help = make_button("help", "Help", games::GlossTone::chrome);
     hud_.reset = gf::make_control<HoldButton>(gf::StableId("zc.reset"), "Start over");
     (*hud_.reset).set_radius(7);
-    (*hud_.reset).set_accessible_name("Start over (hold)");
+    (*hud_.reset).accessible_name = "Start over (hold)";
     (*hud_.reset).set_paint_plane(gf::PaintPlane::overlay);
-    (*hud_.reset).set_visible(false);
+    (*hud_.reset).visible = false;
     add_child(hud_.reset);
     button_ids_.push_back("reset");
     hud_.new_site = make_button("new", "New site", games::GlossTone::chrome);
@@ -1214,31 +1215,31 @@ void ZenView::initialize_control_tree() {
     hud_.let_go = make_button("release", "Let go", games::GlossTone::gold);
     // while fresh rocks tip into the bowl
     hud_.loading = gf::make_control<Paper>(gf::StableId("zc.loading"), 12, paper(), 2);
-    (*hud_.loading).set_visible(false);
+    (*hud_.loading).visible = false;
     add_child(hud_.loading);
     hud_.loading_title = make_label("loading.title", 18, 700, true, ink(kInk));
     hud_.loading_dots = make_label("loading.dots", 12, 400, false, muted);
-    (*hud_.loading_title).set_alignment(gf::HorizontalAlignment::center);
-    (*hud_.loading_dots).set_alignment(gf::HorizontalAlignment::center);
-    (*hud_.loading_title).set_text("Filling the bowl...");
+    (*hud_.loading_title).alignment = gf::HorizontalAlignment::center;
+    (*hud_.loading_dots).alignment = gf::HorizontalAlignment::center;
+    (*hud_.loading_title).text = "Filling the bowl...";
     // the panels, over the dimmed worksite
     hud_.sheet = gf::make_control<Paper>(gf::StableId("zc.sheet"), 14, paper(), 2);
-    (*hud_.sheet).set_visible(false);
+    (*hud_.sheet).visible = false;
     add_child(hud_.sheet);
     hud_.sheet_title = make_label("sheet.title", 20, 700, true, ink(kInk));
-    (*hud_.sheet_title).set_alignment(gf::HorizontalAlignment::center);
+    (*hud_.sheet_title).alignment = gf::HorizontalAlignment::center;
     hud_.sheet_note = make_label("sheet.note", 12.5, 400, false, brown, true);
     hud_.seed_note = make_label("sheet.seed", 11, 400, false, muted, true);
     for (const char* line : kHelp) {
         hud_.help_lines.push_back(make_label("help." + std::to_string(hud_.help_lines.size()), 12.5, 400, false, ink(kInk), true));
-        (*hud_.help_lines.back()).set_text(line);
+        (*hud_.help_lines.back()).text = line;
     }
     hud_.name = gf::make_control<gf::TextBox>(gf::StableId("zc.name"), name_entry_);
-    (*hud_.name).set_maximum_length(28);
-    (*hud_.name).set_font({gf::FontRole::content, 16, 700, false});
-    (*hud_.name).set_accessible_name("Your company's name, for the sign");
+    (*hud_.name).maximum_length = 28;
+    (*hud_.name).font = gf::FontSpec{gf::FontRole::content, 16, 700, false};
+    (*hud_.name).accessible_name = "Your company's name, for the sign";
     (*hud_.name).set_paint_plane(gf::PaintPlane::overlay);
-    (*hud_.name).set_visible(false);
+    (*hud_.name).visible = false;
     add_child(hud_.name);
     gf::on((*hud_.name).text_changed(), *this, &ZenView::name_changed);
     gf::on((*hud_.name).committed(), *this, &ZenView::name_committed);
@@ -1292,10 +1293,10 @@ void ZenView::update_hud() {
         const bool first = hud_panel_ < 0;
         hud_panel_ = static_cast<int>(panel_);
         if (panel_ == Panel::new_site) {
-            (*hud_.name).set_text(name_entry_);
+            (*hud_.name).text = name_entry_;
             (*hud_.name).select_all();
             static_cast<void>((*attached_window()).request_focus(hud_.name));
-        } else if (!first && (*hud_.name).visible()) {
+        } else if (!first && (*hud_.name).visible.read()) {
             activate();
         }
     }
@@ -1315,7 +1316,7 @@ void ZenView::update_hud() {
     if (std::abs(fade - say_fade_) > 0.004 || (fade == 0) != (say_fade_ == 0)) {
         say_fade_ = fade;
         (*hud_.say).set_fade(fade);
-        (*hud_.say_text).set_foreground(ink(kInk, fade));
+        (*hud_.say_text).fore_color = ink(kInk, fade);
     }
     if (steering && !open) {
         (*hud_.slings).set_tension((*run_).world().hold_state().tension);
@@ -1351,10 +1352,7 @@ void ZenView::update_hud() {
     show(*hud_.hint, working && !hint.empty());
     set_words(*hud_.hint, hint);
     {
-        const gf::FontSpec f{gf::FontRole::content, small ? 10.5 : 11.5, 400, false};
-        if (!(*hud_.hint).has_font_override() || !((*hud_.hint).font() == f)) {
-            (*hud_.hint).set_font(f);
-        }
+        (*hud_.hint).font = gf::FontSpec{gf::FontRole::content, small ? 10.5 : 11.5, 400, false};
     }
     show(*hud_.slings, working && steering);
     show(*hud_.music, working && !options_.hosted);
@@ -1364,7 +1362,7 @@ void ZenView::update_hud() {
     show(*hud_.reset, working);
     enable(*hud_.reset, can_reset);
     enable(*hud_.sites, !sites_.empty());
-    (*hud_.music).set_text(music_ ? "Music" : "Quiet");
+    (*hud_.music).text = music_ ? "Music" : "Quiet";
     show(*hud_.let_go, working && steering);
     show(*hud_.back, working && steering);
     show(*hud_.loading, loading);
@@ -1401,8 +1399,8 @@ void ZenView::update_hud() {
     font(*hud_.sheet_title, panel_ == Panel::sites ? 19 : 20, 700, true);
     {
         const gf::HorizontalAlignment a = panel_ == Panel::sites ? gf::HorizontalAlignment::center : gf::HorizontalAlignment::near;
-        if ((*hud_.sheet_note).alignment() != a) {
-            (*hud_.sheet_note).set_alignment(a);
+        if ((*hud_.sheet_note).alignment.read() != a) {
+            (*hud_.sheet_note).alignment = a;
         }
     }
     // the sites, as many rows as fit, around the current one
@@ -1422,9 +1420,9 @@ void ZenView::update_hud() {
             const SavedSite& saved = sites_[static_cast<size_t>(index)];
             char label[160];
             std::snprintf(label, sizeof label, "%s   (rocks no. %u)   best %.1f cm", saved.company.c_str(), saved.seed, saved.best * 100);
-            if (row.text() != label) {
-                row.set_text(label);
-                row.set_accessible_name(label);
+            if (row.text.read() != label) {
+                row.text = label;
+                row.accessible_name = label;
             }
             row.set_tone(index == current_ ? games::GlossTone::gold : games::GlossTone::chrome);
         }
@@ -1440,7 +1438,7 @@ void ZenView::layout_hud() {
     const double top = top_inset();
     const double bh = small ? 24 : 28;
     // the site's card, top left (hosted, below the capsule)
-    if ((*hud_.card).visible()) {
+    if ((*hud_.card).visible.read()) {
         const gf::Size c = size_of(*hud_.company, 0);
         const gf::Size l = size_of(*hud_.line, 0);
         set_child_layout(hud_.card, {10, top, std::max(c.width, l.width) + 28, small ? 46.0 : 56.0});
@@ -1452,7 +1450,7 @@ void ZenView::layout_hud() {
         double x = W_ - 10;
         games::SuiteButton* row[5] = {hud_.music.get(), hud_.help.get(), hud_.reset.get(), hud_.new_site.get(), hud_.sites.get()};
         for (games::SuiteButton* b : row) {
-            if (!(*b).visible()) {
+            if (!(*b).visible.read()) {
                 continue;
             }
             // Start over is as wide as its words while held, so it doesn't grow under the pointer
@@ -1463,7 +1461,7 @@ void ZenView::layout_hud() {
         }
     }
     // a line from the worksite, bottom left
-    if ((*hud_.say).visible()) {
+    if ((*hud_.say).visible.read()) {
         const double wrap = std::min(260.0, W_ - 170);
         const gf::Size m = size_of(*hud_.say_text, wrap);
         const double tw = std::min(wrap, m.width);
@@ -1472,8 +1470,8 @@ void ZenView::layout_hud() {
         set_child_layout(hud_.say, {16, by, tw + 22, m.height + 16});
         set_child_layout(hud_.say_text, {27, by + 8, tw + 1, m.height});
     }
-    const bool steering = (*hud_.let_go).visible();
-    if ((*hud_.hint).visible()) {
+    const bool steering = (*hud_.let_go).visible.read();
+    if ((*hud_.hint).visible.read()) {
         const double wrap = W_ - 16 - (steering ? 240 : 20);
         const gf::Size m = size_of(*hud_.hint, wrap);
         set_child_layout(hud_.hint, {16, H_ - 14 - m.height, std::min(wrap, m.width) + 1, m.height});
@@ -1485,7 +1483,7 @@ void ZenView::layout_hud() {
         const double mw = small ? 90 : 130;
         set_child_layout(hud_.slings, {W_ - 10 - mw, H_ - 10 - bh - 42, mw, 30});
     }
-    if ((*hud_.loading).visible()) {
+    if ((*hud_.loading).visible.read()) {
         const double w = std::min(W_ - 40, 360.0);
         const double x = (W_ - w) / 2;
         const double y = (H_ - 96) / 2;
@@ -1653,7 +1651,7 @@ std::vector<games::GameCommand> ZenView::commands() const {
 void ZenView::run_command(std::string_view id) { action(std::string(id)); }
 void ZenView::on_focus_changed(bool focused) {
     if (!focused) {
-        std::fill(std::begin(keys_), std::end(keys_), false);
+        scripted_keys_.fill(false);
         dragging_ = false;
         hold_reset_ = 0;
     }

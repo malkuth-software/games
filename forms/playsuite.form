@@ -1,0 +1,10 @@
+/* The PlaySuite window. Its one control is the shell (games::Collection), which
+   makes the shelf, the game views, the command capsule, Help and Settings in code:
+   they are data (the catalogue, each game's commands and settings), not a fixed
+   layout. Its look is themes/playsuite. */
+form playsuite.window {
+  text: "PlaySuite";
+  client-size: 1060 680;
+
+  collection games.table { }
+}

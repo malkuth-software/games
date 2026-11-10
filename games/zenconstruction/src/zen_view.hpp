@@ -9,6 +9,8 @@
 #include "platform/render.hpp"
 
 #include "gui_forms/basic_controls.hpp"
+
+#include <array>
 #include "gui_forms/controls/panel/text_box/text_box.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
@@ -77,7 +79,10 @@ private:
     double since_render_ = 1;
     bool want_render_ = true;
     // input
-    bool keys_[256] = {};
+    // The keys a development script holds (hold=up,1.5), by physical key; real keys are
+    // the window's (held()).
+    std::array<bool, 256> scripted_keys_{};
+    [[nodiscard]] bool held(std::uint32_t key) const;
     double mx_ = 0, my_ = 0;
     bool dragging_ = false, drag_moved_ = false;
     double drag_x_ = 0, drag_y_ = 0;
@@ -156,7 +161,7 @@ private:
     std::vector<int> xmap_, ymap_;
 
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
     void tick();
     void publish();
     // sites

@@ -113,12 +113,13 @@ PackedTexel pack(const CardTexel& t) {
     p.facet_x = static_cast<std::int8_t>(std::lround(std::clamp(t.facet_x * kFacetSteps, -127.0, 127.0)));
     p.facet_y = static_cast<std::int8_t>(std::lround(std::clamp(t.facet_y * kFacetSteps, -127.0, 127.0)));
     p.facet = static_cast<std::uint8_t>(std::lround(std::clamp(static_cast<double>(t.facet), 0.0, 1.0) * kUnitSteps));
+    p.accent = static_cast<std::uint8_t>(std::lround(std::clamp(static_cast<double>(t.accent), 0.0, 1.0) * kUnitSteps));
     return p;
 }
 
 // A texel read back, as the lighting wants it.
 struct Texel {
-    double red, green, blue, ink, foil, slope_x, slope_y, facet_x, facet_y, facet;
+    double red, green, blue, ink, foil, slope_x, slope_y, facet_x, facet_y, facet, accent;
 };
 // The face at (u, v), 0..1 each, bilinearly.
 Texel sample(const CardFaceLevel& level, double u, double v) {
@@ -144,6 +145,7 @@ Texel sample(const CardFaceLevel& level, double u, double v) {
     t.facet_x = (a.facet_x * wa + b.facet_x * wb + c.facet_x * wc + d.facet_x * wd) / kFacetSteps;
     t.facet_y = (a.facet_y * wa + b.facet_y * wb + c.facet_y * wc + d.facet_y * wd) / kFacetSteps;
     t.facet = (a.facet * wa + b.facet * wb + c.facet * wc + d.facet * wd) / kUnitSteps;
+    t.accent = (a.accent * wa + b.accent * wb + c.accent * wc + d.accent * wd) / kUnitSteps;
     return t;
 }
 
@@ -160,6 +162,7 @@ CardTexel blend(const CardTexel& a, const CardTexel& b, float f) {
     t.facet_x = a.facet_x * g + b.facet_x * f;
     t.facet_y = a.facet_y * g + b.facet_y * f;
     t.facet = a.facet * g + b.facet * f;
+    t.accent = a.accent * g + b.accent * f;
     return t;
 }
 CardFaceLevel packed(const CardFaceMap& map) {
@@ -297,7 +300,11 @@ Lit light_face(const Frame& f, const Texel& t, const Vec& n, const Vec& toward_e
         return out;
     // The ink: raised and glossy.
     const double gloss = .06 * std::exp(8 * (aim - 1)) + .9 * std::exp(150 * (aim - 1));
-    double inked[3] = {m.ink[0] * light + gloss, m.ink[1] * light + gloss, m.ink[2] * light + gloss};
+    // Ink printed in the accent colour where the face asks for it, the plain ink elsewhere.
+    const double accent = std::clamp(t.accent, 0.0, 1.0);
+    double inked[3] = {0, 0, 0};
+    for (int c = 0; c < 3; ++c)
+        inked[c] = (m.ink[c] * (1 - accent) + m.accent[c] * accent) * light + gloss;
     const double foil = std::clamp(t.foil * f.pose.foil, 0.0, 1.0);
     if (foil > 0) {
         const double gold = gold_light(f, light, mirror, aim);

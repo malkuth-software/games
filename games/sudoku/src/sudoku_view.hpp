@@ -40,7 +40,7 @@ class SudokuView final : public gf::Control, public CommandSource {
     std::vector<int> celebrated_;
     gf::FrameTime celebration_start_{};
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
     void action(gf::ButtonBase& button);
     void new_game();
     void tick();

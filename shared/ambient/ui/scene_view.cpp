@@ -16,6 +16,7 @@
 #include <functional>
 #include <span>
 #include <sstream>
+#include "stable_ids.hpp"
 
 namespace ambient {
 namespace {
@@ -114,7 +115,7 @@ class HelpCard final : public gf::Control {
             event.handled = true;
         }
     }
-    void on_detaching_from_window(gf::Window& window) noexcept override {
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override {
         if (image_.value)
             static_cast<void>(window.remove_image(image_));
         image_ = {};
@@ -129,12 +130,12 @@ class HelpCard final : public gf::Control {
 SceneView::SceneView(gf::StableId id, HostSetup setup, std::unique_ptr<Scenery> scenery, ViewOptions options)
     : Control(std::move(id)), setup_(std::move(setup)), scenery_(std::move(scenery)), options_(options) {
     front_ = !options_.hosted;
-    set_focusable(true);
+    focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     gf::SurfaceMaterial plain;
     plain.fills = {gf::MaterialFillLayer::solid(backdrop_color(setup_.backdrop))};
     set_authored_surface_material(plain);
-    set_accessible_name(setup_.accessible_name);
+    accessible_name = setup_.accessible_name;
     trace_.on = std::getenv("GAMES_SCENE_TRACE") != nullptr;
     restore();
     update_limits();
@@ -145,8 +146,8 @@ SceneView::~SceneView() = default;
 
 // Children join once the view is owned (initialize_tree_after_construction).
 void SceneView::initialize_control_tree() {
-    card_ = gf::make_control<HelpCard>(gf::StableId(setup_.id + ".help_card"));
-    (*card_).set_visible(false);
+    card_ = gf::make_control<HelpCard>(games::stable_id(setup_.id + ".help_card"));
+    (*card_).visible = false;
     (*card_).close = std::bind_front(&SceneView::set_help, this, false);
     add_child(card_);
 }
@@ -163,7 +164,7 @@ void SceneView::on_attached_to_window() {
     request_frame();
 }
 
-void SceneView::on_detaching_from_window(gf::Window&) noexcept {
+void SceneView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
     try {
         persist();
         report_trace();
@@ -236,7 +237,8 @@ bool SceneView::scene_ready() const {
 
 SceneContext SceneView::context() {
     SceneContext result{governor_, sound_, settings_, scene_time_, reduced_, settings_.paused,
-                        sound_on_ && front_ && visible(), 0, false};
+                        sound_on_ && front_ && visible.read(), 0, false};
+    result.keys = help_open_ ? nullptr : this;
     return result;
 }
 
@@ -274,7 +276,7 @@ void SceneView::on_paint(gf::Painter& painter, gf::Rect) {
 
 void SceneView::request_frame() {
     render_dirty_ = true;
-    if (!timer_ || !visible() || !front_)
+    if (!timer_ || !visible.read() || !front_)
         return;
     if (!(*timer_).enabled())
         last_tick_ = Clock::now();
@@ -283,15 +285,15 @@ void SceneView::request_frame() {
 }
 
 bool SceneView::animating() const {
-    const bool result = scene_ready() && !settings_.paused && front_ && visible();
+    const bool result = scene_ready() && !settings_.paused && front_ && visible.read();
     return result;
 }
 
 void SceneView::tick() {
     // A scene that could not be opened says so on the card.
-    if (card_ && !(*card_).visible() && !(*scenery_).failure().empty())
+    if (card_ && !(*card_).visible.read() && !(*scenery_).failure().empty())
         update_card();
-    if (!visible() || !front_) {
+    if (!visible.read() || !front_) {
         if (timer_)
             (*timer_).stop();
         return;
@@ -532,7 +534,7 @@ void SceneView::update_card() {
     if (!card_)
         return;
     if (!shown || window == nullptr) {
-        (*card_).set_visible(false);
+        (*card_).visible = false;
         card_key_.clear();
         return;
     }
@@ -542,14 +544,14 @@ void SceneView::update_card() {
         int width = 0, height = 0, left = 0, top = 0;
         const std::vector<std::byte> pixels = render_card(width, height, left, top);
         if (pixels.empty()) {
-            (*card_).set_visible(false);
+            (*card_).visible = false;
             return;
         }
         (*card_).show(*window, pixels, width, height);
         set_child_layout(card_, {left / scale_, top / scale_, width / scale_, height / scale_});
         card_key_ = key;
     }
-    (*card_).set_visible(true);
+    (*card_).visible = true;
 }
 
 
@@ -598,7 +600,7 @@ void SceneView::on_pointer(gf::PointerEvent& event) {
             request_frame();
             event.handled = true;
         } else if (!dragging_) {
-            set_cursor(live && (*scenery_).grabbable(x, y) ? gf::CursorKind::hand : gf::CursorKind::arrow);
+            cursor = live && (*scenery_).grabbable(x, y) ? gf::CursorKind::hand : gf::CursorKind::arrow;
         }
     } else if (event.action == gf::PointerAction::down && event.button == gf::PointerButton::primary) {
         activate();
@@ -617,7 +619,7 @@ void SceneView::on_pointer(gf::PointerEvent& event) {
         request_frame();
         event.handled = true;
     } else if (event.action == gf::PointerAction::leave && !dragging_) {
-        set_cursor(gf::CursorKind::arrow);
+        cursor = gf::CursorKind::arrow;
     }
     finish(work);
 }
@@ -627,15 +629,11 @@ void SceneView::on_key(gf::KeyEvent& event) {
         return;
     using Key = gf::PhysicalKey;
     const std::uint32_t key = event.physical_key;
-    if (!help_open_ && !event.repeat) {
-        SceneContext work = context();
-        const bool taken = (*scenery_).hold_key(key, event.action == gf::KeyAction::down, work);
-        finish(work);
-        if (taken) {
-            event.handled = true;
-            request_frame();
-            return;
-        }
+    if (!help_open_ && (*scenery_).steers_with(key)) {
+        // the scene reads the key's state as it advances (key_held); a frame shows it
+        event.handled = true;
+        request_frame();
+        return;
     }
     if (event.action != gf::KeyAction::down)
         return;
@@ -723,7 +721,7 @@ void SceneView::run_command(std::string_view id) {
 }
 
 bool SceneView::scripted_action(std::string_view action) {
-    if (!options_.dev || !front_ || !visible())
+    if (!options_.dev || !front_ || !visible.read())
         return false;
     std::istringstream input{std::string(action)};
     std::string verb{};
