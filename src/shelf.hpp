@@ -1,4 +1,5 @@
 #pragma once
+#include "gui_forms/paint_framebuffer.hpp"
 #include "gui_forms/timer.hpp"
 #include "suite.hpp"
 #include "suite_model.hpp"
@@ -31,9 +32,36 @@ class ShelfBox final : public gf::Button {
     std::function<void()> wake;
 
   private:
+    // What the cached picture was painted for; any difference paints it again.
+    struct PictureKey final {
+        double width = 0;
+        double height = 0;
+        double scale = 0;
+        double lift = 0;
+        bool selected = false;
+        bool focus_cue = false;
+        const void* theme = nullptr;
+    };
+    [[nodiscard]] static bool same_picture(const PictureKey& a, const PictureKey& b);
+    // The box as drawn: shadow, sides, cover art, title and rim, in box coordinates.
+    void paint_box(gf::Painter& painter);
+    // Paints the box into the cached window image for `key`; false when it cannot (the
+    // box is then painted directly).
+    bool refresh_picture(const PictureKey& key);
+    void release_picture();
+
     Entry entry_;
     TextSprites& sprites_;
     double lift_ = 0;
+    // The cached picture: the box painted once into a window image at device scale, so a
+    // scroll frame draws one image per box instead of its blurred shadow, gradients and
+    // lettering. Owned by this box: the image lives in its window's registry until
+    // replaced or released, the framebuffer is reused while the size holds. While the box
+    // lifts or settles (lift between its rest values) it is painted directly.
+    std::unique_ptr<gf::PaintFramebuffer> picture_frame_;
+    gf::ImageId picture_{};
+    gf::Window* picture_window_ = nullptr;
+    PictureKey picture_key_{};
 };
 
 // One of the shelf's scroll arrows: a plump candy arrow in the game bar's smoky blue,

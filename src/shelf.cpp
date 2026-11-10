@@ -127,7 +127,72 @@ bool ShelfBox::step(double dt, bool reduced) {
     }
     return moving;
 }
+bool ShelfBox::same_picture(const PictureKey& a, const PictureKey& b) {
+    const bool same = a.width == b.width && a.height == b.height && a.scale == b.scale && a.lift == b.lift &&
+                      a.selected == b.selected && a.focus_cue == b.focus_cue && a.theme == b.theme;
+    return same;
+}
+void ShelfBox::release_picture() {
+    if (picture_.value && picture_window_ != nullptr && picture_window_ == attached_window())
+        static_cast<void>((*picture_window_).remove_image(picture_));
+    picture_ = {};
+    picture_window_ = nullptr;
+    picture_key_ = {};
+}
+bool ShelfBox::refresh_picture(const PictureKey& key) {
+    gf::Window* window = attached_window();
+    if (window == nullptr || key.width < 1 || key.height < 1)
+        return false;
+    if (picture_.value && picture_window_ == window && same_picture(key, picture_key_))
+        return true;
+    const bool same_extent = picture_frame_ && key.width == picture_key_.width &&
+                             key.height == picture_key_.height && key.scale == picture_key_.scale;
+    release_picture();
+    if (!same_extent)
+        picture_frame_ = (*window).create_framebuffer({key.width, key.height}, key.scale);
+    if (!picture_frame_)
+        return false;
+    gf::PaintFramebuffer& frame = *picture_frame_;
+    const gf::Rect whole{0, 0, key.width, key.height};
+    // The buffer survives begin/end: it is cleared to transparent before each picture.
+    const std::span<std::byte> cleared = frame.pixels();
+    std::fill(cleared.begin(), cleared.end(), std::byte{0});
+    if (!frame.begin((*window).image_resources(), whole))
+        return false;
+    paint_box(frame.painter());
+    frame.end();
+    const std::span<std::byte> pixels = frame.pixels();
+    const gf::ImageLoadResult loaded = (*window).load_bgra32_premultiplied(
+        frame.width(), frame.height(), static_cast<std::uint64_t>(frame.row_bytes()), pixels);
+    if (!loaded)
+        return false;
+    picture_ = loaded.image;
+    picture_window_ = window;
+    picture_key_ = key;
+    return true;
+}
 void ShelfBox::on_paint(gf::Painter& p, gf::Rect) {
+    const gf::Rect b = client_rectangle();
+    gf::Window* window = attached_window();
+    // Cached only at rest: lift at one of the values step() settles on.
+    const bool resting = lift_ == 0 || lift_ == .55 || lift_ == 1;
+    if (window != nullptr && resting) {
+        PictureKey key;
+        key.width = b.width;
+        key.height = b.height;
+        key.scale = (*window).scale();
+        key.lift = lift_;
+        key.selected = selected.read();
+        key.focus_cue = focus_cue_visible();
+        key.theme = (*window).theme_ptr().get();
+        if (refresh_picture(key)) {
+            p.draw_image(picture_, b);
+            return;
+        }
+    }
+    paint_box(p);
+}
+void ShelfBox::paint_box(gf::Painter& p) {
     const EntryInfo& info = entry_info(entry_);
     const gf::Rect b = client_rectangle();
     const double h = b.height - kLiftRoom, depth = std::max(4.0, b.width * .07);
