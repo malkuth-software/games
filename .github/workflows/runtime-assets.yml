@@ -91,7 +91,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: malkuth-software/gui_forms
-          ref: ffbdc2a775a9289eef142d131db3c91bac36faac
+          ref: 757db03a7be63d7dabcf1803c5c9668e0ace61e0
           path: gui_forms
       - uses: actions/setup-python@v5
         if: runner.os == 'Windows'
