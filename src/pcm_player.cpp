@@ -63,7 +63,10 @@ void PcmPlayer::create_voice(Slot& slot) {
         if (!balanced.clip) { report(balanced.status, "pan"); return; }
         playback = balanced.clip;
     }
-    const gui_forms::AudioStatus admitted = engine_.voice(playback, slot.loop, slot.voice, !slot.loop);
+    // A fixed-rate voice refuses every rate but 1 (AudioVoice::set_rate: invalid_value), so a
+    // loop that has been asked for another rate is made pitch-enabled.
+    slot.pitched = !slot.loop || slot.rate != 1 || slot.pitched;
+    const gui_forms::AudioStatus admitted = engine_.voice(playback, slot.loop, slot.voice, slot.pitched);
     report(admitted, slot.name);
     slot.voice_ready = admitted == gui_forms::AudioStatus::ok;
     if (!slot.voice_ready) { return; }
@@ -100,6 +103,7 @@ void PcmPlayer::start(std::size_t index, const std::string& name, bool loop, dou
     slot.rate = rate;
     slot.pan = std::clamp(pan, -1.0, 1.0);
     slot.paused = false;
+    slot.pitched = false;
     if (slot.clip) {
         slot.voice = gui_forms::AudioVoice{};
         create_voice(slot);
@@ -130,8 +134,18 @@ void PcmPlayer::gain(std::size_t index, double value) {
 void PcmPlayer::rate(std::size_t index, double value) {
     Slot& slot = slots_.at(index);
     slot.rate = value;
-    if (slot.voice_ready && engine_.status() == gui_forms::AudioStatus::ok)
-        report(slot.voice.set_rate(value), "rate");
+    if (!slot.voice_ready || engine_.status() != gui_forms::AudioStatus::ok)
+        return;
+    if (!slot.pitched && value != 1) {
+        // A fixed-rate loop asked for another rate: made again, pitch-enabled, once; the loop
+        // restarts from its beginning that one time.
+        slot.pitched = true;
+        slot.voice = gui_forms::AudioVoice{};
+        slot.voice_ready = false;
+        create_voice(slot);
+        return;
+    }
+    report(slot.voice.set_rate(value), "rate");
 }
 void PcmPlayer::pause(std::size_t index) {
     Slot& slot = slots_.at(index);

@@ -58,6 +58,9 @@ private:
         std::shared_ptr<gui_forms::CancellationFlag> cancellation{};
         bool voice_ready{};
         bool loop{}, paused{};
+        // The voice was made pitch-enabled. One-shots always are; a loop is made fixed-rate
+        // (exact sample positions) until a rate other than 1 is asked of it.
+        bool pitched{};
         double gain{1}, rate{1}, pan{};
     };
     gui_forms::AudioEngine engine_{};
