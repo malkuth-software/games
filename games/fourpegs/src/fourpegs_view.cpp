@@ -561,6 +561,14 @@ void FourPegsView::on_mouse_click(gf::MouseEventArgs& e) {
     if (is_alive()) gf::Control::on_mouse_click(e);
 }
 
+// The view's capture ends after the release's click, when the press is already
+// over, or while the press is still down when it is lost (set_pointer_capture(false),
+// a system cancel): then the drag is cancelled and nothing is dropped.
+void FourPegsView::on_mouse_capture_changed() {
+    if (mouse_down_) cancel_drag();
+    gf::Control::on_mouse_capture_changed();
+}
+
 // A click on the console: a palette peg fills the next empty socket (or the
 // socket chosen first); a socket takes the chosen peg or empties; CHECK
 // checks; he can be prodded.

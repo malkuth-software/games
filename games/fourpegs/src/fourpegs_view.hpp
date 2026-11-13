@@ -43,6 +43,7 @@ public:
     void on_mouse_move(gf::MouseEventArgs& e) override;
     void on_mouse_leave() override;
     void on_mouse_click(gf::MouseEventArgs& e) override;
+    void on_mouse_capture_changed() override;
     void on_key_down(gf::KeyEventArgs& e) override;
     void on_key_bubble(gf::KeyEvent& e) override;
     void on_key_press(gf::KeyPressEventArgs& e) override;

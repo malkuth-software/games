@@ -584,7 +584,16 @@ int main() {
             // The same corner link and shortcuts work over every render path.
             const std::shared_ptr<gf::Button> help = button(*collection, "collection.help");
             assert(help && (*help).visible.read());
+            // The link must be what the press finds there; a game control laid over it
+            // would take the click. Say which game and which control, then fail.
+            const gf::Control::Ptr under = window.hit_test((*help).point_to_window({18, 18}));
+            if (under != help)
+                std::cerr << "collection_ui: over " << entry_info(entry).title << ", the help link's press goes to "
+                          << (under ? std::string((*under).stable_id().value()) : std::string("nothing")) << '\n';
             click(window, *help, {18, 18});
+            if (!(*collection).help_open())
+                std::cerr << "collection_ui: the help link did not open help over " << entry_info(entry).title
+                          << '\n';
             assert((*collection).help_open());
             window.perform_layout();
             painter.text_seen.clear();
