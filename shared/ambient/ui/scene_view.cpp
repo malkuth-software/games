@@ -91,9 +91,9 @@ Detail next_detail(Detail detail) {
 
 // The help card: a picture of the card, made by the view, laid over the scene. It
 // takes a click to close.
-class HelpCard final : public gf::Control {
+class HelpCard final : public games::RoutedInput<gf::Control> {
   public:
-    explicit HelpCard(gf::StableId id) : Control(std::move(id)) {
+    explicit HelpCard(gf::StableId id) : games::RoutedInput<gf::Control>(std::move(id)) {
         set_paint_plane(gf::PaintPlane::overlay);
     }
     std::function<void()> close{};
@@ -109,7 +109,7 @@ class HelpCard final : public gf::Control {
         if (image_.value)
             painter.draw_image(image_, client_rectangle());
     }
-    void on_pointer(gf::PointerEvent& event) override {
+    void handle_pointer(gf::PointerEvent& event) override {
         if (event.action == gf::PointerAction::down && event.button == gf::PointerButton::primary && close) {
             close();
             event.handled = true;
@@ -128,7 +128,7 @@ class HelpCard final : public gf::Control {
 // ---------------------------------------------------------------- construction
 
 SceneView::SceneView(gf::StableId id, HostSetup setup, std::unique_ptr<Scenery> scenery, ViewOptions options)
-    : Control(std::move(id)), setup_(std::move(setup)), scenery_(std::move(scenery)), options_(options) {
+    : games::RoutedInput<gf::Control>(std::move(id)), setup_(std::move(setup)), scenery_(std::move(scenery)), options_(options) {
     front_ = !options_.hosted;
     focusable = true;
     set_style(gf::ControlStyles::opaque, true);
@@ -585,7 +585,7 @@ void SceneView::set_help(bool open) {
     request_frame();
 }
 
-void SceneView::on_pointer(gf::PointerEvent& event) {
+void SceneView::handle_pointer(gf::PointerEvent& event) {
     const gf::Point local = point_from_window(event.position);
     const gf::Rect bounds = client_rectangle();
     if (bounds.width <= 0 || bounds.height <= 0)
@@ -624,7 +624,7 @@ void SceneView::on_pointer(gf::PointerEvent& event) {
     finish(work);
 }
 
-void SceneView::on_key(gf::KeyEvent& event) {
+void SceneView::handle_key(gf::KeyEvent& event) {
     if (event.handled)
         return;
     using Key = gf::PhysicalKey;

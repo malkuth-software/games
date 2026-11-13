@@ -207,7 +207,7 @@ CardFaceMap print_face(int width, int height, double density, double grain, std:
 }  // namespace
 
 BusinessCard::BusinessCard(gf::StableId id, Kind kind)
-    : Control(std::move(id)), kind_(kind),
+    : games::RoutedInput<gf::Control>(std::move(id)), kind_(kind),
       remarks_(static_cast<std::uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count())) {
     set_paint_plane(gf::PaintPlane::overlay);
     focusable = true;
@@ -762,7 +762,7 @@ void BusinessCard::unhover() {
     wake();
 }
 
-void BusinessCard::on_pointer(gf::PointerEvent& e) {
+void BusinessCard::handle_pointer(gf::PointerEvent& e) {
     const gf::Point local = point_from_window(e.position);
     now_ = clock();
     if (e.action == gf::PointerAction::wheel) {
@@ -852,7 +852,7 @@ void BusinessCard::on_pointer(gf::PointerEvent& e) {
     }
 }
 
-void BusinessCard::on_key(gf::KeyEvent& e) {
+void BusinessCard::handle_key(gf::KeyEvent& e) {
     if (e.handled || e.action != gf::KeyAction::down)
         return;
     const bool activate = e.physical_key == gf::PhysicalKey::enter || e.physical_key == gf::PhysicalKey::space;

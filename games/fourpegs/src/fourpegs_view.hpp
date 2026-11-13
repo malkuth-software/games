@@ -14,6 +14,7 @@
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
 #include "gui_forms/window.hpp"
+#include "routed_input.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -29,7 +30,7 @@ struct Options {
     bool hosted = false;  // a host shell supplies New, Help, Top scores and the audio switches
 };
 
-class FourPegsView final : public gf::Control {
+class FourPegsView final : public games::RoutedInput<gf::Control> {
 public:
     bool editing_name() const { return panel_ == Panel::name; }
     FourPegsView(gf::StableId id, Options opt);
@@ -37,9 +38,9 @@ public:
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& p, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& e) override;
-    void on_key(gf::KeyEvent& e) override;
-    void on_key_bubble(gf::KeyEvent& e) override { on_key(e); }
+    void handle_pointer(gf::PointerEvent& e) override;
+    void handle_key(gf::KeyEvent& e) override;
+    void on_key_bubble(gf::KeyEvent& e) override { handle_key(e); }
     void on_text_input(gf::TextInputEvent& e) override;
     void activate();
     // Cabinet hosting: the collection's master switches gate this game's own

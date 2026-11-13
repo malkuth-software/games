@@ -43,7 +43,7 @@ int size_index(int n) {
 
 }  // namespace
 
-SpecimenCabinetView::SpecimenCabinetView(gf::StableId id, Options options) : Control(std::move(id)), options_(options) {
+SpecimenCabinetView::SpecimenCabinetView(gf::StableId id, Options options) : games::RoutedInput<gf::Control>(std::move(id)), options_(options) {
     front_ = !options_.hosted;
     focusable = true;
     set_style(gf::ControlStyles::opaque, true);
@@ -573,7 +573,7 @@ void SpecimenCabinetView::cancel_press() {
 
 // ---------------------------------------------------------------- input
 
-void SpecimenCabinetView::on_pointer(gf::PointerEvent& event) {
+void SpecimenCabinetView::handle_pointer(gf::PointerEvent& event) {
     const gf::Point local = point_from_window(event.position);
     const double x = local.x;
     const double y = local.y;
@@ -672,7 +672,7 @@ void SpecimenCabinetView::on_pointer(gf::PointerEvent& event) {
     }
 }
 
-void SpecimenCabinetView::on_key(gf::KeyEvent& event) {
+void SpecimenCabinetView::handle_key(gf::KeyEvent& event) {
     if (event.handled || event.action != gf::KeyAction::down)
         return;
     using Key = gf::PhysicalKey;

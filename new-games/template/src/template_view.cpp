@@ -32,7 +32,7 @@ std::string size_label(int side) {
 }  // namespace
 
 TemplateView::TemplateView(gf::StableId id, Options options)
-    : Control(std::move(id)), options_(options) {
+    : games::RoutedInput<gf::Control>(std::move(id)), options_(options) {
     front_ = !options_.hosted;
     focusable = true;
     set_style(gf::ControlStyles::opaque, true);
@@ -312,7 +312,7 @@ void TemplateView::move_cursor(int rows, int columns) {
 
 // ---------------------------------------------------------------- input
 
-void TemplateView::on_pointer(gf::PointerEvent& event) {
+void TemplateView::handle_pointer(gf::PointerEvent& event) {
     const gf::Point local = point_from_window(event.position);
     const int under = visual_.help ? -1 : pick_cell(layout_, session_.board.side, local.x, local.y);
     if (event.action == gf::PointerAction::move || event.action == gf::PointerAction::leave) {
@@ -338,7 +338,7 @@ void TemplateView::on_pointer(gf::PointerEvent& event) {
     }
 }
 
-void TemplateView::on_key(gf::KeyEvent& event) {
+void TemplateView::handle_key(gf::KeyEvent& event) {
     if (event.handled || event.action != gf::KeyAction::down) {
         return;
     }

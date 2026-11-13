@@ -1,5 +1,5 @@
 #pragma once
-#include "gui_forms/controls/scrollable_control/scrollable_control.hpp"
+#include "gui_forms/controls/scrollable_control.hpp"
 #include "business_card.hpp"
 #include "paper_sheet.hpp"
 #include "suite.hpp"
@@ -22,6 +22,9 @@ class HelpPages final : public gf::ScrollableControl {
     void initialize_control_tree();
     void arrange(gf::Rect bounds) override;
     void on_key_bubble(gf::KeyEvent& event) override;
+    // A wheel turned over the business card, which lies over the pages: the pages scroll
+    // as under a wheel turned over them (ScrollableControl's own wheel handling).
+    void wheel_from_card(gf::PointerEvent& event);
     void select(int entry, std::string_view topic);
     // Where the business card rests beside the front lines, in these pages' visible points:
     // its middle and width, and how far above the pages it may still be seen. Told on every

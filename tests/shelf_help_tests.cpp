@@ -124,7 +124,7 @@ int main() {
             gf::PointerEvent wheel;
             wheel.action = gf::PointerAction::wheel;
             wheel.wheel_delta = {0, -3};
-            (*rows).on_pointer(wheel);
+            (*rows).wheel(wheel);
             window.perform_layout();
             // A wheel notch glides: nothing moves until the clock steps.
             assert(wheel.handled && (*rows).scroll_offset() == 0);
@@ -140,7 +140,7 @@ int main() {
             pan.wheel_unit = gf::WheelDeltaUnit::pixels;
             pan.wheel_delta = {0, 10};
             const double settled = (*rows).scroll_offset();
-            (*rows).on_pointer(pan);
+            (*rows).wheel(pan);
             assert(pan.handled && (*rows).scroll_offset() == settled - 10);
         }
     }

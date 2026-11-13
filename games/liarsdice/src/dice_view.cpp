@@ -35,7 +35,7 @@ const char* danger_word(int d) { return d <= 1 ? "easy pickings" : d == 2 ? "a s
 std::string a_an(const std::string& w) { return (w.empty() || std::strchr("aeiou", w[0]) == nullptr ? "a " : "an ") + w; }
 }  // namespace
 
-DiceView::DiceView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt) {
+DiceView::DiceView(gf::StableId id, Options opt) : games::RoutedInput<gf::Control>(std::move(id)), opt_(opt) {
     cab_front_ = !opt_.hosted;
     focusable = true;
     set_style(gf::ControlStyles::opaque, true);
@@ -640,7 +640,7 @@ void DiceView::publish() {
 }
 
 // ------------------------------------------------------------------ input
-void DiceView::on_pointer(gf::PointerEvent& e) {
+void DiceView::handle_pointer(gf::PointerEvent& e) {
     const gf::Point local = point_from_window(e.position);
     mouse_x_ = local.x / pixel_;
     mouse_y_ = local.y / pixel_;
@@ -667,7 +667,7 @@ void DiceView::on_pointer(gf::PointerEvent& e) {
     }
 }
 
-void DiceView::on_key(gf::KeyEvent& e) {
+void DiceView::handle_key(gf::KeyEvent& e) {
     if (e.handled || e.action != gf::KeyAction::down) return;
     using K = gf::PhysicalKey;
     const std::uint32_t k = e.physical_key;

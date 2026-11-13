@@ -11,9 +11,10 @@
 #include "gui_forms/basic_controls.hpp"
 
 #include <array>
-#include "gui_forms/controls/panel/text_box/text_box.hpp"
+#include "gui_forms/controls/text_box.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
+#include "routed_input.hpp"
 
 #include <chrono>
 #include <future>
@@ -30,16 +31,16 @@ struct Options {
     bool dev = false;   // a separate save; ZC_SCRIPT allowed
 };
 
-class ZenView final : public gf::Control, public games::CommandSource {
+class ZenView final : public games::RoutedInput<gf::Control>, public games::CommandSource {
 public:
     ZenView(gf::StableId id, Options options);
     static constexpr bool initialize_tree_after_construction = true;
     void initialize_control_tree();
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& event) override;
-    void on_key(gf::KeyEvent& event) override;
-    void on_key_bubble(gf::KeyEvent& event) override { on_key(event); }
+    void handle_pointer(gf::PointerEvent& event) override;
+    void handle_key(gf::KeyEvent& event) override;
+    void on_key_bubble(gf::KeyEvent& event) override { handle_key(event); }
     void activate();
     // in the cabinet: whether this game is in front, and the master switches
     void set_cabinet(bool foreground, bool music, bool sound, bool reduced = false);

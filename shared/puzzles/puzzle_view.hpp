@@ -1,10 +1,11 @@
 #pragma once
 #include "gui_forms/basic_controls.hpp"
-#include "gui_forms/controls/panel/text_box/text_box.hpp"
+#include "gui_forms/controls/text_box.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/paint_framebuffer.hpp"
 #include "gui_forms/resources.hpp"
 #include "gui_forms/timer.hpp"
+#include "routed_input.hpp"
 #include "kitten.hpp"
 #include "gem_art.hpp"
 #include "puzzle_render.hpp"
@@ -20,15 +21,15 @@
 namespace games {
 namespace gf = gui_forms;
 class PuzzleScenePart;
-class PuzzleView final : public gf::Control, public CommandSource {
+class PuzzleView final : public games::RoutedInput<gf::Control>, public CommandSource {
   public:
     PuzzleView(gf::StableId id, PuzzleKind kind);
     static constexpr bool initialize_tree_after_construction = true;
     void initialize_control_tree();
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& p, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& e) override;
-    void on_key(gf::KeyEvent& e) override;
+    void handle_pointer(gf::PointerEvent& e) override;
+    void handle_key(gf::KeyEvent& e) override;
     void on_key_bubble(gf::KeyEvent& e) override;
     void on_text_input(gf::TextInputEvent& e) override;
     void activate();

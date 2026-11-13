@@ -103,7 +103,7 @@ gf::ImageId load_image(gf::Window& window, const std::string& name) {
     return result.image;
 }
 } // namespace
-Table::Table(gf::StableId id) : Control(std::move(id)) {
+Table::Table(gf::StableId id) : games::RoutedInput<gf::Control>(std::move(id)) {
     focusable = true;
     accessible_name = "Card table. Arrow keys choose piles, Enter selects or places, H hints, "
                         "Space deals, Z undoes, F1 opens help.";
@@ -1937,7 +1937,7 @@ void Table::select_or_move(int pile, int index) {
     }
     invalidate(gf::Dirty::paint);
 }
-void Table::on_pointer(gf::PointerEvent& e) {
+void Table::handle_pointer(gf::PointerEvent& e) {
     const gf::Point local_position = point_from_window(e.position);
     if (cascading_ && e.action == gf::PointerAction::down) {
         finish_cascade();
@@ -2114,14 +2114,14 @@ void Table::heart_continue() {
     }
 }
 void Table::on_key_bubble(gf::KeyEvent& e) {
-    on_key(e);
+    handle_key(e);
 }
 void Table::on_key_preview(gf::KeyEvent& e) {
     if (e.action == gf::KeyAction::down &&
         (e.physical_key == gf::PhysicalKey::f1 || e.physical_key == gf::PhysicalKey::escape))
-        on_key(e);
+        handle_key(e);
 }
-void Table::on_key(gf::KeyEvent& e) {
+void Table::handle_key(gf::KeyEvent& e) {
     if (cascading_ && e.action == gf::KeyAction::down) {
         finish_cascade();
         e.handled = true;

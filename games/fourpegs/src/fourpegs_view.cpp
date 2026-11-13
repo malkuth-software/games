@@ -46,7 +46,7 @@ void mini_symbol(Canvas& c, int color, double x, double y, double r, Col col) {
 }
 }  // namespace
 
-FourPegsView::FourPegsView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt), board_(seed_now()), actor_(seed_now() ^ 0x5EED) {
+FourPegsView::FourPegsView(gf::StableId id, Options opt) : games::RoutedInput<gf::Control>(std::move(id)), opt_(opt), board_(seed_now()), actor_(seed_now() ^ 0x5EED) {
     focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     {
@@ -447,7 +447,7 @@ void FourPegsView::publish() {
 }
 
 // ------------------------------------------------------------------ input
-void FourPegsView::on_pointer(gf::PointerEvent& e) {
+void FourPegsView::handle_pointer(gf::PointerEvent& e) {
     const gf::Point local = point_from_window(e.position);
     mouse_x_ = local.x / pixel_;
     mouse_y_ = local.y / pixel_;
@@ -546,7 +546,7 @@ void FourPegsView::on_pointer(gf::PointerEvent& e) {
     }
 }
 
-void FourPegsView::on_key(gf::KeyEvent& e) {
+void FourPegsView::handle_key(gf::KeyEvent& e) {
     if (e.handled) return;
     using K = gf::PhysicalKey;
     if (e.action != gf::KeyAction::down) return;

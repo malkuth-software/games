@@ -44,7 +44,7 @@ const char* kind_line(Smarts s) {
 }
 }  // namespace
 
-SheepView::SheepView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt) {
+SheepView::SheepView(gf::StableId id, Options opt) : games::RoutedInput<gf::Control>(std::move(id)), opt_(opt) {
     cab_front_ = !opt_.hosted;
     focusable = true;
     set_style(gf::ControlStyles::opaque, true);
@@ -512,7 +512,7 @@ void SheepView::publish() {
 }
 
 // ------------------------------------------------------------------ input
-void SheepView::on_pointer(gf::PointerEvent& e) {
+void SheepView::handle_pointer(gf::PointerEvent& e) {
     const gf::Point local = point_from_window(e.position);
     mouse_x_ = local.x / pixel_;
     mouse_y_ = local.y / pixel_;
@@ -544,7 +544,7 @@ void SheepView::on_pointer(gf::PointerEvent& e) {
     }
 }
 
-void SheepView::on_key(gf::KeyEvent& e) {
+void SheepView::handle_key(gf::KeyEvent& e) {
     if (e.handled || e.action != gf::KeyAction::down) return;
     using K = gf::PhysicalKey;
     const std::uint32_t k = e.physical_key;

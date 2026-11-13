@@ -21,6 +21,7 @@
 
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/timer.hpp"
+#include "routed_input.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -50,7 +51,7 @@ struct HostSetup {
 
 class HelpCard;
 
-class SceneView : public gf::Control, public games::CommandSource {
+class SceneView : public games::RoutedInput<gf::Control>, public games::CommandSource {
   public:
     SceneView(gf::StableId id, HostSetup setup, std::unique_ptr<Scenery> scenery, ViewOptions options);
     ~SceneView() override;
@@ -58,10 +59,10 @@ class SceneView : public gf::Control, public games::CommandSource {
     void initialize_control_tree();
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& event) override;
-    void on_key(gf::KeyEvent& event) override;
+    void handle_pointer(gf::PointerEvent& event) override;
+    void handle_key(gf::KeyEvent& event) override;
     void on_key_bubble(gf::KeyEvent& event) override {
-        on_key(event);
+        handle_key(event);
     }
 
     void activate();

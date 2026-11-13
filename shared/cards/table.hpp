@@ -3,8 +3,9 @@
 #include "dealer.hpp"
 #include "game.hpp"
 #include "gui_forms/basic_controls.hpp"
-#include "gui_forms/controls/panel/text_box/text_box.hpp"
+#include "gui_forms/controls/text_box.hpp"
 #include "gui_forms/timer.hpp"
+#include "routed_input.hpp"
 #include "storage.hpp"
 #include "suite.hpp"
 #include "suite_settings.hpp"
@@ -21,7 +22,7 @@ struct Sprite {
     double lift = 0;  // 0 on the table .. 1 at the top of its arc, as it moves
     double arc = .45; // how high a move that does not turn the card rises (a short one barely)
 };
-class Table final : public gf::Control, public CommandSource {
+class Table final : public games::RoutedInput<gf::Control>, public CommandSource {
   public:
     explicit Table(gf::StableId id);
     static constexpr bool initialize_tree_after_construction = true;
@@ -29,8 +30,8 @@ class Table final : public gf::Control, public CommandSource {
     void initialize_control_tree();
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& event) override;
-    void on_key(gf::KeyEvent& event) override;
+    void handle_pointer(gf::PointerEvent& event) override;
+    void handle_key(gf::KeyEvent& event) override;
     void on_key_preview(gf::KeyEvent& event) override;
     void on_key_bubble(gf::KeyEvent& event) override;
     Game game;

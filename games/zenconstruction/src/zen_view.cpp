@@ -89,7 +89,7 @@ const char* const kJiggle[] = {"A good shake!", "Let's see what's underneath."};
 
 }  // namespace
 
-ZenView::ZenView(gf::StableId id, Options options) : Control(std::move(id)), options_(options) {
+ZenView::ZenView(gf::StableId id, Options options) : games::RoutedInput<gf::Control>(std::move(id)), options_(options) {
     focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     {
@@ -852,7 +852,7 @@ void ZenView::name_cancelled() {
     }
 }
 
-void ZenView::on_pointer(gf::PointerEvent& e) {
+void ZenView::handle_pointer(gf::PointerEvent& e) {
     const gf::Point local = point_from_window(e.position);
     mx_ = local.x;
     my_ = local.y;
@@ -918,7 +918,7 @@ void ZenView::on_pointer(gf::PointerEvent& e) {
     }
 }
 
-void ZenView::on_key(gf::KeyEvent& e) {
+void ZenView::handle_key(gf::KeyEvent& e) {
     if (e.handled) {
         return;
     }

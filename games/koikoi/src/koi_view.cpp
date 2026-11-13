@@ -38,7 +38,7 @@ int group_of(int c) {
 }
 }  // namespace
 
-KoiView::KoiView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt) {
+KoiView::KoiView(gf::StableId id, Options opt) : games::RoutedInput<gf::Control>(std::move(id)), opt_(opt) {
     cab_front_ = !opt_.hosted;
     focusable = true;
     set_style(gf::ControlStyles::opaque, true);
@@ -675,7 +675,7 @@ void KoiView::publish() {
 }
 
 // ------------------------------------------------------------------ input
-void KoiView::on_pointer(gf::PointerEvent& e) {
+void KoiView::handle_pointer(gf::PointerEvent& e) {
     const gf::Point local = point_from_window(e.position);
     mx_ = local.x;
     my_ = local.y;
@@ -723,7 +723,7 @@ void KoiView::on_pointer(gf::PointerEvent& e) {
     }
 }
 
-void KoiView::on_key(gf::KeyEvent& e) {
+void KoiView::handle_key(gf::KeyEvent& e) {
     if (!e.handled && e.action == gf::KeyAction::down) request_frame();
     if (e.handled || e.action != gf::KeyAction::down) return;
     using K = gf::PhysicalKey;

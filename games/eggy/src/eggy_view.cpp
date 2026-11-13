@@ -53,7 +53,7 @@ const char* biome_lines(Biome b) {
 }
 }  // namespace
 
-EggyView::EggyView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt) {
+EggyView::EggyView(gf::StableId id, Options opt) : games::RoutedInput<gf::Control>(std::move(id)), opt_(opt) {
     focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     {   // we cover every pixel ourselves: no themed background fill underneath
@@ -756,7 +756,7 @@ void EggyView::action(const std::string& id) {
     if (panel_ == Panel::away && id == "close") open(Panel::none);
 }
 
-void EggyView::on_pointer(gf::PointerEvent& e) {
+void EggyView::handle_pointer(gf::PointerEvent& e) {
     const gf::Point local = point_from_window(e.position);
     mouse_x_ = local.x / save_.settings.pixel;
     mouse_y_ = local.y / save_.settings.pixel;
@@ -798,7 +798,7 @@ EggyView::WalkKeys EggyView::held_walk_keys() const {
     return result;
 }
 
-void EggyView::on_key(gf::KeyEvent& e) {
+void EggyView::handle_key(gf::KeyEvent& e) {
     if (e.handled) return;
     using K = gf::PhysicalKey;
     const bool down = e.action == gf::KeyAction::down;

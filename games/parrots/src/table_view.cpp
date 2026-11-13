@@ -57,7 +57,7 @@ std::string read_checked(const std::filesystem::path& p, const std::string& head
 V3 bezier(V3 a, V3 c, V3 b, double t) { return a * ((1 - t) * (1 - t)) + c * (2 * t * (1 - t)) + b * (t * t); }
 }  // namespace
 
-TableView::TableView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt), rng_(seed_now()) {
+TableView::TableView(gf::StableId id, Options opt) : games::RoutedInput<gf::Control>(std::move(id)), opt_(opt), rng_(seed_now()) {
     cab_front_ = !opt_.hosted;
     focusable = true;
     set_style(gf::ControlStyles::opaque, true);
@@ -705,7 +705,7 @@ void TableView::publish() {
 }
 
 // ------------------------------------------------------------------ input
-void TableView::on_pointer(gf::PointerEvent& e) {
+void TableView::handle_pointer(gf::PointerEvent& e) {
     const gf::Point local = point_from_window(e.position);
     mouse_x_ = local.x / pixel_;
     mouse_y_ = local.y / pixel_;
@@ -752,7 +752,7 @@ void TableView::on_pointer(gf::PointerEvent& e) {
     }
 }
 
-void TableView::on_key(gf::KeyEvent& e) {
+void TableView::handle_key(gf::KeyEvent& e) {
     if (e.handled || e.action != gf::KeyAction::down) return;
     using K = gf::PhysicalKey;
     const std::uint32_t k = e.physical_key;

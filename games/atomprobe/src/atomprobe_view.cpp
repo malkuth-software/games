@@ -40,7 +40,7 @@ Col kind_col(Outcome k, int pair) {
 const char* kWords[] = {"one", "two", "three", "four"};
 }  // namespace
 
-AtomProbeView::AtomProbeView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt), box_(seed_now()) {
+AtomProbeView::AtomProbeView(gf::StableId id, Options opt) : games::RoutedInput<gf::Control>(std::move(id)), opt_(opt), box_(seed_now()) {
     focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     {
@@ -544,7 +544,7 @@ void AtomProbeView::publish() {
 }
 
 // ------------------------------------------------------------------ input
-void AtomProbeView::on_pointer(gf::PointerEvent& e) {
+void AtomProbeView::handle_pointer(gf::PointerEvent& e) {
     const gf::Point local = point_from_window(e.position);
     mouse_x_ = local.x / pixel_;
     mouse_y_ = local.y / pixel_;
@@ -588,7 +588,7 @@ void AtomProbeView::on_pointer(gf::PointerEvent& e) {
     }
 }
 
-void AtomProbeView::on_key(gf::KeyEvent& e) {
+void AtomProbeView::handle_key(gf::KeyEvent& e) {
     if (e.handled) return;
     using K = gf::PhysicalKey;
     if (e.action != gf::KeyAction::down) return;

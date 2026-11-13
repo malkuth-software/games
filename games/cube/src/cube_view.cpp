@@ -75,7 +75,7 @@ render::Color rgb(std::uint32_t color) {
 
 }  // namespace
 
-CubeView::CubeView(gf::StableId id, Options options) : Control(std::move(id)), options_(options) {
+CubeView::CubeView(gf::StableId id, Options options) : games::RoutedInput<gf::Control>(std::move(id)), options_(options) {
     front_ = !options_.hosted;
     focusable = true;
     set_style(gf::ControlStyles::opaque, true);
@@ -812,7 +812,7 @@ void CubeView::lean_toward(gf::Point local) {
     request_frame();
 }
 
-void CubeView::on_pointer(gf::PointerEvent& event) {
+void CubeView::handle_pointer(gf::PointerEvent& event) {
     const gf::Point local = point_from_window(event.position);
     if (panel_ != Panel::none) {
         if (event.action == gf::PointerAction::down) {
@@ -957,7 +957,7 @@ void CubeView::confirm_name() {
     request_frame();
 }
 
-void CubeView::on_key(gf::KeyEvent& event) {
+void CubeView::handle_key(gf::KeyEvent& event) {
     if (event.handled || event.action != gf::KeyAction::down) {
         return;
     }

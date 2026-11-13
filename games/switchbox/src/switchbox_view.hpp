@@ -15,6 +15,7 @@
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
+#include "routed_input.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -30,7 +31,7 @@ struct Options {
     bool dev = false;  // separate save file
 };
 
-class SwitchboxView final : public gf::Control {
+class SwitchboxView final : public games::RoutedInput<gf::Control> {
 public:
     bool editing_name() const { return panel_ == Panel::name; }
     SwitchboxView(gf::StableId id, Options opt);
@@ -38,9 +39,9 @@ public:
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& p, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& e) override;
-    void on_key(gf::KeyEvent& e) override;
-    void on_key_bubble(gf::KeyEvent& e) override { on_key(e); }
+    void handle_pointer(gf::PointerEvent& e) override;
+    void handle_key(gf::KeyEvent& e) override;
+    void on_key_bubble(gf::KeyEvent& e) override { handle_key(e); }
     void on_text_input(gf::TextInputEvent& e) override;
     void activate();
     // Cabinet hosting: the collection's master switches gate this game's own

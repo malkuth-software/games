@@ -38,7 +38,7 @@ std::string replace_all(std::string s, const std::string& a, const std::string& 
 }
 }  // namespace
 
-MazeView::MazeView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt) {
+MazeView::MazeView(gf::StableId id, Options opt) : games::RoutedInput<gf::Control>(std::move(id)), opt_(opt) {
     focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     {
@@ -530,7 +530,7 @@ void MazeView::publish() {
 }
 
 // ------------------------------------------------------------------ input
-void MazeView::on_pointer(gf::PointerEvent& e) {
+void MazeView::handle_pointer(gf::PointerEvent& e) {
     const gf::Point local = point_from_window(e.position);
     mouse_x_ = local.x / pixel_;
     mouse_y_ = local.y / pixel_;
@@ -571,7 +571,7 @@ void MazeView::on_pointer(gf::PointerEvent& e) {
     }
 }
 
-void MazeView::on_key(gf::KeyEvent& e) {
+void MazeView::handle_key(gf::KeyEvent& e) {
     if (e.handled) return;
     request_frame();
     if (e.action == gf::KeyAction::down && (e.physical_key == gf::PhysicalKey::h || e.physical_key == gf::PhysicalKey::f1) && games::route_help(*this)) { e.handled = true; return; }

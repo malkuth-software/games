@@ -98,19 +98,40 @@ void ShelfBox::on_focus_changed(bool has_focus) {
     if (has_focus && focused)
         focused(entry_);
 }
-void ShelfBox::on_pointer(gf::PointerEvent& e) {
-    const bool was = hot();
-    gf::Button::on_pointer(e);
+void ShelfBox::wake_if_changed(bool was) {
     // A leave reaches only the box itself, so the shelf's frames start here.
     if (hot() != was && wake)
         wake();
 }
+void ShelfBox::on_mouse_down(gf::MouseEventArgs& arguments) {
+    const bool was = hot();
+    gf::Button::on_mouse_down(arguments);
+    wake_if_changed(was);
+}
+void ShelfBox::on_mouse_up(gf::MouseEventArgs& arguments) {
+    const bool was = hot();
+    gf::Button::on_mouse_up(arguments);
+    wake_if_changed(was);
+}
+void ShelfBox::on_mouse_move(gf::MouseEventArgs& arguments) {
+    const bool was = hot();
+    gf::Button::on_mouse_move(arguments);
+    wake_if_changed(was);
+}
+void ShelfBox::on_mouse_enter() {
+    const bool was = hot();
+    gf::Button::on_mouse_enter();
+    wake_if_changed(was);
+}
+void ShelfBox::on_mouse_leave() {
+    const bool was = hot();
+    gf::Button::on_mouse_leave();
+    wake_if_changed(was);
+}
 void ShelfBox::forget_pointer() {
     if (!hovered_visual())
         return;
-    gf::PointerEvent leave{};
-    leave.action = gf::PointerAction::leave;
-    gf::Button::on_pointer(leave);
+    gf::Button::on_mouse_leave();
     // The shelf is going away, so there are no frames to settle in: settle now.
     lift_ = selected.read() && focus_cue_visible() ? 1.0 : 0.0;
     invalidate(gf::Dirty::paint);
@@ -466,8 +487,11 @@ void ShelfRows::wheel(gf::PointerEvent& event) {
             wake();
     }
 }
-void ShelfRows::on_pointer(gf::PointerEvent& event) {
+void ShelfRows::on_mouse_wheel(gf::MouseEventArgs& arguments) {
+    gf::PointerEvent event = gf::pointer_event_of(arguments);
     wheel(event);
+    arguments.handled = event.handled;
+    gf::Control::on_mouse_wheel(arguments);
 }
 void ShelfRows::on_pointer_bubble(gf::PointerEvent& event) {
     wheel(event);

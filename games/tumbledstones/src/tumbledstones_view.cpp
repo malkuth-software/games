@@ -80,7 +80,7 @@ bool neighbours(int a, int b) {
 
 }  // namespace
 
-TumbledStonesView::TumbledStonesView(gf::StableId id, Options options) : Control(std::move(id)), options_(options) {
+TumbledStonesView::TumbledStonesView(gf::StableId id, Options options) : games::RoutedInput<gf::Control>(std::move(id)), options_(options) {
     front_ = !options_.hosted;
     focusable = true;
     set_style(gf::ControlStyles::opaque, true);
@@ -648,7 +648,7 @@ void TumbledStonesView::cancel_press() {
 
 // ---------------------------------------------------------------- input
 
-void TumbledStonesView::on_pointer(gf::PointerEvent& event) {
+void TumbledStonesView::handle_pointer(gf::PointerEvent& event) {
     const gf::Point local = point_from_window(event.position);
     const double x = local.x;
     const double y = local.y;
@@ -766,7 +766,7 @@ void TumbledStonesView::on_pointer(gf::PointerEvent& event) {
     }
 }
 
-void TumbledStonesView::on_key(gf::KeyEvent& event) {
+void TumbledStonesView::handle_key(gf::KeyEvent& event) {
     if (event.handled || event.action != gf::KeyAction::down)
         return;
     using Key = gf::PhysicalKey;

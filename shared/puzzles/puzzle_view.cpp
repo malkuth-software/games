@@ -391,7 +391,7 @@ static gf::ImageId load_art(gf::Window& window, const std::string& name) {
     gf::ImageLoadResult result = window.load_png(bytes);
     return result ? result.image : gf::ImageId{};
 }
-PuzzleView::PuzzleView(gf::StableId id, PuzzleKind kind) : Control(std::move(id)), game(kind) {
+PuzzleView::PuzzleView(gf::StableId id, PuzzleKind kind) : games::RoutedInput<gf::Control>(std::move(id)), game(kind) {
     focusable = true;
     accessible_name = puzzle_title(kind);
     if (!game.load(path())) {
@@ -3260,7 +3260,7 @@ void PuzzleView::tick() {
     if (!moving && timer_)
         (*timer_).stop();
 }
-void PuzzleView::on_pointer(gf::PointerEvent& e) {
+void PuzzleView::handle_pointer(gf::PointerEvent& e) {
     const gf::Point local_position = point_from_window(e.position);
     if (panel_)
         return;
@@ -3603,9 +3603,9 @@ void PuzzleView::on_pointer(gf::PointerEvent& e) {
     }
 }
 void PuzzleView::on_key_bubble(gf::KeyEvent& e) {
-    on_key(e);
+    handle_key(e);
 }
-void PuzzleView::on_key(gf::KeyEvent& e) {
+void PuzzleView::handle_key(gf::KeyEvent& e) {
     if (e.handled || e.action != gf::KeyAction::down)
         return;
     if (e.physical_key == gf::PhysicalKey::escape) {

@@ -133,6 +133,10 @@ set_tests_properties(fourpegs_pointer PROPERTIES ENVIRONMENT "GAMES_ASSET_DIR=${
 endif()
 target_link_libraries(ui_tests PRIVATE game_ui)
 add_test(NAME ui_routing COMMAND ui_tests)
+# The views' routed handlers over GUI.Forms' interaction raisers (src/routed_input.hpp).
+add_executable(routed_input_tests tests/routed_input_tests.cpp)
+target_link_libraries(routed_input_tests PRIVATE game_ui)
+add_test(NAME routed_input COMMAND routed_input_tests)
 set(collection_fixture_available TRUE)
 foreach(required solitaire spider freecell hearts sudoku gems cube untangle atomprobe fourpegs switchbox solve eggy koikoi parrots liarsdice penthesheep zenconstruction)
     if(NOT required IN_LIST GAMES_MODULE_IDS)

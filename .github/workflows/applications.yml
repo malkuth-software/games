@@ -137,6 +137,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: malkuth-software/gui_forms
+          # PLACEHOLDER PIN (claude/conformance-prep): still cp27. The sources on this branch
+          # target GUI.Forms main 96d3696 (0.6) and do not build at cp27; the pin moves once, at
+          # the conformance rebase, to the release that carries cp32/cp33. See CONFORMANCE_PREP.md.
           ref: 757db03a7be63d7dabcf1803c5c9668e0ace61e0
           path: gui_forms
       - uses: actions/setup-python@v5

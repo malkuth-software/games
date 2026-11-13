@@ -16,6 +16,7 @@
 
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/timer.hpp"
+#include "routed_input.hpp"
 
 #include <chrono>
 #include <deque>
@@ -39,16 +40,16 @@ struct Options {
     bool dev = false;  // separate save file; MZ_SCRIPT allowed
 };
 
-class MazeView final : public gf::Control, public games::CommandSource {
+class MazeView final : public games::RoutedInput<gf::Control>, public games::CommandSource {
 public:
     MazeView(gf::StableId id, Options opt);
     static constexpr bool initialize_tree_after_construction = true;
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& p, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& e) override;
-    void on_key(gf::KeyEvent& e) override;
-    void on_key_bubble(gf::KeyEvent& e) override { on_key(e); }
+    void handle_pointer(gf::PointerEvent& e) override;
+    void handle_key(gf::KeyEvent& e) override;
+    void on_key_bubble(gf::KeyEvent& e) override { handle_key(e); }
     void activate();
     void set_cabinet(bool foreground, bool music, bool sound, bool reduced = false);
     std::vector<games::GameCommand> commands() const override;

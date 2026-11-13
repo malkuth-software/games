@@ -21,6 +21,7 @@
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
+#include "routed_input.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -40,7 +41,7 @@ struct Options {
     bool dev = false;     // a separate save file and scripted actions, for tests
 };
 
-class CubeView final : public gf::Control, public games::CommandSource {
+class CubeView final : public games::RoutedInput<gf::Control>, public games::CommandSource {
 public:
     CubeView(gf::StableId id, Options options);
     ~CubeView() override;
@@ -48,10 +49,10 @@ public:
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& event) override;
-    void on_key(gf::KeyEvent& event) override;
+    void handle_pointer(gf::PointerEvent& event) override;
+    void handle_key(gf::KeyEvent& event) override;
     void on_key_bubble(gf::KeyEvent& event) override {
-        on_key(event);
+        handle_key(event);
     }
     void on_text_input(gf::TextInputEvent& event) override;
 

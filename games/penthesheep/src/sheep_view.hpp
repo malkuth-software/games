@@ -11,6 +11,7 @@
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
+#include "routed_input.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -27,7 +28,7 @@ struct Options {
     bool dev = false;  // separate save; SH_SCRIPT allowed
 };
 
-class SheepView final : public gf::Control, public games::CommandSource {
+class SheepView final : public games::RoutedInput<gf::Control>, public games::CommandSource {
 public:
     SheepView(gf::StableId id, Options opt);
     ~SheepView() override;
@@ -35,9 +36,9 @@ public:
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& p, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& e) override;
-    void on_key(gf::KeyEvent& e) override;
-    void on_key_bubble(gf::KeyEvent& e) override { on_key(e); }
+    void handle_pointer(gf::PointerEvent& e) override;
+    void handle_key(gf::KeyEvent& e) override;
+    void on_key_bubble(gf::KeyEvent& e) override { handle_key(e); }
     void activate();
     bool ready_for_play() const { return phase_ != Phase::loading; }
     std::vector<games::GameCommand> commands() const override;

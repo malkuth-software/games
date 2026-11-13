@@ -58,7 +58,7 @@ class PadNumeral final : public gf::Button {
 static std::filesystem::path sudoku_path() {
     return cabinet_path().parent_path() / "sudoku-v1.txt";
 }
-SudokuView::SudokuView(gf::StableId id) : Control(std::move(id)) {
+SudokuView::SudokuView(gf::StableId id) : games::RoutedInput<gf::Control>(std::move(id)) {
     focusable = true;
     accessible_name = "Sudoku. Choose a digit; click a square to set it, right click to make a "
                         "note. Arrow keys move; N toggles notes; Z undoes.";
@@ -510,7 +510,7 @@ void SudokuView::action(gf::ButtonBase& button) {
         static_cast<void>((*attached_window()).request_focus(shared_from_this()));
     invalidate(gf::Dirty::paint);
 }
-void SudokuView::on_pointer(gf::PointerEvent& e) {
+void SudokuView::handle_pointer(gf::PointerEvent& e) {
     const gf::Point local_position = point_from_window(e.position);
     if (panel_ || busy_)
         return;
@@ -536,9 +536,9 @@ void SudokuView::on_pointer(gf::PointerEvent& e) {
     }
 }
 void SudokuView::on_key_bubble(gf::KeyEvent& e) {
-    on_key(e);
+    handle_key(e);
 }
-void SudokuView::on_key(gf::KeyEvent& e) {
+void SudokuView::handle_key(gf::KeyEvent& e) {
     if (e.handled || e.action != gf::KeyAction::down)
         return;
     if (e.physical_key == gf::PhysicalKey::escape) {

@@ -263,6 +263,9 @@ void HelpPages::on_key_bubble(gf::KeyEvent& e) {
         e.handled = true;
     }
 }
+void HelpPages::wheel_from_card(gf::PointerEvent& event) {
+    scroll_pointer(event);
+}
 HelpBook::HelpBook(gf::StableId id) : Control(std::move(id)) {
     set_paint_plane(gf::PaintPlane::overlay);
     set_skin_class(*this, ButtonSkin::ivory);
@@ -309,7 +312,7 @@ void HelpBook::card_clicked() {
         open_card();
 }
 void HelpBook::wheel_over_card(gf::PointerEvent& event) {
-    (*pages_).on_pointer(event);
+    (*pages_).wheel_from_card(event);
 }
 void HelpBook::arrange(gf::Rect bounds) {
     arrange_self(bounds);

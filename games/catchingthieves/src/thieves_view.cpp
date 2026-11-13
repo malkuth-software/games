@@ -55,7 +55,7 @@ void medal_icon(Canvas& c, double x, double y, double r, int medal) {
 }
 }  // namespace
 
-ThievesView::ThievesView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt), show_(seed_now()) {
+ThievesView::ThievesView(gf::StableId id, Options opt) : games::RoutedInput<gf::Control>(std::move(id)), opt_(opt), show_(seed_now()) {
     cab_front_ = !opt_.hosted;
     focusable = true;
     set_style(gf::ControlStyles::opaque, true);
@@ -843,7 +843,7 @@ void ThievesView::publish() {
 }
 
 // ------------------------------------------------------------------ input
-void ThievesView::on_pointer(gf::PointerEvent& e) {
+void ThievesView::handle_pointer(gf::PointerEvent& e) {
     if (!cab_front_) return;
     request_frame();
     const gf::Point local = point_from_window(e.position);
@@ -869,7 +869,7 @@ void ThievesView::on_pointer(gf::PointerEvent& e) {
     }
 }
 
-void ThievesView::on_key(gf::KeyEvent& e) {
+void ThievesView::handle_key(gf::KeyEvent& e) {
     if (e.handled || !cab_front_) return;
     request_frame();
     if (opt_.hosted && e.physical_key == gf::PhysicalKey::m) return;

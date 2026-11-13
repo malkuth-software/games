@@ -19,6 +19,7 @@
 #include "cards/held_card.hpp"
 #include "game_text.hpp"
 #include "gui_forms/timer.hpp"
+#include "routed_input.hpp"
 #include "presentation.hpp"
 
 #include <chrono>
@@ -29,7 +30,7 @@
 
 namespace games {
 
-class BusinessCard final : public gf::Control {
+class BusinessCard final : public games::RoutedInput<gf::Control> {
   public:
     enum class Kind { page, hand };
     BusinessCard(gf::StableId id, Kind kind);
@@ -48,8 +49,8 @@ class BusinessCard final : public gf::Control {
 
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& event) override;
-    void on_key(gf::KeyEvent& event) override;
+    void handle_pointer(gf::PointerEvent& event) override;
+    void handle_key(gf::KeyEvent& event) override;
     void on_focus_cue_changed(bool visible) override;
     [[nodiscard]] bool hit_test_local(gf::Point local) const override;
     [[nodiscard]] gf::Insets visual_outsets() const noexcept override;

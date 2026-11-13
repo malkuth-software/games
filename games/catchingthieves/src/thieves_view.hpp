@@ -19,6 +19,7 @@
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
+#include "routed_input.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -38,7 +39,7 @@ struct Options {
     bool dev = false;  // separate save file; CT_SCRIPT allowed
 };
 
-class ThievesView final : public gf::Control, public games::CommandSource {
+class ThievesView final : public games::RoutedInput<gf::Control>, public games::CommandSource {
 public:
     ThievesView(gf::StableId id, Options opt);
     ~ThievesView() override;
@@ -46,9 +47,9 @@ public:
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& p, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& e) override;
-    void on_key(gf::KeyEvent& e) override;
-    void on_key_bubble(gf::KeyEvent& e) override { on_key(e); }
+    void handle_pointer(gf::PointerEvent& e) override;
+    void handle_key(gf::KeyEvent& e) override;
+    void on_key_bubble(gf::KeyEvent& e) override { handle_key(e); }
     void activate();
     // Cabinet hosting: the collection's master switches gate this game's own
     // music and sound; `foreground` is false while another game shows.

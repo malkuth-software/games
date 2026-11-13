@@ -27,7 +27,7 @@ std::uint64_t seed_now() {
 }  // namespace
 
 SwitchboxView::SwitchboxView(gf::StableId id, Options opt)
-    : Control(std::move(id)), opt_(opt), puzzle_(seed_now()), actor_(seed_now() ^ 0xA5A5) {
+    : games::RoutedInput<gf::Control>(std::move(id)), opt_(opt), puzzle_(seed_now()), actor_(seed_now() ^ 0xA5A5) {
     focusable = true;
     set_style(gf::ControlStyles::opaque, true);
     {
@@ -463,7 +463,7 @@ void SwitchboxView::mole_tick(double dt) {
 }
 
 // ------------------------------------------------------------------ input
-void SwitchboxView::on_pointer(gf::PointerEvent& e) {
+void SwitchboxView::handle_pointer(gf::PointerEvent& e) {
     const gf::Point local = point_from_window(e.position);
     mouse_x_ = local.x / pixel_;
     mouse_y_ = local.y / pixel_;
@@ -520,7 +520,7 @@ void SwitchboxView::on_pointer(gf::PointerEvent& e) {
     }
 }
 
-void SwitchboxView::on_key(gf::KeyEvent& e) {
+void SwitchboxView::handle_key(gf::KeyEvent& e) {
     if (e.handled) return;
     using K = gf::PhysicalKey;
     if (e.action != gf::KeyAction::down) return;
