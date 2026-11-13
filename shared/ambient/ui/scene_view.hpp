@@ -21,7 +21,7 @@
 
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/timer.hpp"
-#include "routed_input.hpp"
+#include "key_arguments.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -51,7 +51,7 @@ struct HostSetup {
 
 class HelpCard;
 
-class SceneView : public games::RoutedInput<gf::Control>, public games::CommandSource {
+class SceneView : public gf::Control, public games::CommandSource {
   public:
     SceneView(gf::StableId id, HostSetup setup, std::unique_ptr<Scenery> scenery, ViewOptions options);
     ~SceneView() override;
@@ -59,11 +59,13 @@ class SceneView : public games::RoutedInput<gf::Control>, public games::CommandS
     void initialize_control_tree();
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void handle_pointer(gf::PointerEvent& event) override;
-    void handle_key(gf::KeyEvent& event) override;
-    void on_key_bubble(gf::KeyEvent& event) override {
-        handle_key(event);
-    }
+    void on_mouse_down(gf::MouseEventArgs& event) override;
+    void on_mouse_up(gf::MouseEventArgs& event) override;
+    void on_mouse_move(gf::MouseEventArgs& event) override;
+    void on_mouse_leave() override;
+    void on_key_down(gf::KeyEventArgs& event) override;
+    void on_key_up(gf::KeyEventArgs& event) override;
+    void on_key_bubble(gf::KeyEvent& event) override;
 
     void activate();
     void set_cabinet(bool foreground, bool music, bool sound, bool reduced = false);
@@ -84,6 +86,8 @@ class SceneView : public games::RoutedInput<gf::Control>, public games::CommandS
     [[nodiscard]] Rates rates() const;
 
   private:
+    bool pointer_fraction(gf::Point local, double& x, double& y) const;
+    void key_input(gf::KeyEventArgs& event, bool down);
     HostSetup setup_;
     std::unique_ptr<Scenery> scenery_;
     ViewOptions options_;

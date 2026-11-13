@@ -75,10 +75,12 @@ render::Color rgb(std::uint32_t color) {
 
 }  // namespace
 
-CubeView::CubeView(gf::StableId id, Options options) : games::RoutedInput<gf::Control>(std::move(id)), options_(options) {
+CubeView::CubeView(gf::StableId id, Options options) : gf::Control(std::move(id)), options_(options) {
     front_ = !options_.hosted;
     focusable = true;
-    set_style(gf::ControlStyles::opaque, true);
+    // Every release over the view is a click: a quick second press is another click, not a
+    // double click. (The opaque style went in GUI.Forms 0.6, audit A17.)
+    set_style(gf::ControlStyles::standard_double_click, false);
     accessible_name = "Nature Cube. Join each coloured pair with a line across three faces of a cube.";
     if (!restore()) {
         // A first game: deal it now if it is quick, otherwise in the background while the
@@ -812,20 +814,15 @@ void CubeView::lean_toward(gf::Point local) {
     request_frame();
 }
 
-void CubeView::handle_pointer(gf::PointerEvent& event) {
-    const gf::Point local = point_from_window(event.position);
-    if (panel_ != Panel::none) {
-        if (event.action == gf::PointerAction::down) {
-            const Box& box = layout_.panel;
-            if (!inside(box, local.x, local.y) && (panel_ == Panel::scores || panel_ == Panel::help)) {
-                close_panel();
-            }
-            event.handled = true;
-        }
-        return;
-    }
-    const int cell = cell_under(local);
-    if (event.action == gf::PointerAction::move) {
+// The pointer, in GUI.Forms' raisers. A primary press on a tile starts a
+// trace under capture; the moves extend it (stepping through a free corner on
+// a quick diagonal) and the release, or a capture lost before it, ends it.
+// Without a trace the moves lean the cube toward the pointer. Under a panel
+// only a press outside a scores or help panel acts: it closes the panel.
+void CubeView::on_mouse_move(gf::MouseEventArgs& event) {
+    if (panel_ == Panel::none) {
+        const gf::Point local = event.location;
+        const int cell = cell_under(local);
         if (!tracing_) {
             lean_toward(local);
         }
@@ -882,83 +879,102 @@ void CubeView::handle_pointer(gf::PointerEvent& event) {
             cursor = live || tracing_ ? gf::CursorKind::hand : gf::CursorKind::arrow;
             request_frame();
         }
-        return;
     }
-    if (event.action == gf::PointerAction::leave) {
+    gf::Control::on_mouse_move(event);
+}
+
+void CubeView::on_mouse_leave() {
+    if (panel_ == Panel::none) {
         if (hover_ >= 0) {
             hover_ = -1;
             request_frame();
         }
-        return;
     }
-    if (event.action == gf::PointerAction::down) {
+    gf::Control::on_mouse_leave();
+}
+
+void CubeView::on_mouse_down(gf::MouseEventArgs& event) {
+    const gf::Point local = event.location;
+    if (panel_ != Panel::none) {
+        const Box& box = layout_.panel;
+        if (!inside(box, local.x, local.y) && (panel_ == Panel::scores || panel_ == Panel::help)) {
+            close_panel();
+        }
+        event.handled = true;
+    } else {
+        const int cell = cell_under(local);
         activate();
-        if (event.button != gf::PointerButton::primary || session_.play.won || waiting_ || cell < 0) {
-            return;
-        }
-        if (press(session_.puzzle, session_.play, cell)) {
-            tracing_ = true;
-            // A press on the portal a line went into keeps the hop and carries on from the far
-            // side: wait for the pointer there.
-            const std::vector<int>& line = session_.play.paths[static_cast<std::size_t>(session_.play.active)];
-            seeking_ = !line.empty() && line.back() != cell && !adjacent(session_.puzzle.geometry, line.back(), cell);
-            set_pointer_capture(true);
-            hold_tilt(motion_);
-            note_lines(motion_, session_.puzzle, session_.play, reduced_);
-            persist();
-            games::sound_play("nature_cube_pick", sound_ && front_);
-            request_frame();
-        }
-        event.handled = true;
-        return;
-    }
-    if (event.action == gf::PointerAction::up) {
-        if (tracing_) {
-            tracing_ = false;
-            seeking_ = false;
-            // Traced back to where it began, a line is gone: its square is as it was.
-            const int pair = session_.play.active;
-            release(session_.play);
-            if (pair >= 0 && pair < static_cast<int>(session_.play.paths.size()) &&
-                session_.play.paths[static_cast<std::size_t>(pair)].size() <= 1) {
-                static_cast<void>(erase(session_.play, pair));
+        if (event.button == gf::PointerButton::primary && !session_.play.won && !waiting_ && cell >= 0) {
+            if (press(session_.puzzle, session_.play, cell)) {
+                tracing_ = true;
+                // A press on the portal a line went into keeps the hop and carries on from the far
+                // side: wait for the pointer there.
+                const std::vector<int>& line = session_.play.paths[static_cast<std::size_t>(session_.play.active)];
+                seeking_ = !line.empty() && line.back() != cell && !adjacent(session_.puzzle.geometry, line.back(), cell);
+                set_pointer_capture(true);
+                hold_tilt(motion_);
                 note_lines(motion_, session_.puzzle, session_.play, reduced_);
+                persist();
+                games::sound_play("nature_cube_pick", sound_ && front_);
+                request_frame();
             }
-            set_pointer_capture(false);
-            persist();
-            request_frame();
+            event.handled = true;
         }
+    }
+    if (is_alive()) gf::Control::on_mouse_down(event);
+}
+
+void CubeView::on_mouse_up(gf::MouseEventArgs& event) {
+    if (panel_ == Panel::none) {
+        end_trace();
         event.handled = true;
     }
+    gf::Control::on_mouse_up(event);
 }
 
-void CubeView::close_panel() {
-    if (panel_ == Panel::name) {
-        session_.pending = -1;
-        persist();
-    }
-    panel_ = Panel::none;
-    request_frame();
+// A capture lost before the release (a modal, the window deactivating) ends
+// the trace, as the release would.
+void CubeView::on_mouse_capture_changed() {
+    end_trace();
+    gf::Control::on_mouse_capture_changed();
 }
 
-void CubeView::confirm_name() {
-    std::string name = name_entry_;
-    while (!name.empty() && name.back() == ' ') {
-        name.pop_back();
-    }
-    if (!valid_name(name) || !record(session_.scores, name, session_.pending)) {
+void CubeView::end_trace() {
+    if (!tracing_) {
         return;
     }
-    session_.player = name;
-    session_.pending = -1;
+    tracing_ = false;
+    seeking_ = false;
+    // Traced back to where it began, a line is gone: its square is as it was.
+    const int pair = session_.play.active;
+    release(session_.play);
+    if (pair >= 0 && pair < static_cast<int>(session_.play.paths.size()) &&
+        session_.play.paths[static_cast<std::size_t>(pair)].size() <= 1) {
+        static_cast<void>(erase(session_.play, pair));
+        note_lines(motion_, session_.puzzle, session_.play, reduced_);
+    }
+    set_pointer_capture(false);
     persist();
-    games::sound_play("ui_name_confirm", sound_ && front_);
-    panel_ = Panel::scores;
     request_frame();
 }
 
-void CubeView::handle_key(gf::KeyEvent& event) {
-    if (event.handled || event.action != gf::KeyAction::down) {
+// The keys: the view's own handling runs after the base raised the event, on
+// a key its subscribers left unhandled; keys bubbling from a focused child
+// take the same handling.
+void CubeView::on_key_down(gf::KeyEventArgs& event) {
+    gf::Control::on_key_down(event);
+    key_down(event);
+}
+
+void CubeView::on_key_bubble(gf::KeyEvent& event) {
+    if (event.action != gf::KeyAction::down) return;
+    gf::KeyEventArgs arguments = games::key_arguments_of(event);
+    key_down(arguments);
+    event.handled = arguments.handled;
+}
+
+void CubeView::key_down(gf::KeyEventArgs& event) {
+    if (event.handled) {
         return;
     }
     const std::uint32_t key = event.physical_key;
@@ -995,20 +1011,50 @@ void CubeView::handle_key(gf::KeyEvent& event) {
     event.handled = true;
 }
 
-void CubeView::on_text_input(gf::TextInputEvent& event) {
-    if (panel_ != Panel::name || event.composing || event.text_utf8.empty()) {
+// Committed text, for the name entry (an input method's marked text never
+// reaches on_key_press).
+void CubeView::on_key_press(gf::KeyPressEventArgs& event) {
+    gf::Control::on_key_press(event);
+    if (event.handled || panel_ != Panel::name || event.text.empty()) {
         return;
     }
-    for (char c : event.text_utf8) {
+    for (char c : event.text) {
         if (static_cast<unsigned char>(c) < 32 || c == 127) {
             return;
         }
     }
-    if (name_entry_.size() + event.text_utf8.size() <= 24) {
-        name_entry_ += event.text_utf8;
+    if (name_entry_.size() + event.text.size() <= 24) {
+        name_entry_ += event.text;
         request_frame();
     }
     event.handled = true;
 }
+
+void CubeView::close_panel() {
+    if (panel_ == Panel::name) {
+        session_.pending = -1;
+        persist();
+    }
+    panel_ = Panel::none;
+    request_frame();
+}
+
+void CubeView::confirm_name() {
+    std::string name = name_entry_;
+    while (!name.empty() && name.back() == ' ') {
+        name.pop_back();
+    }
+    if (!valid_name(name) || !record(session_.scores, name, session_.pending)) {
+        return;
+    }
+    session_.player = name;
+    session_.pending = -1;
+    persist();
+    games::sound_play("ui_name_confirm", sound_ && front_);
+    panel_ = Panel::scores;
+    request_frame();
+}
+
+
 
 }  // namespace ps_cube

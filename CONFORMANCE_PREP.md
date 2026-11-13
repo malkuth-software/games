@@ -28,28 +28,37 @@ has been compiled or run. The integrator builds it.
    on_key removed") removed `Control::on_key` and `Control::on_pointer`. The target phase is now
    on_mouse_down/up/move/wheel and on_key_down/up, which take `MouseEventArgs&` / `KeyEventArgs&`. So the
    products cannot compile against 96d3696 without this port, and it is done here:
-   - `src/routed_input.hpp`: `games::RoutedInput<Base>`, a base that rebuilds the routed event from each
-     raiser's arguments (`pointer_event_of`, `key_event_of`) and calls the view's `handle_pointer` /
-     `handle_key`. It follows GUI.Forms' own tests/support/routed_input_probe.hpp. A mouse raiser runs the
-     handler first, copies `handled` back (which ends the route, as before) and then raises the event. A key
-     raiser raises first and calls the handler only for a key nobody handled. A key up raised by deactivation
-     does not reach the handler, as before. Enter and leave come from on_mouse_enter/leave and carry no position.
-   - 21 classes derive from `games::RoutedInput<gf::Control>`: their 20 `on_key` and 21 `on_pointer`
-     overrides are now `handle_key` / `handle_pointer`, and the 20 `on_key_bubble` / `on_key_preview`
-     forwarders call `handle_key`. The classes are the views of atomprobe, catchingthieves, cube, eggy,
-     fourpegs, koikoi, liarsdice, maze, parrots, penthesheep, specimencabinet, sudoku, switchbox,
-     tumbledstones and zenconstruction, plus new-games/template, shared/ambient SceneView and its HelpCard,
-     shared/cards Table, shared/puzzles PuzzleView, and src BusinessCard.
+   - Option C (owner, provisional): the 21 views handle input in GUI.Forms' raisers directly. The
+     interim adapter (`games::RoutedInput`) is gone. Each view overrides the raisers it uses:
+     on_mouse_down/up/move/wheel/leave, on_mouse_click (on_mouse_double_click in the card table),
+     on_mouse_capture_changed where a hold or trace must end on capture loss, on_key_down (on_key_up
+     where key ups are marked handled), and on_key_press for committed text (the old on_text_input). A view's
+     own pointer handling runs before the base call (so subscribers see its state), and its key handling runs
+     after it, only on a key the subscribers left unhandled.
+   - The painted buttons, and every hand-detected click (press and release over the same thing without
+     moving), now act on the derived click. So GUI.Forms' order rules apply: up then click; a drag's
+     release sets `suppress_click`; and a click is dropped when the control is disposed, a modal opens, or
+     the capture is lost. Actions that happened on the press itself (walk, play a card, flip a switch, select
+     a cell) still happen on the press.
+   - Every view but the card table clears `ControlStyles::standard_double_click`, so a quick second press is
+     another click, as before. The card table keeps it: its second press only notes a card that can go to a
+     foundation, and the derived double click places it (on the release, not the press as before).
+   - Keys bubbling from a focused child (`on_key_bubble`, and the card table's F1/Escape `on_key_preview`)
+     take the same handling, through `games::key_arguments_of` (src/key_arguments.hpp), the inverse of
+     GUI.Forms' `key_event_of`.
+   - `ControlStyles::opaque` is gone at 96d3696 (audit A17); the 16 views that set it no longer do.
    - src/shelf: ShelfBox (a Button) overrides the five mouse raisers and wakes the shelf when its hot state
      changes. `forget_pointer` calls `Button::on_mouse_leave()`. ShelfRows scrolls on `on_mouse_wheel`, and
      `wheel()` is public, so tests/shelf_help_tests.cpp drives it directly (it called `on_pointer`).
    - src/help_book: the business card's wheel scrolls the pages through
      `HelpPages::wheel_from_card` → `ScrollableControl::scroll_pointer(PointerEvent&)`, replacing a direct
      `on_pointer` call.
-   - New test: tests/routed_input_tests.cpp (ctest `routed_input`). It checks the order, `handled` ending the
-     route, the key-subscriber precedence, enter/leave, and the deactivation release.
-   - The 29 `on_key_bubble` / `on_pointer_preview` / `on_pointer_bubble` / `on_key_preview` overrides stay.
-     They are still virtual at 96d3696.
+   - New test: tests/view_input_tests.cpp (ctest `view_input`): the card table's derived double click, a
+     drag's release with no click, a double click whose release lands off the view, and the bubbled key's
+     fields. tests/fourpegs_pointer_tests.cpp adds a quick second click on the palette and a drag cancelled
+     by capture loss.
+   - The other preview and bubble overrides (src/collection, src/shelf) stay. They are still virtual at
+     96d3696.
 7. **zc_phys hull overflow** (games/zenconstruction/phys/hull.cpp). In the boundary-loop pass, a merged-face
    group with no boundary edge left `start` at -1, and the walk then read `next[-1]` and put -1 into
    `loops`. The pass now skips such a group, and stops a walk that reaches a vertex with no outgoing boundary
@@ -108,20 +117,23 @@ ctest --test-dir .build/conformance -LE design --output-on-failure
 Or build GUI.Forms in-tree: leave `CMAKE_PREFIX_PATH` unset and pass
 `-DGAMES_TOOLKIT_SOURCE_DIR=<gui_forms checkout>`. CI does it this way. Use a fresh build folder when switching
 between the two. Tests that should cover this branch:
-- routed_input;
+- view_input;
 - ui_routing, collection_ui, shelf_help, puzzle_frames, fourpegs_pointer and the view_contract tests (the
-  routed handlers in real views);
+  raisers in real views);
 - rockstack_degenerate_hulls under ASan/UBSan;
 - playsuite_theme;
 - the full `ctest -LE design`.
 
 ## Risks (not checked without a build)
 
-- A view header that includes routed_input.hpp from a target without `src` on its include path. Every game
-  and shared target already includes help_route.hpp from src through game_paths, so none is expected.
-- A crossing carries no position. A handler that reads the position of an enter sees the window origin until
-  the next move. AtomProbe, FourPegs, Switchbox and Thieves compute `mouse_x_`/`mouse_y_` on enter but use them
-  only on move and leave.
+- Feel: the painted buttons and the in-place clicks now fire on GUI.Forms' derived click. A release over
+  the same button still fires it, as before; what is new is that the click is dropped when a modal opens or
+  the capture is lost between the press and the release. The card table's double click now places on the
+  second release instead of the second press.
+- Leave carries no position. The views no longer read one: hover state clears on leave and keeps the last
+  position.
+- Composing text: on_key_press sees committed text only. The name entries (AtomProbe, Cube, Eggy, FourPegs,
+  Switchbox) and the digit entries (Sudoku, puzzles) never used marked text.
 - A refused degenerate hull now throws where it once went on with fewer than four faces. Generated rocks
   should never be that degenerate; a caller that cooks unchecked input should catch it.
 - The 51 GUI.Forms accessors that delete their rvalue overload can refuse a call on a temporary; only a

@@ -2,23 +2,24 @@
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/controls/text_box.hpp"
 #include "gui_forms/timer.hpp"
-#include "routed_input.hpp"
+#include "key_arguments.hpp"
 #include "sudoku.hpp"
 #include "suite.hpp"
 #include <future>
 namespace games {
 namespace gf = gui_forms;
-class SudokuView final : public games::RoutedInput<gf::Control>, public CommandSource {
+class SudokuView final : public gf::Control, public CommandSource {
   public:
     explicit SudokuView(gf::StableId id);
     static constexpr bool initialize_tree_after_construction = true;
     void initialize_control_tree();
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void handle_pointer(gf::PointerEvent& event) override;
-    void handle_key(gf::KeyEvent& event) override;
+    void on_mouse_down(gf::MouseEventArgs& event) override;
+    void on_mouse_move(gf::MouseEventArgs& event) override;
+    void on_key_down(gf::KeyEventArgs& event) override;
     void on_key_bubble(gf::KeyEvent& event) override;
-    void on_text_input(gf::TextInputEvent& event) override;
+    void on_key_press(gf::KeyPressEventArgs& event) override;
     void activate();
     [[nodiscard]] std::vector<GameCommand> commands() const override;
     void run_command(std::string_view id) override;
@@ -28,6 +29,8 @@ class SudokuView final : public games::RoutedInput<gf::Control>, public CommandS
     Sudoku game;
 
   private:
+    int cell_at(gf::Point local) const;
+    void key_down(gf::KeyEventArgs& event);
     std::array<std::shared_ptr<gf::Button>, 20> buttons_;
     std::shared_ptr<gf::TextBox> name_;
     std::vector<gf::SubscriptionToken> subscriptions_;

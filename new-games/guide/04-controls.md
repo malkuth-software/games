@@ -14,7 +14,7 @@ The source of truth is the pinned toolkit (`.github/workflows/applications.yml`)
 
 | Control | Header | Use it for |
 |---|---|---|
-| `Control` | `gui_forms/control.hpp` | The base: `arrange`, `on_paint`, `on_pointer`, `on_key`, `on_key_bubble`, `on_attached_to_window`, `on_detaching_from_window`, `invalidate`, `set_paint_plane`, `set_accessible_name`. Anything owner-drawn. |
+| `Control` | `gui_forms/control.hpp` | The base: `arrange`, `on_paint`, the input raisers (`on_mouse_down` and the rest, `on_mouse_click`, `on_key_down`, `on_key_press`), `on_key_bubble`, `on_attached_to_window`, `on_detaching_from_window`, `invalidate`, `set_paint_plane`, `set_accessible_name`. Anything owner-drawn. |
 | `Panel`, `GroupBox`, `ScaledPanel`, `Card` | `container_controls.hpp` | Grouping; a card with an elevation. |
 | `FlowLayoutPanel`, `TableLayoutPanel` | `container_controls.hpp` | Layout containers; `GridPanel` (`grid_panel.hpp`) is the declarative grid. The shell still lays out by hand in `arrange`. |
 | `ScrollableControl` | `controls/scrollable_control/` | A scrolling body: `set_auto_scroll`, `arrange_scroll_viewport`, `scroll_to`, `scroll_by`, `scroll_position`. The help pages and the Settings page are these. |

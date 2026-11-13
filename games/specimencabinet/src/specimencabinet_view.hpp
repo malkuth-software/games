@@ -18,7 +18,7 @@
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/threading.hpp"
 #include "gui_forms/timer.hpp"
-#include "routed_input.hpp"
+#include "key_arguments.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -35,7 +35,7 @@ struct Options {
     bool dev = false;     // a separate save file, for tests and development
 };
 
-class SpecimenCabinetView final : public games::RoutedInput<gf::Control>, public games::CommandSource {
+class SpecimenCabinetView final : public gf::Control, public games::CommandSource {
 public:
     SpecimenCabinetView(gf::StableId id, Options options);
     ~SpecimenCabinetView() override;
@@ -43,11 +43,13 @@ public:
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void handle_pointer(gf::PointerEvent& event) override;
-    void handle_key(gf::KeyEvent& event) override;
-    void on_key_bubble(gf::KeyEvent& event) override {
-        handle_key(event);
-    }
+    void on_mouse_down(gf::MouseEventArgs& event) override;
+    void on_mouse_up(gf::MouseEventArgs& event) override;
+    void on_mouse_move(gf::MouseEventArgs& event) override;
+    void on_mouse_click(gf::MouseEventArgs& event) override;
+    void on_mouse_capture_changed() override;
+    void on_key_down(gf::KeyEventArgs& event) override;
+    void on_key_bubble(gf::KeyEvent& event) override;
 
     void activate();
     void set_cabinet(bool foreground, bool music, bool sound, bool reduced = false);
@@ -95,6 +97,11 @@ private:
     bool pressing_ = false;       // the button is down on the held stone, not yet a drag
     bool dragging_ = false;
     double press_x_ = 0, press_y_ = 0;
+    void key_down(gf::KeyEventArgs& event);
+    // What a release ended, for the click that follows it: the panel button
+    // pressed, or a lifted stone that did not drag (the click carries it).
+    int released_button_ = -1;
+    bool carry_pending_ = false;
     double grip_x_ = 0, grip_y_ = 0;    // the pointer's offset from the stone's centre
     double held_x_ = 0, held_y_ = 0;    // the held stone's centre, points
     int target_ = -1;             // the socket it is over
