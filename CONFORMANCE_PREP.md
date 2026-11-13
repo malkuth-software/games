@@ -15,6 +15,9 @@ has been compiled or run. The integrator builds it.
 3. **theme.hpp:** control.hpp no longer includes it. No PlaySuite file needs an addition: the only complete
    use of Theme (tests/playsuite_theme_tests.cpp) reaches it through application.hpp. shared/render/ui/surface.hpp
    and src/help_route.hpp do not use Theme.
+   PlaySuite's look is its own theme, the package in themes/playsuite (`games::playsuite_theme()`), which
+   paints the capsule, help and the rest of the suite. main passes it in `ApplicationConfig::theme.packages`;
+   the base named there only fills what the package leaves unset and is the fallback if the package is refused.
 4. **Exports:** every `gf::` name PlaySuite uses is in the 96d3696 export lists or is header-only, except the
    Audio classes (GUIForms::Audio is a static library) and Worker/CancellationFlag (GUIForms::Threading's own
    list). The check works by name only; a partly marked class shows only at link time.
