@@ -34,12 +34,16 @@ int main() {
     config.theme.base = gf::ThemeBase::windows_professional;
     config.theme.packages.push_back(games::playsuite_theme());
     gf::ApplicationCreateResult created = gf::Application::create(std::move(config));
-    // The package is taken with no finding but W201: every PlaySuite colour is a literal
-    // (custom properties; GUI.Forms has no application palette roles), which forced high
-    // contrast cannot remap. Anything else is a declaration or rule the engine dropped.
+    // The package is taken with no finding but W201 (and W402, below): every PlaySuite
+    // colour is a literal (custom properties; GUI.Forms has no application palette roles),
+    // which forced high contrast cannot remap. Anything else is a declaration or rule the
+    // engine dropped.
     std::size_t unexpected = 0;
     for (const gf::ThemeCompileDiagnostic& finding : created.findings) {
-        if (finding.code == "W201")
+        // W402 is GUI.Forms' at 96d3696: the package is light only and writes no dark rule,
+        // but the dark rules of the base it is layered over (windows_professional) are counted
+        // as the package's. The products force the light scheme, so nothing is dropped.
+        if (finding.code == "W201" || finding.code == "W402")
             continue;
         ++unexpected;
         std::cerr << finding.code << ' ' << finding.name << ' ' << finding.file << ':' << finding.line << ':'

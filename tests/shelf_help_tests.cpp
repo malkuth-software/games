@@ -161,11 +161,13 @@ int main() {
         for (const HelpTopic& topic : descriptor.help_topics) {
             (*pages).select(static_cast<int>(entry), topic.id);
             window.perform_layout();
-            const std::shared_ptr<gf::Control> extra = find_control(*pages, std::string(games::stable_id(prefix + topic.id).value()));
+            // StableId::value() borrows, so each id is a named object before it is read.
+            const gf::StableId extra_id = games::stable_id(prefix + topic.id);
+            const std::shared_ptr<gf::Control> extra = find_control(*pages, std::string(extra_id.value()));
             assert(extra && (*extra).visible.read() && !(*body).visible.read());
-            const std::shared_ptr<gf::Control> heading = find_control(
-                *pages, std::string(games::stable_id("help.topic." + std::to_string(static_cast<int>(entry)) + "." +
-                                                     topic.id).value()));
+            const gf::StableId heading_id =
+                games::stable_id("help.topic." + std::to_string(static_cast<int>(entry)) + "." + topic.id);
+            const std::shared_ptr<gf::Control> heading = find_control(*pages, std::string(heading_id.value()));
             // The chosen topic opens first, straight under the dedication and credits (and
             // the business card beside them, which the book lays over the pages).
             const gf::Rect credits =

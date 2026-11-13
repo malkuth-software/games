@@ -65,18 +65,24 @@ int main() {
         require((*view).board().turns_used() == 1, "Check button submits the complete mouse-entered guess");
         // The console's clicks are GUI.Forms' derived clicks: a quick second press is another
         // click (the view raises no double clicks), a drop is no click, and a capture lost
-        // mid-drag cancels the drag.
-        const int before = placed(*view);
-        click(window, *view, projected(scene, fp::Lair::palette(4)), 1);
-        click(window, *view, projected(scene, fp::Lair::palette(5)), 2);
-        require(placed(*view) == before + 2, "A quick second click on the palette places a second orb");
-        const int carried = placed(*view);
-        pointer(window, *view, gf::PointerAction::down, projected(scene, fp::Lair::palette(0)));
-        pointer(window, *view, gf::PointerAction::move, projected(scene, fp::Lair::socket(3)));
-        (*view).set_pointer_capture(false);
-        pointer(window, *view, gf::PointerAction::up, projected(scene, fp::Lair::socket(3)));
-        require(placed(*view) == carried, "A drag whose capture was lost drops nothing");
-        require(!(*view).has_pointer_capture(), "The cancelled drag holds no capture");
+        // mid-drag cancels the drag. The guess above is still being judged (no peg goes in
+        // while it is), so these run on a fresh console with its own empty saves.
+        games_test::isolate_saves(games_test::scratch_directory("fourpegs-pointer-fresh-"));
+        std::shared_ptr<fp::FourPegsView> fresh = gf::make_control<fp::FourPegsView>(
+            gf::StableId("pegs-fresh"), fp::Options{.dev = true, .hosted = true});
+        gf::Window fresh_window(fresh, {1000, 660});
+        fresh_window.perform_layout();
+        (*fresh).set_cabinet(true, false, false, true);
+        require(placed(*fresh) == 0, "A fresh console starts with an empty guess");
+        click(fresh_window, *fresh, projected(scene, fp::Lair::palette(4)), 1);
+        click(fresh_window, *fresh, projected(scene, fp::Lair::palette(5)), 2);
+        require(placed(*fresh) == 2, "A quick second click on the palette places a second orb");
+        pointer(fresh_window, *fresh, gf::PointerAction::down, projected(scene, fp::Lair::palette(0)));
+        pointer(fresh_window, *fresh, gf::PointerAction::move, projected(scene, fp::Lair::socket(3)));
+        (*fresh).set_pointer_capture(false);
+        pointer(fresh_window, *fresh, gf::PointerAction::up, projected(scene, fp::Lair::socket(3)));
+        require(placed(*fresh) == 2, "A drag whose capture was lost drops nothing");
+        require(!(*fresh).has_pointer_capture(), "The cancelled drag holds no capture");
         std::cout << "Four Pegs pointer routing passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
