@@ -14,7 +14,7 @@
 #include "gui_forms/controls/text_box.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
-#include "routed_input.hpp"
+#include "gui_forms/events/key_events/key_events.hpp"
 
 #include <chrono>
 #include <future>
@@ -31,16 +31,21 @@ struct Options {
     bool dev = false;   // a separate save; ZC_SCRIPT allowed
 };
 
-class ZenView final : public games::RoutedInput<gf::Control>, public games::CommandSource {
+class ZenView final : public gf::Control, public games::CommandSource {
 public:
     ZenView(gf::StableId id, Options options);
     static constexpr bool initialize_tree_after_construction = true;
     void initialize_control_tree();
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void handle_pointer(gf::PointerEvent& event) override;
-    void handle_key(gf::KeyEvent& event) override;
-    void on_key_bubble(gf::KeyEvent& event) override { handle_key(event); }
+    void on_mouse_down(gf::MouseEventArgs& e) override;
+    void on_mouse_up(gf::MouseEventArgs& e) override;
+    void on_mouse_move(gf::MouseEventArgs& e) override;
+    void on_mouse_wheel(gf::MouseEventArgs& e) override;
+    void on_mouse_click(gf::MouseEventArgs& e) override;
+    void on_key_down(gf::KeyEventArgs& e) override;
+    void on_key_up(gf::KeyEventArgs& e) override;
+    void on_key_bubble(gf::KeyEvent& e) override;
     void activate();
     // in the cabinet: whether this game is in front, and the master switches
     void set_cabinet(bool foreground, bool music, bool sound, bool reduced = false);
@@ -49,6 +54,7 @@ public:
     void on_focus_changed(bool focused) override;
 
 private:
+    void key_down(gf::KeyEventArgs& e);
     enum class Panel { none, new_site, sites, help };
     struct SavedSite {
         std::string text;   // the run's own save
@@ -89,14 +95,15 @@ private:
     double drag_x_ = 0, drag_y_ = 0;
     // The orbit on GUI.Forms' relative pointer (cp33): a press asks for the pointer confined to
     // the view, visible, until its release, so the orbit goes on past the view's edge. While
-    // granted, the motion, the release and the wheel arrive as samples; a host or a window that
-    // cannot grant it leaves the ordinary moves (the orbit then stops at the edge, as before).
-    // `orbit_travel_` adds up the sample deltas, which decide whether the release was a click.
+    // granted, the motion, the release and the wheel arrive as samples and no click is
+    // derived; a host or window that cannot confine leaves the ordinary raisers (the orbit
+    // then stops at the edge, as before). `orbit_travel_` adds up the sample deltas, which
+    // decide whether the release was a click on a rock.
     bool orbit_relative_ = false;
     double orbit_travel_ = 0;
     void begin_orbit();
     void orbit_by(double dx, double dy);
-    void end_orbit(gf::PointerButton button);
+    void fetch_hovered_rock();
     void relative_sample(gf::RelativePointerEventArgs& sample);
     void relative_ended(const gf::RelativePointerEnded& ended);
     int hover_rock_ = -1;

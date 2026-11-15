@@ -14,7 +14,7 @@
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
-#include "routed_input.hpp"
+#include "gui_forms/events/key_events/key_events.hpp"
 
 #include <array>
 #include <chrono>
@@ -33,16 +33,20 @@ struct Options {
     bool dev = false;  // separate save; KK_SCRIPT allowed
 };
 
-class KoiView final : public games::RoutedInput<gf::Control>, public games::CommandSource {
+class KoiView final : public gf::Control, public games::CommandSource {
 public:
     KoiView(gf::StableId id, Options opt);
     static constexpr bool initialize_tree_after_construction = true;
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& p, gf::Rect damage) override;
-    void handle_pointer(gf::PointerEvent& e) override;
-    void handle_key(gf::KeyEvent& e) override;
-    void on_key_bubble(gf::KeyEvent& e) override { handle_key(e); }
+    void on_mouse_down(gf::MouseEventArgs& e) override;
+    void on_mouse_up(gf::MouseEventArgs& e) override;
+    void on_mouse_move(gf::MouseEventArgs& e) override;
+    void on_mouse_leave() override;
+    void on_mouse_click(gf::MouseEventArgs& e) override;
+    void on_key_down(gf::KeyEventArgs& e) override;
+    void on_key_bubble(gf::KeyEvent& e) override;
     void activate();
     std::vector<games::GameCommand> commands() const override;
     void run_command(std::string_view id) override;
@@ -76,6 +80,11 @@ private:
     Panel panel_ = Panel::none;
     std::vector<Button> buttons_;
     std::string pressed_, hover_btn_;
+    void track_pointer(gf::Point local);
+    std::string hit_button() const;
+    void key_down(gf::KeyEventArgs& e);
+    // The painted button a release ended, for the click that follows it.
+    std::string released_;
     double mx_ = 0, my_ = 0;
     std::vector<std::pair<double, std::string>> script_;
     bool auto_ = false;

@@ -38,8 +38,11 @@ std::string replace_all(std::string s, const std::string& a, const std::string& 
 }
 }  // namespace
 
-MazeView::MazeView(gf::StableId id, Options opt) : games::RoutedInput<gf::Control>(std::move(id)), opt_(opt) {
+MazeView::MazeView(gf::StableId id, Options opt) : gf::Control(std::move(id)), opt_(opt) {
     focusable = true;
+    // Every release over the view is a click: a quick second press is another click, not a
+    // double click. (The opaque style went in GUI.Forms 0.6, audit A17.)
+    set_style(gf::ControlStyles::standard_double_click, false);
     {
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
@@ -529,32 +532,42 @@ void MazeView::publish() {
 }
 
 // ------------------------------------------------------------------ input
-void MazeView::handle_pointer(gf::PointerEvent& e) {
-    const gf::Point local = point_from_window(e.position);
+// The pointer, in GUI.Forms' raisers. The painted buttons fire on the derived
+// click (a release over the view after a press on the same button), so the
+// window's order rules apply; every other press acts on the press itself.
+void MazeView::track_pointer(gf::Point local) {
     mouse_x_ = local.x / pixel_;
     mouse_y_ = local.y / pixel_;
-    std::string hit;
-    for (const Button& button : buttons_)
-        if (mouse_x_ >= button.x && mouse_x_ < button.x + button.w &&
-            mouse_y_ >= button.y && mouse_y_ < button.y + button.h) { hit = button.id; break; }
-    if (e.action == gf::PointerAction::move) {
-        if (hover_ != hit) request_frame();
-        hover_ = hit;
-        cursor = !hover_.empty() ? gf::CursorKind::hand : gf::CursorKind::arrow;
-    }
-    if (e.action == gf::PointerAction::down || e.action == gf::PointerAction::up) request_frame();
-    if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
+}
+
+std::string MazeView::hit_button() const {
+    for (const Button& b : buttons_)
+        if (mouse_x_ >= b.x && mouse_x_ < b.x + b.w && mouse_y_ >= b.y && mouse_y_ < b.y + b.h) return b.id;
+    return {};
+}
+
+void MazeView::on_mouse_move(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    const std::string hit = hit_button();
+    if (hover_ != hit) request_frame();
+    hover_ = hit;
+    cursor = !hover_.empty() ? gf::CursorKind::hand : gf::CursorKind::arrow;
+    gf::Control::on_mouse_move(e);
+}
+
+void MazeView::on_mouse_down(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    request_frame();
+    if (e.button == gf::PointerButton::primary) {
         activate();
-        const std::string h = hit;
-        if (!h.empty()) { pressed_ = h; e.handled = true; return; }
-        // a click on the line showing puts it away
-        if (panel_ == Panel::none && speech_w_ > 0 && mouse_x_ >= speech_x_ && mouse_x_ < speech_x_ + speech_w_ &&
-            mouse_y_ >= speech_y_ && mouse_y_ < speech_y_ + speech_h_) {
+        const std::string h = hit_button();
+        if (!h.empty()) {
+            pressed_ = h;
+        } else if (panel_ == Panel::none && speech_w_ > 0 && mouse_x_ >= speech_x_ && mouse_x_ < speech_x_ + speech_w_ &&
+                   mouse_y_ >= speech_y_ && mouse_y_ < speech_y_ + speech_h_) {
+            // a click on the line showing puts it away
             sess_.dismiss_speech();
-            e.handled = true;
-            return;
-        }
-        if (panel_ == Panel::none) {
+        } else if (panel_ == Panel::none) {
             take_over();
             // the view itself: left third turns left, right third turns right, the middle walks on
             if (mouse_x_ < pw_ / 3.0) sess_.command(Cmd::left);
@@ -563,19 +576,47 @@ void MazeView::handle_pointer(gf::PointerEvent& e) {
             else sess_.command(Cmd::forward);
         }
         e.handled = true;
-    } else if (e.action == gf::PointerAction::up) {
-        if (!pressed_.empty() && hit == pressed_) action(pressed_);
-        pressed_.clear();
-        e.handled = true;
     }
+    if (is_alive()) gf::Control::on_mouse_down(e);
 }
 
-void MazeView::handle_key(gf::KeyEvent& e) {
+void MazeView::on_mouse_up(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    request_frame();
+    released_ = pressed_;
+    pressed_.clear();
+    e.handled = true;
+    gf::Control::on_mouse_up(e);
+}
+
+void MazeView::on_mouse_click(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    const std::string released = released_;
+    released_.clear();
+    if (!released.empty() && hit_button() == released) action(released);
+    if (is_alive()) gf::Control::on_mouse_click(e);
+}
+
+// The keys: the view's own handling runs after the base raised the event, on
+// a key its subscribers left unhandled; keys bubbling from a focused child
+// take the same handling.
+void MazeView::on_key_down(gf::KeyEventArgs& e) {
+    gf::Control::on_key_down(e);
+    key_down(e);
+}
+
+void MazeView::on_key_bubble(gf::KeyEvent& e) {
+    if (e.action != gf::KeyAction::down) return;
+    gf::KeyEventArgs arguments = gf::key_event_arguments(e);
+    key_down(arguments);
+    e.handled = arguments.handled;
+}
+
+void MazeView::key_down(gf::KeyEventArgs& e) {
     if (e.handled) return;
     request_frame();
-    if (e.action == gf::KeyAction::down && (e.physical_key == gf::PhysicalKey::h || e.physical_key == gf::PhysicalKey::f1) && games::route_help(*this)) { e.handled = true; return; }
+    if ((e.physical_key == gf::PhysicalKey::h || e.physical_key == gf::PhysicalKey::f1) && games::route_help(*this)) { e.handled = true; return; }
     using K = gf::PhysicalKey;
-    if (e.action != gf::KeyAction::down) return;
     const std::uint32_t k = e.physical_key;
     if (k == K::f1 || k == K::h) { open(panel_ == Panel::help ? Panel::none : Panel::help); e.handled = true; return; }
     if (panel_ != Panel::none) {
@@ -595,6 +636,7 @@ void MazeView::handle_key(gf::KeyEvent& e) {
     else return;
     e.handled = true;
 }
+
 
 void MazeView::action(const std::string& id) {
     play("mz_click", .4f);

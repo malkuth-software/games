@@ -40,8 +40,11 @@ Col kind_col(Outcome k, int pair) {
 const char* kWords[] = {"one", "two", "three", "four"};
 }  // namespace
 
-AtomProbeView::AtomProbeView(gf::StableId id, Options opt) : games::RoutedInput<gf::Control>(std::move(id)), opt_(opt), box_(seed_now()) {
+AtomProbeView::AtomProbeView(gf::StableId id, Options opt) : gf::Control(std::move(id)), opt_(opt), box_(seed_now()) {
     focusable = true;
+    // Every release over the view is a click: a quick second press is another click, not a
+    // double click. (The opaque style went in GUI.Forms 0.6, audit A17.)
+    set_style(gf::ControlStyles::standard_double_click, false);
     {
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
@@ -543,54 +546,103 @@ void AtomProbeView::publish() {
 }
 
 // ------------------------------------------------------------------ input
-void AtomProbeView::handle_pointer(gf::PointerEvent& e) {
-    const gf::Point local = point_from_window(e.position);
+// The pointer, in GUI.Forms' raisers. The painted buttons fire on the derived
+// click (a release over the view after a press on the same button), so the
+// window's order rules apply; every other press acts on the press itself.
+// Hover follows the moves and clears on leave.
+void AtomProbeView::track_pointer(gf::Point local) {
     mouse_x_ = local.x / pixel_;
     mouse_y_ = local.y / pixel_;
-    mouse_in_ = e.action != gf::PointerAction::leave;
+}
+
+void AtomProbeView::update_hover() {
     const bool live = panel_ == Panel::none && reveal_t_ < 0 && !box_.opened();
-    if (e.action == gf::PointerAction::move || e.action == gf::PointerAction::leave) {
-        hover_ = hit_button();
-        const bool over_ui = !hover_.empty();
-        st_.hover_port = live && !over_ui && mouse_in_ ? ch_.pick_port(mouse_x_, mouse_y_) : -1;
-        st_.hover_cell = live && !over_ui && mouse_in_ && st_.hover_port < 0 ? ch_.pick_cell(mouse_x_, mouse_y_) : -1;
-        st_.lever_hover = live && !over_ui && mouse_in_ && ch_.pick_lever(mouse_x_, mouse_y_, st_.lever);
-        st_.partner = -1;
-        if (st_.hover_port >= 0) {
-            const int k = box_.known(st_.hover_port);
-            if (k >= 0) {
-                const Probe& pr = box_.probes()[static_cast<size_t>(k)];
-                if (pr.kind == Outcome::exit && !(shot_.port >= 0 && shot_.pr.port == pr.port)) st_.partner = pr.port == st_.hover_port ? pr.exit : pr.port;
-            }
+    hover_ = mouse_in_ ? hit_button() : std::string{};
+    const bool over_ui = !hover_.empty();
+    st_.hover_port = live && !over_ui && mouse_in_ ? ch_.pick_port(mouse_x_, mouse_y_) : -1;
+    st_.hover_cell = live && !over_ui && mouse_in_ && st_.hover_port < 0 ? ch_.pick_cell(mouse_x_, mouse_y_) : -1;
+    st_.lever_hover = live && !over_ui && mouse_in_ && ch_.pick_lever(mouse_x_, mouse_y_, st_.lever);
+    st_.partner = -1;
+    if (st_.hover_port >= 0) {
+        const int k = box_.known(st_.hover_port);
+        if (k >= 0) {
+            const Probe& pr = box_.probes()[static_cast<size_t>(k)];
+            if (pr.kind == Outcome::exit && !(shot_.port >= 0 && shot_.pr.port == pr.port)) st_.partner = pr.port == st_.hover_port ? pr.exit : pr.port;
         }
-        if (st_.hover_port >= 0 && st_.hover_port != last_hover_port_) play("ap_hover", .25f, .9f + .2f * static_cast<float>(st_.hover_port % 8) / 8);
-        last_hover_port_ = st_.hover_port;
-        const bool over = over_ui || st_.hover_port >= 0 || st_.hover_cell >= 0 || st_.lever_hover;
-        cursor = over ? gf::CursorKind::hand : gf::CursorKind::arrow;
     }
-    if (e.action == gf::PointerAction::down) {
-        activate();
-        const std::string h = hit_button();
-        if (!h.empty() && e.button == gf::PointerButton::primary) { pressed_ = h; e.handled = true; return; }
-        if (!live) { e.handled = true; return; }
+    if (st_.hover_port >= 0 && st_.hover_port != last_hover_port_) play("ap_hover", .25f, .9f + .2f * static_cast<float>(st_.hover_port % 8) / 8);
+    last_hover_port_ = st_.hover_port;
+    const bool over = over_ui || st_.hover_port >= 0 || st_.hover_cell >= 0 || st_.lever_hover;
+    cursor = over ? gf::CursorKind::hand : gf::CursorKind::arrow;
+}
+
+void AtomProbeView::on_mouse_move(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    mouse_in_ = true;
+    update_hover();
+    gf::Control::on_mouse_move(e);
+}
+
+void AtomProbeView::on_mouse_leave() {
+    mouse_in_ = false;
+    update_hover();
+    gf::Control::on_mouse_leave();
+}
+
+void AtomProbeView::on_mouse_down(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    mouse_in_ = true;
+    activate();
+    const bool live = panel_ == Panel::none && reveal_t_ < 0 && !box_.opened();
+    const std::string h = hit_button();
+    if (!h.empty() && e.button == gf::PointerButton::primary) {
+        pressed_ = h;
+    } else if (live) {
         const bool secondary = e.button == gf::PointerButton::secondary ||
                                (static_cast<unsigned>(e.modifiers) & (static_cast<unsigned>(gf::Modifier::control) | static_cast<unsigned>(gf::Modifier::alt)));
         const int port = ch_.pick_port(mouse_x_, mouse_y_);
         if (port >= 0 && !secondary) fire(port);
         else if (const int cell = ch_.pick_cell(mouse_x_, mouse_y_); cell >= 0) mark(cell, secondary);
         else if (ch_.pick_lever(mouse_x_, mouse_y_, st_.lever)) pull_lever();
-        e.handled = true;
-    } else if (e.action == gf::PointerAction::up) {
-        if (!pressed_.empty() && hit_button() == pressed_) action(pressed_);
-        pressed_.clear();
-        e.handled = true;
     }
+    e.handled = true;
+    if (is_alive()) gf::Control::on_mouse_down(e);
 }
 
-void AtomProbeView::handle_key(gf::KeyEvent& e) {
+void AtomProbeView::on_mouse_up(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    released_ = pressed_;
+    pressed_.clear();
+    e.handled = true;
+    gf::Control::on_mouse_up(e);
+}
+
+void AtomProbeView::on_mouse_click(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    const std::string released = released_;
+    released_.clear();
+    if (!released.empty() && hit_button() == released) action(released);
+    if (is_alive()) gf::Control::on_mouse_click(e);
+}
+
+// The keys: the view's own handling runs after the base raised the event, on
+// a key its subscribers left unhandled; keys bubbling from a focused child
+// take the same handling.
+void AtomProbeView::on_key_down(gf::KeyEventArgs& e) {
+    gf::Control::on_key_down(e);
+    key_down(e);
+}
+
+void AtomProbeView::on_key_bubble(gf::KeyEvent& e) {
+    if (e.action != gf::KeyAction::down) return;
+    gf::KeyEventArgs arguments = gf::key_event_arguments(e);
+    key_down(arguments);
+    e.handled = arguments.handled;
+}
+
+void AtomProbeView::key_down(gf::KeyEventArgs& e) {
     if (e.handled) return;
     using K = gf::PhysicalKey;
-    if (e.action != gf::KeyAction::down) return;
     const std::uint32_t k = e.physical_key;
     if (panel_ == Panel::name) {
         if (k == K::backspace && !name_entry_.empty()) { name_entry_.pop_back(); play("ui_name_backspace", .6f); }
@@ -614,9 +666,11 @@ void AtomProbeView::handle_key(gf::KeyEvent& e) {
     if (k == K::s && !opt_.hosted) { action("sound"); e.handled = true; return; }
 }
 
-void AtomProbeView::on_text_input(gf::TextInputEvent& e) {
-    if (panel_ != Panel::name) return;
-    for (char c : e.text_utf8) {
+// Committed text, for the name entry.
+void AtomProbeView::on_key_press(gf::KeyPressEventArgs& e) {
+    gf::Control::on_key_press(e);
+    if (e.handled || panel_ != Panel::name) return;
+    for (char c : e.text) {
         if (name_entry_.size() >= 12) break;
         if (std::isalnum(static_cast<unsigned char>(c)) || c == ' ' || c == '-' || c == '.') {
             name_entry_ += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
@@ -625,6 +679,8 @@ void AtomProbeView::on_text_input(gf::TextInputEvent& e) {
     }
     e.handled = true;
 }
+
+
 
 void AtomProbeView::action(const std::string& id) {
     if (id == "close") open(Panel::none);

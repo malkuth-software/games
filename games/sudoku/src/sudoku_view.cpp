@@ -58,7 +58,7 @@ class PadNumeral final : public gf::Button {
 static std::filesystem::path sudoku_path() {
     return cabinet_path().parent_path() / "sudoku-v1.txt";
 }
-SudokuView::SudokuView(gf::StableId id) : games::RoutedInput<gf::Control>(std::move(id)) {
+SudokuView::SudokuView(gf::StableId id) : gf::Control(std::move(id)) {
     focusable = true;
     accessible_name = "Sudoku. Choose a digit; click a square to set it, right click to make a "
                         "note. Arrow keys move; N toggles notes; Z undoes.";
@@ -510,36 +510,58 @@ void SudokuView::action(gf::ButtonBase& button) {
         static_cast<void>((*attached_window()).request_focus(shared_from_this()));
     invalidate(gf::Dirty::paint);
 }
-void SudokuView::handle_pointer(gf::PointerEvent& e) {
-    const gf::Point local_position = point_from_window(e.position);
-    if (panel_ || busy_)
-        return;
-    int cell = -1;
-    if (local_position.x >= board_.x && local_position.y >= board_.y &&
-        local_position.x < board_.x + board_.width && local_position.y < board_.y + board_.height)
-        cell = static_cast<int>((local_position.x - board_.x) / cell_) +
-               9 * static_cast<int>((local_position.y - board_.y) / cell_);
-    if (e.action == gf::PointerAction::move) {
+// The pointer, in GUI.Forms' raisers: hover follows the moves, and a press on
+// a cell selects it and enters the chosen digit (a note with the secondary
+// button or in notes mode). Nothing reacts under a panel or while busy.
+int SudokuView::cell_at(gf::Point local) const {
+    if (local.x >= board_.x && local.y >= board_.y && local.x < board_.x + board_.width &&
+        local.y < board_.y + board_.height)
+        return static_cast<int>((local.x - board_.x) / cell_) + 9 * static_cast<int>((local.y - board_.y) / cell_);
+    return -1;
+}
+
+void SudokuView::on_mouse_move(gf::MouseEventArgs& event) {
+    if (!panel_ && !busy_) {
+        const int cell = cell_at(event.location);
         if (hover_ != cell) {
             hover_ = cell;
             invalidate(board_);
         }
     }
-    if (e.action == gf::PointerAction::down && cell >= 0) {
+    gf::Control::on_mouse_move(event);
+}
+
+void SudokuView::on_mouse_down(gf::MouseEventArgs& event) {
+    const int cell = panel_ || busy_ ? -1 : cell_at(event.location);
+    if (cell >= 0) {
         selected_ = cell;
         if (attached_window())
             static_cast<void>((*attached_window()).request_focus(shared_from_this()));
         keyboard_ = false;
-        edit(digit_, digit_ != 0 && (notes_ || e.button == gf::PointerButton::secondary));
+        edit(digit_, digit_ != 0 && (notes_ || event.button == gf::PointerButton::secondary));
         invalidate(gf::Dirty::paint);
-        e.handled = true;
+        event.handled = true;
     }
+    if (is_alive()) gf::Control::on_mouse_down(event);
 }
+
+// The keys: the view's own handling runs after the base raised the event, on
+// a key its subscribers left unhandled; keys bubbling from a focused child
+// take the same handling.
+void SudokuView::on_key_down(gf::KeyEventArgs& e) {
+    gf::Control::on_key_down(e);
+    key_down(e);
+}
+
 void SudokuView::on_key_bubble(gf::KeyEvent& e) {
-    handle_key(e);
+    if (e.action != gf::KeyAction::down) return;
+    gf::KeyEventArgs arguments = gf::key_event_arguments(e);
+    key_down(arguments);
+    e.handled = arguments.handled;
 }
-void SudokuView::handle_key(gf::KeyEvent& e) {
-    if (e.handled || e.action != gf::KeyAction::down)
+
+void SudokuView::key_down(gf::KeyEventArgs& e) {
+    if (e.handled)
         return;
     if (e.physical_key == gf::PhysicalKey::escape) {
         panel(0);
@@ -571,12 +593,16 @@ void SudokuView::handle_key(gf::KeyEvent& e) {
     invalidate(gf::Dirty::paint);
     e.handled = true;
 }
-void SudokuView::on_text_input(gf::TextInputEvent& e) {
-    if (e.text_utf8.size() == 1 && e.text_utf8[0] >= '1' && e.text_utf8[0] <= '9' && !panel_) {
-        digit_ = e.text_utf8[0] - '0';
+
+// Committed text: a digit enters itself.
+void SudokuView::on_key_press(gf::KeyPressEventArgs& event) {
+    gf::Control::on_key_press(event);
+    if (event.handled) return;
+    if (event.text.size() == 1 && event.text[0] >= '1' && event.text[0] <= '9' && !panel_) {
+        digit_ = event.text[0] - '0';
         keyboard_ = true;
         edit(digit_, notes_);
-        e.handled = true;
+        event.handled = true;
     }
 }
 } // namespace games

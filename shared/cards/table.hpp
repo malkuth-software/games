@@ -5,7 +5,7 @@
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/controls/text_box.hpp"
 #include "gui_forms/timer.hpp"
-#include "routed_input.hpp"
+#include "gui_forms/events/key_events/key_events.hpp"
 #include "storage.hpp"
 #include "suite.hpp"
 #include "suite_settings.hpp"
@@ -22,7 +22,7 @@ struct Sprite {
     double lift = 0;  // 0 on the table .. 1 at the top of its arc, as it moves
     double arc = .45; // how high a move that does not turn the card rises (a short one barely)
 };
-class Table final : public games::RoutedInput<gf::Control>, public CommandSource {
+class Table final : public gf::Control, public CommandSource {
   public:
     explicit Table(gf::StableId id);
     static constexpr bool initialize_tree_after_construction = true;
@@ -30,10 +30,13 @@ class Table final : public games::RoutedInput<gf::Control>, public CommandSource
     void initialize_control_tree();
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void handle_pointer(gf::PointerEvent& event) override;
-    void handle_key(gf::KeyEvent& event) override;
-    void on_key_preview(gf::KeyEvent& event) override;
+    void on_mouse_down(gf::MouseEventArgs& event) override;
+    void on_mouse_up(gf::MouseEventArgs& event) override;
+    void on_mouse_move(gf::MouseEventArgs& event) override;
+    void on_mouse_double_click(gf::MouseEventArgs& event) override;
+    void on_key_down(gf::KeyEventArgs& event) override;
     void on_key_bubble(gf::KeyEvent& event) override;
+    void on_key_preview(gf::KeyEvent& event) override;
     Game game;
     void activate();
     void reload_preferences();
@@ -51,6 +54,12 @@ class Table final : public games::RoutedInput<gf::Control>, public CommandSource
     }
 
   private:
+    void primary_press(gf::MouseEventArgs& event, gf::Point local_position);
+    [[nodiscard]] int foundation_for(int pile, int index) const;
+    void key_down(gf::KeyEventArgs& event);
+    // The second press of a double click on a card that can go to a
+    // foundation: the double click that follows it places the card.
+    bool double_place_ = false;
     Cabinet cabinet_;
     std::shared_ptr<gf::TextBox> score_name_;
     bool pending_score() const;

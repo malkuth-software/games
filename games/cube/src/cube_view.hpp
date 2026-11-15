@@ -21,7 +21,7 @@
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
-#include "routed_input.hpp"
+#include "gui_forms/events/key_events/key_events.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -41,7 +41,7 @@ struct Options {
     bool dev = false;     // a separate save file and scripted actions, for tests
 };
 
-class CubeView final : public games::RoutedInput<gf::Control>, public games::CommandSource {
+class CubeView final : public gf::Control, public games::CommandSource {
 public:
     CubeView(gf::StableId id, Options options);
     ~CubeView() override;
@@ -49,12 +49,14 @@ public:
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void handle_pointer(gf::PointerEvent& event) override;
-    void handle_key(gf::KeyEvent& event) override;
-    void on_key_bubble(gf::KeyEvent& event) override {
-        handle_key(event);
-    }
-    void on_text_input(gf::TextInputEvent& event) override;
+    void on_mouse_down(gf::MouseEventArgs& event) override;
+    void on_mouse_up(gf::MouseEventArgs& event) override;
+    void on_mouse_move(gf::MouseEventArgs& event) override;
+    void on_mouse_leave() override;
+    void on_mouse_capture_changed() override;
+    void on_key_down(gf::KeyEventArgs& event) override;
+    void on_key_bubble(gf::KeyEvent& event) override;
+    void on_key_press(gf::KeyPressEventArgs& event) override;
 
     void activate();
     void set_cabinet(bool foreground, bool music, bool sound, bool reduced = false);
@@ -77,6 +79,8 @@ public:
     [[nodiscard]] bool settled() const;
 
 private:
+    void end_trace();
+    void key_down(gf::KeyEventArgs& event);
     enum class Panel { none, scores, name, help };
     struct Job {
         std::future<Puzzle> board;

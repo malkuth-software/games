@@ -43,9 +43,12 @@ int size_index(int n) {
 
 }  // namespace
 
-SpecimenCabinetView::SpecimenCabinetView(gf::StableId id, Options options) : games::RoutedInput<gf::Control>(std::move(id)), options_(options) {
+SpecimenCabinetView::SpecimenCabinetView(gf::StableId id, Options options) : gf::Control(std::move(id)), options_(options) {
     front_ = !options_.hosted;
     focusable = true;
+    // Every release over the view is a click: a quick second press is another click, not a
+    // double click. (The opaque style went in GUI.Forms 0.6, audit A17.)
+    set_style(gf::ControlStyles::standard_double_click, false);
     gf::SurfaceMaterial plain;
     plain.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(36, 23, 14))};
     set_authored_surface_material(plain);
@@ -572,38 +575,21 @@ void SpecimenCabinetView::cancel_press() {
 
 // ---------------------------------------------------------------- input
 
-void SpecimenCabinetView::handle_pointer(gf::PointerEvent& event) {
-    const gf::Point local = point_from_window(event.position);
-    const double x = local.x;
-    const double y = local.y;
+// The pointer, in GUI.Forms' raisers. Under a panel, its buttons fire on the
+// derived click after a press on the same button. Under help, a press closes
+// it. On the board a primary press lifts a movable stone under capture; past
+// 0.12 of a stone the moves drag it and the release lets it go there (and
+// suppresses the click); a press that did not drag is a click, and the stone
+// is carried until the next press sets it down. A secondary press puts the
+// stone in hand back. A capture lost mid-press, or a release whose click was
+// dropped (a modal, the pointer off the view), puts the stone back.
+void SpecimenCabinetView::on_mouse_move(gf::MouseEventArgs& event) {
+    const double x = event.location.x;
+    const double y = event.location.y;
     if (panel_ != Panel::none) {
         const int button = panel_button(x, y);
-        if (event.action == gf::PointerAction::move) {
-            cursor = button >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
-        } else if (event.action == gf::PointerAction::down && event.button == gf::PointerButton::primary) {
-            activate();
-            pressed_button_ = button;
-            if (button >= 0)
-                set_pointer_capture(true);
-            request_frame();
-            event.handled = true;
-        } else if (event.action == gf::PointerAction::up && event.button == gf::PointerButton::primary) {
-            const int pressed = pressed_button_;
-            cancel_press();
-            if (pressed >= 0 && pressed == button)
-                press_panel_button(pressed);
-            request_frame();
-            event.handled = true;
-        }
-        return;
-    }
-    if (help_) {
-        if (event.action == gf::PointerAction::down)
-            set_help(false);
-        event.handled = event.action == gf::PointerAction::down;
-        return;
-    }
-    if (event.action == gf::PointerAction::move || event.action == gf::PointerAction::leave) {
+        cursor = button >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+    } else if (!help_) {
         if (pressing_ && !dragging_ && std::hypot(x - press_x_, y - press_y_) > layout_.stone * .12)
             dragging_ = true;
         if (held_ >= 0 && (dragging_ || carrying_)) {
@@ -613,55 +599,101 @@ void SpecimenCabinetView::handle_pointer(gf::PointerEvent& event) {
             keyboard_ = false;
             render_dirty_ = true;
             cursor = gf::CursorKind::hand;
-        } else if (event.action == gf::PointerAction::move) {
+        } else {
             const int under = stone_under(layout_, session_, x, y, waiting_);
             cursor = under >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
         }
         if (render_dirty_)
             request_frame();
-        return;
     }
-    if (event.action == gf::PointerAction::down) {
+    gf::Control::on_mouse_move(event);
+}
+
+void SpecimenCabinetView::on_mouse_down(gf::MouseEventArgs& event) {
+    const double x = event.location.x;
+    const double y = event.location.y;
+    if (panel_ != Panel::none) {
+        if (event.button == gf::PointerButton::primary) {
+            activate();
+            pressed_button_ = panel_button(x, y);
+            if (pressed_button_ >= 0)
+                set_pointer_capture(true);
+            request_frame();
+            event.handled = true;
+        }
+    } else if (help_) {
+        set_help(false);
+        event.handled = true;
+    } else {
         activate();
         event.handled = true;
-        if (!session_.playing || session_.won)
-            return;
-        if (event.button == gf::PointerButton::secondary) {
-            put_back();
-            return;
+        if (session_.playing && !session_.won) {
+            if (event.button == gf::PointerButton::secondary) {
+                put_back();
+            } else if (event.button == gf::PointerButton::primary) {
+                keyboard_ = false;
+                if (held_ >= 0 && carrying_) {
+                    // The second click of a carry sets the stone down here.
+                    let_go(x, y);
+                } else {
+                    const int stone = stone_under(layout_, session_, x, y, waiting_);
+                    if (stone >= 0) {
+                        take(stone, x, y);
+                        pressing_ = true;
+                        dragging_ = false;
+                        press_x_ = x;
+                        press_y_ = y;
+                        set_pointer_capture(true);
+                    }
+                }
+            }
         }
-        if (event.button != gf::PointerButton::primary)
-            return;
-        keyboard_ = false;
-        if (held_ >= 0 && carrying_) {
-            // The second click of a carry sets the stone down here.
-            let_go(x, y);
-            return;
-        }
-        const int stone = stone_under(layout_, session_, x, y, waiting_);
-        if (stone < 0)
-            return;
-        take(stone, x, y);
-        pressing_ = true;
-        dragging_ = false;
-        press_x_ = x;
-        press_y_ = y;
-        set_pointer_capture(true);
-        return;
     }
-    if (event.action == gf::PointerAction::up && event.button == gf::PointerButton::primary) {
-        event.handled = true;
-        if (!pressing_)
-            return;
-        const bool dragged = dragging_;
-        set_pointer_capture(false);
-        pressing_ = false;
-        dragging_ = false;
-        if (held_ < 0)
-            return;
-        if (dragged) {
-            let_go(x, y);
-        } else {
+    if (is_alive()) gf::Control::on_mouse_down(event);
+}
+
+void SpecimenCabinetView::on_mouse_up(gf::MouseEventArgs& event) {
+    const double x = event.location.x;
+    const double y = event.location.y;
+    if (event.button == gf::PointerButton::primary) {
+        if (panel_ != Panel::none) {
+            released_button_ = pressed_button_;
+            cancel_press();
+            request_frame();
+            event.handled = true;
+        } else if (!help_) {
+            event.handled = true;
+            if (pressing_) {
+                const bool dragged = dragging_;
+                set_pointer_capture(false);
+                pressing_ = false;
+                dragging_ = false;
+                if (held_ >= 0 && dragged) {
+                    let_go(x, y);
+                    // a drop is not a click
+                    event.suppress_click = true;
+                } else if (held_ >= 0) {
+                    carry_pending_ = true;
+                }
+            }
+        }
+    }
+    gf::Control::on_mouse_up(event);
+}
+
+void SpecimenCabinetView::on_mouse_click(gf::MouseEventArgs& event) {
+    const double x = event.location.x;
+    const double y = event.location.y;
+    const int released = released_button_;
+    const bool carry = carry_pending_;
+    released_button_ = -1;
+    carry_pending_ = false;
+    if (event.button == gf::PointerButton::primary) {
+        if (panel_ != Panel::none) {
+            if (released >= 0 && released == panel_button(x, y))
+                press_panel_button(released);
+            request_frame();
+        } else if (carry && held_ >= 0) {
             // A click: the stone is carried until the next.
             carrying_ = true;
             held_x_ = x - grip_x_;
@@ -669,10 +701,39 @@ void SpecimenCabinetView::handle_pointer(gf::PointerEvent& event) {
             request_frame();
         }
     }
+    if (is_alive()) gf::Control::on_mouse_click(event);
 }
 
-void SpecimenCabinetView::handle_key(gf::KeyEvent& event) {
-    if (event.handled || event.action != gf::KeyAction::down)
+// The capture ends after the release's click, or before the release when it is
+// lost. A press still down, or a lifted stone whose click never came, goes back.
+void SpecimenCabinetView::on_mouse_capture_changed() {
+    if (pressing_ || dragging_) {
+        cancel_press();
+        request_frame();
+    } else if (carry_pending_) {
+        carry_pending_ = false;
+        put_back();
+    }
+    gf::Control::on_mouse_capture_changed();
+}
+
+// The keys: the view's own handling runs after the base raised the event, on
+// a key its subscribers left unhandled; keys bubbling from a focused child
+// take the same handling.
+void SpecimenCabinetView::on_key_down(gf::KeyEventArgs& event) {
+    gf::Control::on_key_down(event);
+    key_down(event);
+}
+
+void SpecimenCabinetView::on_key_bubble(gf::KeyEvent& event) {
+    if (event.action != gf::KeyAction::down) return;
+    gf::KeyEventArgs arguments = gf::key_event_arguments(event);
+    key_down(arguments);
+    event.handled = arguments.handled;
+}
+
+void SpecimenCabinetView::key_down(gf::KeyEventArgs& event) {
+    if (event.handled)
         return;
     using Key = gf::PhysicalKey;
     const std::uint32_t key = event.physical_key;
@@ -754,6 +815,7 @@ void SpecimenCabinetView::handle_key(gf::KeyEvent& event) {
         event.handled = false;
     }
 }
+
 
 // ---------------------------------------------------------------- the capsule
 

@@ -35,9 +35,12 @@ const char* danger_word(int d) { return d <= 1 ? "easy pickings" : d == 2 ? "a s
 std::string a_an(const std::string& w) { return (w.empty() || std::strchr("aeiou", w[0]) == nullptr ? "a " : "an ") + w; }
 }  // namespace
 
-DiceView::DiceView(gf::StableId id, Options opt) : games::RoutedInput<gf::Control>(std::move(id)), opt_(opt) {
+DiceView::DiceView(gf::StableId id, Options opt) : gf::Control(std::move(id)), opt_(opt) {
     cab_front_ = !opt_.hosted;
     focusable = true;
+    // Every release over the view is a click: a quick second press is another click, not a
+    // double click. (The opaque style went in GUI.Forms 0.6, audit A17.)
+    set_style(gf::ControlStyles::standard_double_click, false);
     {
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
@@ -639,35 +642,73 @@ void DiceView::publish() {
 }
 
 // ------------------------------------------------------------------ input
-void DiceView::handle_pointer(gf::PointerEvent& e) {
-    const gf::Point local = point_from_window(e.position);
+// The pointer, in GUI.Forms' raisers. The painted buttons fire on the derived
+// click (a release over the view after a press on the same button), so the
+// window's order rules apply; every other press acts on the press itself.
+void DiceView::track_pointer(gf::Point local) {
     mouse_x_ = local.x / pixel_;
     mouse_y_ = local.y / pixel_;
-    auto hit = [&]() -> std::string {
-        for (const Button& b : buttons_)
-            if (b.enabled && mouse_x_ >= b.x && mouse_x_ < b.x + b.w && mouse_y_ >= b.y && mouse_y_ < b.y + b.h) return b.id;
-        return {};
-    };
-    if (e.action == gf::PointerAction::move) {
-        hover_ = hit();
-        hover_seat_ = hover_.empty() && panel_ == Panel::none && phase_ != Phase::wagers && mouse_y_ < ph_ - panel_h_ ? cab_.pick(mouse_x_, mouse_y_, st_) : -1;
-        cursor = !hover_.empty() ? gf::CursorKind::hand : gf::CursorKind::arrow;
-    }
-    if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
-        activate();
-        const std::string h = hit();
-        if (!h.empty()) { pressed_ = h; e.handled = true; return; }
-        if (phase_ == Phase::greet) { bubbles_.clear(); begin_round(); }
-        e.handled = true;
-    } else if (e.action == gf::PointerAction::up) {
-        if (!pressed_.empty() && hit() == pressed_) action(pressed_);
-        pressed_.clear();
-        e.handled = true;
-    }
 }
 
-void DiceView::handle_key(gf::KeyEvent& e) {
-    if (e.handled || e.action != gf::KeyAction::down) return;
+std::string DiceView::hit_button() const {
+    for (const Button& b : buttons_)
+        if (b.enabled && mouse_x_ >= b.x && mouse_x_ < b.x + b.w && mouse_y_ >= b.y && mouse_y_ < b.y + b.h) return b.id;
+    return {};
+}
+
+void DiceView::on_mouse_move(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    hover_ = hit_button();
+    hover_seat_ = hover_.empty() && panel_ == Panel::none && phase_ != Phase::wagers && mouse_y_ < ph_ - panel_h_ ? cab_.pick(mouse_x_, mouse_y_, st_) : -1;
+    cursor = !hover_.empty() ? gf::CursorKind::hand : gf::CursorKind::arrow;
+    gf::Control::on_mouse_move(e);
+}
+
+void DiceView::on_mouse_down(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    if (e.button == gf::PointerButton::primary) {
+        activate();
+        const std::string h = hit_button();
+        if (!h.empty()) pressed_ = h;
+        else if (phase_ == Phase::greet) { bubbles_.clear(); begin_round(); }
+        e.handled = true;
+    }
+    if (is_alive()) gf::Control::on_mouse_down(e);
+}
+
+void DiceView::on_mouse_up(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    released_ = pressed_;
+    pressed_.clear();
+    e.handled = true;
+    gf::Control::on_mouse_up(e);
+}
+
+void DiceView::on_mouse_click(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    const std::string released = released_;
+    released_.clear();
+    if (!released.empty() && hit_button() == released) action(released);
+    if (is_alive()) gf::Control::on_mouse_click(e);
+}
+
+// The keys: the view's own handling runs after the base raised the event, on
+// a key its subscribers left unhandled; keys bubbling from a focused child
+// take the same handling.
+void DiceView::on_key_down(gf::KeyEventArgs& e) {
+    gf::Control::on_key_down(e);
+    key_down(e);
+}
+
+void DiceView::on_key_bubble(gf::KeyEvent& e) {
+    if (e.action != gf::KeyAction::down) return;
+    gf::KeyEventArgs arguments = gf::key_event_arguments(e);
+    key_down(arguments);
+    e.handled = arguments.handled;
+}
+
+void DiceView::key_down(gf::KeyEventArgs& e) {
+    if (e.handled) return;
     using K = gf::PhysicalKey;
     const std::uint32_t k = e.physical_key;
     if (panel_ != Panel::none) {
@@ -687,6 +728,7 @@ void DiceView::handle_key(gf::KeyEvent& e) {
     if ((phase_ == Phase::result || phase_ == Phase::freedom) && (k == K::enter || k == K::space)) { action("again"); e.handled = true; return; }
     if (phase_ == Phase::greet && (k == K::enter || k == K::space)) { bubbles_.clear(); begin_round(); e.handled = true; }
 }
+
 
 void DiceView::action(const std::string& id) {
     play("ld_click", .4f);
