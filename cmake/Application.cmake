@@ -81,37 +81,18 @@ set_target_properties(games PROPERTIES
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
 if(APPLE)
     set(games_resources "$<TARGET_BUNDLE_DIR:games>/Contents/Resources")
-    set(games_libraries "$<TARGET_BUNDLE_DIR:games>/Contents/Frameworks")
-    set_target_properties(games PROPERTIES BUILD_RPATH "@executable_path/../Frameworks")
     set_source_files_properties(assets/Games.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
     target_sources(games PRIVATE assets/Games.icns)
     set_target_properties(games PROPERTIES MACOSX_BUNDLE_ICON_FILE "Games.icns")
 else()
     set(games_resources "$<TARGET_FILE_DIR:games>")
-    set(games_libraries "$<TARGET_FILE_DIR:games>")
-    if(UNIX)
-        set_target_properties(games PROPERTIES BUILD_RPATH "$ORIGIN")
-    endif()
 endif()
+# GUI.Forms is one module (static archives linked into the program): no GUI.Forms library is
+# copied beside the executable and no rpath points at one.
 add_custom_command(TARGET games POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${games_libraries}"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:GUIForms::Application>" "${games_libraries}"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${GAMES_RUNTIME_ASSET_DIR}" "${games_resources}/assets"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${GUIForms_FONT_DIR}" "${games_resources}/fonts"
     VERBATIM)
-# An installed GUI.Forms keeps its DLLs in <prefix>/bin; Windows finds a DLL beside the
-# executable, so the games and the tests (all built in this directory) get copies.
-if(WIN32 AND GAMES_GUI_FORMS_INSTALLED)
-    add_custom_command(TARGET games POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:GUIForms::Threading>" "${games_libraries}"
-        VERBATIM)
-endif()
-if(UNIX)
-    add_custom_command(TARGET games POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:GUIForms::Application>"
-            "${games_libraries}/$<TARGET_SONAME_FILE_NAME:GUIForms::Application>"
-        VERBATIM)
-endif()
 add_executable(ui_tests tests/ui_tests.cpp)
 add_executable(puzzle_frame_tests tests/puzzle_frame_tests.cpp)
 if("gems" IN_LIST GAMES_MODULE_IDS AND "untangle" IN_LIST GAMES_MODULE_IDS)
