@@ -1,4 +1,7 @@
-// The help book's business card: the held card draws where it is and nowhere else, its shadow
+// The held card (shared/cards/held_card.*, PlaySuite's former business card; GUI.Forms' card
+// replaced it in cp33, and the turned card waits for GUI.Forms' own) and the card's remarks,
+// which GUI.Forms' card now says through its remark source: the held card draws where it is
+// and nowhere else, its shadow
 // falls beside it, the eye's ray finds the face that is turned toward it, and the remarks made
 // about it are whole sentences, varied, with no slot left unfilled.
 #include "card_remarks.hpp"

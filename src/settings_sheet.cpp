@@ -1,6 +1,6 @@
 #include "settings_sheet.hpp"
 
-#include "gui_forms/diagnostics/invalidation_overlay/invalidation_overlay.hpp"
+#include "gui_forms/components/business_card/business_card.hpp"
 #include "card_backs.hpp"
 #include "table_art.hpp"
 #include "presentation.hpp"
@@ -294,18 +294,19 @@ void SettingsPage::build(CommandSource* game, const std::string& game_title) {
             add_row(std::move(row));
         }
     }
-    // The invalidation overlay, shown only while it is on. It is read-only here: it is switched
-    // on by a hidden gesture on the business card and stays on until PlaySuite closes.
-    if (gf::invalidation_overlay_default()) {
+    // GUI.Forms' diagnostic overlay (cp33), shown only while it is on. It is read-only here: the
+    // business card's gesture (D held, a right click on its name) turns it on and off.
+    if (gf::diagnostic_overlay()) {
         add_row({Shape::heading, "", heading("Diagnostics"), {}, nullptr, nullptr});
         std::shared_ptr<gf::CheckBox> overlay = gf::make_control<gf::CheckBox>(
             games::stable_id("settings." + std::to_string(built_) + ".invalidation-overlay"),
-            "Invalidation overlay");
+            "Diagnostic overlay");
         (*overlay).checked = true;
         (*overlay).enabled = false;
         add_child(overlay);
         add_row({Shape::check, "", overlay, {}, nullptr,
-                 text_label("Red outlines over every redone area, until PlaySuite closes.", 13, 400)});
+                 text_label("Red outlines over every redone area, and the counters at the top left. "
+                            "D and a right click on the card's name turn it off.", 13, 400)});
     }
     refresh();
     static_cast<void>(scroll_to({0, 0}));

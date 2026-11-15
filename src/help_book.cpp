@@ -273,10 +273,11 @@ HelpBook::HelpBook(gf::StableId id) : Control(std::move(id)) {
 void HelpBook::initialize_control_tree() {
     pages_ = gf::make_control<HelpPages>(gf::StableId("help.pages"));
     (*pages_).card_moved = std::bind_front(&HelpBook::place_card, this);
-    card_ = gf::make_control<BusinessCard>(gf::StableId("help.business-card"), BusinessCard::Kind::page);
-    (*card_).scroll = std::bind_front(&HelpBook::wheel_over_card, this);
-    (*card_).open = std::bind_front(&HelpBook::card_clicked, this);
-    gf::on(visible_changed(), *this, &HelpBook::visibility);
+    card_ = gf::make_control<gf::BusinessCard>(gf::StableId("help.business-card"),
+                                                gf::BusinessCardPresentation::page);
+    // Shown once the pages have placed it.
+    (*card_).visible = false;
+    gf::on((*card_).open_requested(), *this, &HelpBook::card_clicked);
     close_ = gf::make_control<HelpGlyph>(gf::StableId("help.close"), "×");
     (*close_).set_paint_plane(gf::PaintPlane::overlay);
     (*close_).accessible_name = "Close PlaySuite help (H or Escape)";
@@ -298,27 +299,40 @@ void HelpBook::select(int entry, std::string_view topic) {
     if (window != nullptr)
         sheet_.prepare(*window);
     (*pages_).select(entry, topic);
-    (*card_).set_showing(true);
 }
-void HelpBook::visibility(bool shown) {
-    if (!shown)
-        (*card_).set_showing(false);
-}
+// The card's stock is `width` wide with its middle at `centre`, in the pages' visible points
+// (the pages sit at (20, 62) in the book). GUI.Forms' card keeps a fixed margin around its
+// stock for the shadow and the tilt and fits the stock in the rest, at the card's proportion
+// (3.5 by 2), so the margin is read from its measure: W = w + 2m and H = h + 2m with
+// w = 1.75 h give h = (W - H) / 0.75. The card is hidden once it has scrolled wholly under
+// the book's heading band (`top_room` above the pages).
 void HelpBook::place_card(gf::Point centre, double width, double top_room) {
-    (*card_).place(centre, width, top_room);
+    const gf::Size wanted = (*card_).measure(gf::Size{});
+    const double stock_height_wanted = (wanted.width - wanted.height) / 0.75;
+    const double margin = std::max(0.0, (wanted.height - stock_height_wanted) / 2);
+    const double stock_height = width * 2 / 3.5;
+    const gf::Rect placed{20 + centre.x - width / 2 - margin, 62 + centre.y - stock_height / 2 - margin,
+                          width + 2 * margin, stock_height + 2 * margin};
+    set_child_layout(card_, placed);
+    const bool seen = centre.y + stock_height / 2 > -top_room;
+    if ((*card_).visible.read() != seen)
+        (*card_).visible = seen;
 }
-void HelpBook::card_clicked() {
-    if (open_card)
-        open_card();
+void HelpBook::card_clicked(gf::BusinessCardRequest& request) {
+    if (!open_card)
+        return;
+    open_card();
+    request.handled = true;
 }
-void HelpBook::wheel_over_card(gf::PointerEvent& event) {
-    (*pages_).wheel_from_card(event);
+void HelpBook::on_pointer_bubble(gf::PointerEvent& event) {
+    if (event.action == gf::PointerAction::wheel && !event.handled)
+        (*pages_).wheel_from_card(event);
+    gf::Control::on_pointer_bubble(event);
 }
 void HelpBook::arrange(gf::Rect bounds) {
     arrange_self(bounds);
     set_child_layout(close_, {bounds.width - 48, 9, 36, 36});
     set_child_layout(pages_, {20, 62, bounds.width - 36, bounds.height - 82});
-    set_child_layout(card_, {20, 62, bounds.width - 36, bounds.height - 82});
 }
 void HelpBook::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
     sheet_.release(window);

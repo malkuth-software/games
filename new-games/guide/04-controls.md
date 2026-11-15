@@ -144,7 +144,7 @@ parts of its kind through the theme (`paint_skin_part` and `gf::paint_text_part_
 | `CardBackChoice` | `Button` | `card-back`; chosen is `:checked` | face (the ring), focus; the card is content |
 | `HelpGlyph` (`src/help_book.*`) | `Button` | `help-glyph`, with `help-link` or `card-mark` (`set_variant`) | label, underline glyph |
 | `TopicHeading` | `Button` | `topic-heading` | face, label (the +/- as secondary text), focus |
-| `BusinessCard` (`src/business_card.*`) | `Control` | | Canvas art: Rainstar Software's card, drawn by `shared/cards/held_card.*`. |
+| `gf::BusinessCard` (GUI.Forms) | `Control` | | GUI.Forms' business card (cp33): on help's page and in the hand; text from `gf::set_program_identity` (src/main.cpp), look from themes/playsuite. |
 
 A subtree takes its skin by class (`set_skin_class(control, ButtonSkin::ivory)`, which
 replaces games_theme and set_theme_override): `.skin-ivory` and the rest give its labels

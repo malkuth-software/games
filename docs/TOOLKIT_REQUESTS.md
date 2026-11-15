@@ -368,3 +368,29 @@ and that the window has no scheme fallback). Each item names what GUI.Forms coul
 16. **Stable IDs are kebab case.** Runtime IDs built from save slugs, setting keys and
     labels (`atom_probe.action.0`, `shelf.Music`, `-1.rules`) now throw. `games::stable_id`
     spells them (`src/stable_ids.hpp`). No toolkit need.
+
+## The business card (found adopting GUI.Forms' card, cp33, 2026-11-15)
+
+PlaySuite's own card (src/business_card.*, removed) is replaced by GUI.Forms' BusinessCard
+and its diagnostic overlay, as the owner ruled (one card for every program). The page card
+lies beside help's dedication, the hand card comes out in the window's own modal layer, the
+identity is set in main, the remarks come through the remark source (src/card_remarks.*), and
+themes/playsuite gives the card its bone stock, black ink and gold foil. What GUI.Forms' first
+(flat) card cannot express, and PlaySuite's card did:
+
+1. **The card turned in three dimensions.** Dragged in the hand it turned, spun down when
+   let go and settled face up or face down, lit as it faced the lamp, with a back face.
+   GUI.Forms' card only tilts toward the pointer; its header says the turned card comes
+   later. `shared/cards/held_card.*` (and its tests) stay, now without a caller.
+2. **The stock's material.** The paper engine's stock with the Settings screen's finish
+   (dimples, the varnish's sheen, the facets' glint, the two plies of the cut edge) and
+   thermographed ink standing above it. A theme gives the stock a fill and an edge only.
+3. **Remarks around the card.** Up to three remarks rose around the card in the hand, one
+   at a time, and faded. GUI.Forms' card prints one remark, on the card, chosen when it is
+   shown.
+4. **A page card scrolled under a heading.** The old card stayed visible in the help book's
+   heading band while the pages scrolled it up; a child control is clipped to its parent,
+   so the card is now hidden once it has scrolled wholly under the band.
+5. **The website.** GUI.Forms has no host service that opens an address (see "Opening a
+   web address"): the shell answers website_requested with `open_link`.
+

@@ -1,3 +1,4 @@
+#include "gui_forms/components/business_card/business_card.hpp"
 #include "collection.hpp"
 #include "table.hpp"
 #include "puzzle_view.hpp"
@@ -289,10 +290,11 @@ int main() {
                                      eggy = child(*collection, "collection.eggy"),
                                      cards = child(*collection, "collection.cards");
         assert(shelf && capsule && !eggy && !cards);
-        // The shell's own five, and the business card, hidden until help opens it; no game yet.
-        const std::shared_ptr<gf::Control> business_card = child(*collection, "collection.business-card");
-        assert(business_card && !(*business_card).visible.read());
-        assert((*collection).children().size() == 6);
+        // The shell's own five; no game yet. The business card in the hand is GUI.Forms' (cp33),
+        // in the window's own modal layer, not a child of the shell.
+        assert(!child(*collection, "collection.business-card"));
+        assert(!(*collection).card_open());
+        assert((*collection).children().size() == 5);
         assert((*shelf).visible.read() && !(*capsule).visible.read());
         // The shell's pointer release regions (cp33's relative pointer): on the shelf only the
         // help link, the capsule being hidden.
@@ -407,7 +409,14 @@ int main() {
         (*std::static_pointer_cast<fp::FourPegsView>(fourpegs)).host_command("help");
         assert((*collection).help_open());
         assert(window.active_focus_scope_root() == child(*collection, "collection.help-book"));
+        // The business card (GUI.Forms' since cp33) comes out of help into the hand, says a
+        // remark through the shell's remark source, and goes back with help.
+        (*collection).show_card();
+        assert((*collection).card_open() && gf::business_card_shown(window));
+        const std::shared_ptr<gf::BusinessCard> hand = gf::shown_business_card(window);
+        assert(hand && (*hand).presentation() == gf::BusinessCardPresentation::hand && !(*hand).remark().empty());
         (*collection).close_help();
+        assert(!(*collection).card_open());
         assert((*std::static_pointer_cast<fp::FourPegsView>(fourpegs)).host_panel().empty());
         assert((*button(*capsule, "capsule.back")).perform_click());
         assert((*shelf).visible.read() && !(*fourpegs).visible.read());

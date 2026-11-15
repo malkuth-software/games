@@ -2,6 +2,7 @@
 #include "audio.hpp"
 #include "pcm_player.hpp"
 #include "storage.hpp"
+#include "open_link.hpp"
 #include "gui_forms/controls/text_box.hpp"
 #include <array>
 #include <span>
@@ -73,7 +74,12 @@ Collection::Collection(gf::StableId id, bool dev) : Control(std::move(id)) {
     }
     set_skin_class(*this, ButtonSkin::ivory);
 }
-Collection::~Collection() = default;
+// The remark source names this shell: cleared when it goes, if it is still the one named.
+Collection::~Collection() {
+    const gf::BusinessCardRemarkSource source = gf::business_card_remark_source();
+    if (source.context == this)
+        gf::set_business_card_remark_source(gf::BusinessCardRemarkSource{});
+}
 void Collection::set_development(bool dev) {
     modules_.dev = dev;
 }
@@ -107,13 +113,13 @@ void Collection::initialize_control_tree() {
     (*settings_).close = std::bind_front(&Collection::close_settings, this);
     (*settings_).visible = false;
     (*help_).open_card = std::bind_front(&Collection::show_card, this);
-    card_ = gf::make_control<BusinessCard>(gf::StableId("collection.business-card"), BusinessCard::Kind::hand);
-    (*card_).close = std::bind_front(&Collection::close_card, this);
-    (*card_).visible = false;
+    gf::BusinessCardRemarkSource source{};
+    source.context = this;
+    source.write_remark = &Collection::write_remark;
+    gf::set_business_card_remark_source(source);
     add_child(help_link_);
     add_child(help_);
     add_child(settings_);
-    add_child(card_);
     masters_ = SettingsStore::shared().observe(std::bind_front(&Collection::masters_changed, this));
     const SuiteSettings& masters = SettingsStore::shared().values();
     music_shown_ = masters.music;
@@ -363,7 +369,7 @@ bool Collection::forward_game_key(const gf::KeyEvent& event) {
 }
 bool Collection::overlay(const std::shared_ptr<gf::Control>& child) const {
     return child == shelf_ || child == capsule_ || child == help_ || child == help_link_ ||
-           child == settings_ || child == card_;
+           child == settings_;
 }
 void Collection::visibility() {
     for (const std::shared_ptr<gf::Control>& child : children())
@@ -406,7 +412,6 @@ void Collection::arrange(gf::Rect b) {
     const double paper_width = std::min(780.0, b.width - 32);
     set_child_layout(help_, {b.width - paper_width - 16, 16, paper_width, b.height - 32});
     set_child_layout(settings_, full);
-    set_child_layout(card_, full);
     // The capsule is hidden while the shelf is open; the help link is where it was just laid out.
     const gf::Rect help_link = shelf_open_ ? ShelfView::help_slot({b.width, b.height})
                                            : gf::Rect{b.width - 46, 8, 38, 38};
@@ -595,30 +600,42 @@ void Collection::close_help() {
     (*help_).visible = false;
     invalidate(gf::Dirty::paint);
 }
+bool Collection::card_open() const {
+    const gf::Window* window = attached_window();
+    return window != nullptr && gf::business_card_shown(*window);
+}
 void Collection::show_card() {
-    if (card_open() || !help_open())
+    gf::Window* window = attached_window();
+    if (window == nullptr || card_open() || !help_open())
         return;
-    // The card is not inside the help book, so it takes the keyboard from help's scope rather
-    // than nesting in it, and gives it back when it is put away.
-    if (attached_window() && help_focus_)
-        static_cast<void>((*attached_window()).end_focus_scope(help_focus_));
-    help_focus_ = {};
-    (*card_).visible = true;
-    (*card_).set_showing(true);
-    if (attached_window())
-        card_focus_ = (*attached_window()).begin_focus_scope(card_);
-    invalidate(gf::Dirty::layout | gf::Dirty::paint);
+    if (!gf::show_business_card(*window))
+        return;
+    // GUI.Forms makes the card the first time and keeps it: the website request is answered
+    // once per card.
+    const std::shared_ptr<gf::BusinessCard> card = gf::shown_business_card(*window);
+    if (card && card != hand_card_.lock()) {
+        hand_card_ = card;
+        gf::on((*card).website_requested(), *this, &Collection::open_website);
+    }
+    wake();
 }
 void Collection::close_card() {
-    if (!card_open())
+    gf::Window* window = attached_window();
+    if (window == nullptr || !card_open())
         return;
-    if (attached_window() && card_focus_)
-        static_cast<void>((*attached_window()).end_focus_scope(card_focus_));
-    card_focus_ = {};
-    (*card_).set_showing(false);
-    (*card_).visible = false;
-    if (attached_window() && help_open())
-        help_focus_ = (*attached_window()).begin_focus_scope(help_);
+    gf::hide_business_card(*window);
     invalidate(gf::Dirty::paint);
+}
+void Collection::write_remark(void* context, std::string& remark) {
+    Collection& shell = *static_cast<Collection*>(context);
+    remark = shell.remarks_.next();
+}
+// GUI.Forms has no host service that opens an address yet: the shell opens it.
+void Collection::open_website(gf::BusinessCardRequest& request) {
+    const std::string& website = gf::program_identity().website;
+    if (website.empty())
+        return;
+    open_link(website);
+    request.handled = true;
 }
 } // namespace games

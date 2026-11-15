@@ -3,6 +3,8 @@
 #include "playsuite_form.hpp"   // generated from forms/playsuite.form
 #include "playsuite_theme.hpp"  // generated from themes/playsuite
 #include "gui_forms/application.hpp"
+#include "gui_forms/components/business_card/business_card.hpp"
+#include "help_content.hpp"
 #include "gui_forms/paint_framebuffer.hpp"
 #include <clocale>
 #include <fstream>
@@ -279,6 +281,15 @@ int main(int argc,char** argv) {
             throw std::runtime_error("Unknown permanent game ID; use --list-games");
         games::dogfood::DevelopmentState saves(arguments.dev || arguments.smoke || arguments.profile);
         games::initialize_assets(argv[0]);
+        // The business card's text (GUI.Forms cp33: one card for every program): set once,
+        // before any card is shown. The vendor is display text only.
+        gf::ProgramIdentity identity{};
+        identity.product = "PlaySuite";
+        identity.version = GAMES_VERSION;
+        identity.vendor = "Malkuthsoft";
+        identity.website = "https://" + std::string(games::website) + "/";
+        identity.credits = std::string(games::creators);
+        gf::set_program_identity(identity);
         gf::ApplicationCreateResult created = create_application();
         if (!created) throw std::runtime_error("The application could not be made");
         gf::Application& application = *created.application;
