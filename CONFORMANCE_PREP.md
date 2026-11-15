@@ -80,7 +80,14 @@ Two branches, by the owner's ruling (option C, provisional):
    opens the hand card through `show_business_card`, whose website request opens the link. The remarks come
    from `games::CardRemarks` through `set_business_card_remark_source`. The settings row toggles
    `gf::diagnostic_overlay()`. The look stays PlaySuite's through themes/playsuite: make_theme.py writes the
-   `business-card::part(...)` rules (stock, ink, foil, hover). The card gaps are in docs/TOOLKIT_REQUESTS.md.
+   `business-card::part(...)` rules (stock, ink, foil, hover).
+   - With GUI.Forms' card parity (claude/business-card-parity 6741c7da9) nothing PlaySuite's own card did is
+     lost: the hand card turns in 3D and says the shell's remarks around itself; the sheet's stock is a
+     paper-fibre material (the turned faces paint through it) with a copyright ink and a pale remark ink;
+     the help book gives the page card its heading band (`set_heading_band`, a no-paint, no-hit control
+     over the book's title); the website goes to the host's open-URL capability, and src/open_link.* is
+     gone. Not expressed: the paper engine's finer finish (dimples, varnish, cut plies, raised ink).
+     `shared/cards/held_card.*` has no caller and can go once the GUI.Forms turn is seen.
    - tests: collection_ui (the hand card opens with a remark and closes with help), catalog_ui,
      playsuite_theme, business_card_tests (held_card and the remarks).
 
@@ -140,8 +147,7 @@ is now a GUI.Forms composite:
 - **GUI.Forms gaps (docs/TOOLKIT_REQUESTS.md):**
   - W402 `scheme_rules_without_variant` fires on a light-only package over windows_professional (the
     base's dark rules counted as the package's);
-  - the business card: the 3D turn, the card stock material, remarks around the card, the page card under
-    the heading band, the URL service;
+  - the business card's five: closed by GUI.Forms 6741c7da9 (business-card parity), adopted here;
   - the capsule title's display face: settled by the owner (composites may load fonts); waits on
     GUI.Forms claude/app-fonts (above).
   - Closed by cp33: the public `key_event_arguments` and the crossing position (`pointer_location`).
@@ -184,8 +190,8 @@ between the two. Tests that should cover this branch:
 
 ## Risks (not checked without a build)
 
-- The Linux package fails its one-module check until the GUI.Forms pin carries claude/one-module (and the
-  configure fails until it carries the static libc++ link): intended, since both are the owner's rule.
+- The Linux package's one-module check and the static libc++ configure check pass only once the GUI.Forms
+  pin carries one-module (folded as 66f82629b) and the static libc++ link.
 - The system-folder rule allows any library under /lib, /lib64, /usr/lib, /usr/lib64 (X11, ALSA, libc);
   it does not check that each is on the target distribution.
 
@@ -193,7 +199,9 @@ between the two. Tests that should cover this branch:
 - The help book places the page card from the pages' arrange and scroll (set_child_layout inside layout).
 - Zen's orbit assumes the relative release sample arrives before `relative_pointer_ended`.
 - The theme's `business-card` rules may raise new theme findings (unknown part names show only when compiled).
-- `held_card` in src/card_remarks is left without a caller; business_card_tests still covers it.
+- `held_card` is left without a caller; business_card_tests still covers it.
+- The heading band control lies over the book's title with no hit; the card is clipped at its lower edge
+  (y 62, the pages' top).
 - Crossings now read `pointer_location()` during the crossing; if it lags the crossing event, an enter is
   seen at the previous position.
 - A refused degenerate hull now throws where it once went on with fewer than four faces.
