@@ -15,10 +15,12 @@
 #include "surface.hpp"
 
 #include "gui_forms/basic_controls.hpp"
+#include "gui_forms/drag/drag_tracker/drag_tracker.hpp"
 #include "gui_forms/threading.hpp"
 #include "gui_forms/timer.hpp"
 #include "gui_forms/events/key_events/key_events.hpp"
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <memory>
@@ -118,6 +120,16 @@ private:
     // pressed, or the tray cell pressed without a drag.
     int released_button_ = 0;
     int released_cell_ = -1;
+    // The stone drag runs on GUI.Forms' DragTracker: a primary press on a stone arms it, past
+    // 0.2 of a cell it starts (plan_drag lifts the stone), and its targets are the pressed
+    // cell's up to four neighbours, hit while the pointer is over one; the release swaps with
+    // the target or sets the stone down (finish_drag). Escape, a lost capture or the window's
+    // deactivation set it down without a swap. `drag_targets_` is the plan's borrowed storage.
+    gf::DragTracker drag_{*this};
+    std::array<gf::DragTarget, 4> drag_targets_{};
+    void plan_drag(gf::DragPlan& plan);
+    void preview_drag(const gf::DragTrackerFrame& frame);
+    void finish_drag(const gf::DragTrackerFrame& frame);
     int land_sounds_ = 0;
     bool help_ = false;
     // The workshop: shapes, minerals and lit pictures made on a worker while play goes on.

@@ -11,7 +11,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
+#include <span>
 #include <thread>
 
 namespace ts {
@@ -81,6 +83,11 @@ bool neighbours(int a, int b) {
 }  // namespace
 
 TumbledStonesView::TumbledStonesView(gf::StableId id, Options options) : gf::Control(std::move(id)), options_(options) {
+    drag_.callbacks.plan = gf::Delegate<gf::DragPlan&>::bind<TumbledStonesView, &TumbledStonesView::plan_drag>(*this);
+    drag_.callbacks.preview =
+        gf::Delegate<const gf::DragTrackerFrame&>::bind<TumbledStonesView, &TumbledStonesView::preview_drag>(*this);
+    drag_.callbacks.finished =
+        gf::Delegate<const gf::DragTrackerFrame&>::bind<TumbledStonesView, &TumbledStonesView::finish_drag>(*this);
     front_ = !options_.hosted;
     focusable = true;
     // Every release over the view is a click: a quick second press is another click, not a
@@ -164,7 +171,8 @@ void TumbledStonesView::on_attached_to_window() {
     request_frame();
 }
 
-void TumbledStonesView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
+void TumbledStonesView::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
+    drag_.owner_detaching(window);
     try {
         persist();
     } catch (...) {
@@ -640,6 +648,9 @@ void TumbledStonesView::press_panel_button(int button) {
 }
 
 void TumbledStonesView::cancel_press() {
+    // A running drag session ends at once (finish_drag sets nothing down for this end).
+    if (drag_.running())
+        drag_.cancel(gf::DragEnd::model_changed);
     if (press_cell_ >= 0 || dragging_ || pressed_button_ != 0)
         set_pointer_capture(false);
     press_cell_ = -1;
@@ -652,9 +663,10 @@ void TumbledStonesView::cancel_press() {
 
 // The pointer, in GUI.Forms' raisers. Under a panel, its buttons fire on the
 // derived click after a press on the same button. Under help, a press closes
-// it. On the tray a primary press holds a cell under capture; past 0.2 of a
-// cell the moves drag its stone toward a neighbour, and the release swaps them
-// (and suppresses the click); a press that did not drag is a click on its cell,
+// it. On the tray a primary press on a stone arms GUI.Forms' DragTracker; past
+// 0.2 of a cell the moves drag the stone toward a neighbour (the plan's
+// targets), and the release swaps them (and suppresses the click), Escape or a
+// lost capture setting it down; a press that did not drag is a click on its cell,
 // which picks the stone up and turns it over. A secondary press picks the
 // stone up and turns it round. Hover follows the moves and clears on leave.
 void TumbledStonesView::show_hover(int hover) {
@@ -687,31 +699,14 @@ void TumbledStonesView::on_mouse_move(gf::MouseEventArgs& event) {
         if (under >= 0 && moved)
             render_dirty_ = true;  // the glint follows the pointer
         show_hover(under);
-        bool cancelled = false;
-        if (press_cell_ >= 0 && !busy()) {
-            const double travel = std::hypot(x - press_x_, y - press_y_);
-            if (!dragging_ && travel > layout_.cell * .2) {
-                dragging_ = true;
-                if (hand_.serial != 0) {
-                    const bool same = hand_.cell == press_cell_;
-                    set_down();
-                    if (busy() || (same && session_.board.cells[static_cast<std::size_t>(press_cell_)].family < 0)) {
-                        cancel_press();
-                        request_frame();
-                        cancelled = true;
-                    }
-                }
-                if (!cancelled)
-                    play("ts_lift", .3F, 1.05F);
-            }
-            if (dragging_ && !cancelled) {
-                drag_x_ = x;
-                drag_y_ = y;
-                drag_to_ = under >= 0 && neighbours(under, press_cell_) ? under : -1;
-                render_dirty_ = true;
-            }
+        // The tracker lifts the stone past its threshold (plan_drag) and follows it
+        // (preview_drag) while its session runs.
+        if (drag_.running()) {
+            const gf::PointerEvent moved_event = gf::pointer_event_of(event);
+            if (drag_.pointer(moved_event))
+                event.handled = true;
         }
-        if (render_dirty_ && !cancelled)
+        if (render_dirty_)
             request_frame();
     }
     gf::Control::on_mouse_move(event);
@@ -751,7 +746,19 @@ void TumbledStonesView::on_mouse_down(gf::MouseEventArgs& event) {
                 press_x_ = x;
                 press_y_ = y;
                 dragging_ = false;
-                set_pointer_capture(true);
+                // The tracker takes the capture; past 0.2 of a cell it plans the drag.
+                gf::DragStart start{};
+                start.key = static_cast<std::uint64_t>(under);
+                double centre_x = 0, centre_y = 0;
+                cell_centre(layout_, under, centre_x, centre_y);
+                const double half = layout_.cell * .5;
+                const gf::Point corner = point_to_window(gf::Point{centre_x - half, centre_y - half});
+                start.source = gf::Rect{corner.x, corner.y, layout_.cell, layout_.cell};
+                start.threshold = layout_.cell * .2;
+                const gf::PointerEvent press = gf::pointer_event_of(event);
+                const gf::DragStartResult armed = drag_.press(press, start);
+                if (armed != gf::DragStartResult::armed && armed != gf::DragStartResult::started)
+                    set_pointer_capture(true);
             } else if (event.button == gf::PointerButton::secondary) {
                 pick_up(under);
                 turn_round();
@@ -772,13 +779,14 @@ void TumbledStonesView::on_mouse_up(gf::MouseEventArgs& event) {
             event.handled = true;
             const int pressed = press_cell_;
             const bool dragged = dragging_;
-            const int target = drag_to_;
+            // The release reaches the tracker first: dragging, it ends the session and
+            // finish_drag swaps or sets the stone down; only armed, it is the press's click.
+            if (drag_.running()) {
+                const gf::PointerEvent released = gf::pointer_event_of(event);
+                static_cast<void>(drag_.pointer(released));
+            }
             cancel_press();
             if (pressed >= 0 && dragged) {
-                if (target >= 0)
-                    swap_with(pressed, target);
-                else
-                    play("ts_set", .25F, .95F);
                 // a drag is not a click
                 event.suppress_click = true;
             } else if (pressed >= 0) {
@@ -788,6 +796,85 @@ void TumbledStonesView::on_mouse_up(gf::MouseEventArgs& event) {
         }
     }
     gf::Control::on_mouse_up(event);
+}
+
+// Past the threshold: the stone is lifted, as the hand-rolled drag did (a stone in the hand
+// is set down first; a press on an emptied socket or a busy tray drags nothing). The targets
+// are the pressed cell's neighbours, in window coordinates, hit while the pointer is over one
+// (no magnet); a release off them sets the stone down (free).
+void TumbledStonesView::plan_drag(gf::DragPlan& plan) {
+    const int pressed = press_cell_;
+    // A refused plan also forgets the press, so its release is not a click.
+    if (pressed < 0 || busy()) {
+        plan.refused = true;
+        press_cell_ = -1;
+        return;
+    }
+    if (hand_.serial != 0) {
+        const bool same = hand_.cell == pressed;
+        set_down();
+        if (busy() || (same && session_.board.cells[static_cast<std::size_t>(pressed)].family < 0)) {
+            plan.refused = true;
+            press_cell_ = -1;
+            request_frame();
+            return;
+        }
+    }
+    std::size_t count = 0;
+    const int row = pressed / side;
+    const int column = pressed % side;
+    const int row_steps[4] = {-1, 1, 0, 0};
+    const int column_steps[4] = {0, 0, -1, 1};
+    for (std::size_t step = 0; step < 4; step = step + 1) {
+        const int r = row + row_steps[step];
+        const int c = column + column_steps[step];
+        if (r < 0 || c < 0 || r >= side || c >= side)
+            continue;
+        const int cell = r * side + c;
+        const gf::Point corner =
+            point_to_window(gf::Point{layout_.grid_x + c * layout_.cell, layout_.grid_y + r * layout_.cell});
+        gf::DragTarget target{};
+        target.bounds = gf::Rect{corner.x, corner.y, layout_.cell, layout_.cell};
+        target.id = static_cast<std::uint32_t>(cell);
+        drag_targets_[count] = target;
+        count = count + 1;
+    }
+    plan.kind = gf::DragKind::placement;
+    plan.placement.grid_by_default = false;
+    plan.placement.targets = std::span<const gf::DragTarget>(drag_targets_.data(), count);
+    plan.placement.free_drop = true;
+    plan.container = this;
+    dragging_ = true;
+    play("ts_lift", .3F, 1.05F);
+}
+
+// The stone follows the pointer, toward the neighbour under it.
+void TumbledStonesView::preview_drag(const gf::DragTrackerFrame& frame) {
+    const gf::Point local = point_from_window(frame.pointer);
+    drag_x_ = local.x;
+    drag_y_ = local.y;
+    drag_to_ = frame.hit == gf::DragHit::target ? static_cast<int>(frame.target) : -1;
+    render_dirty_ = true;
+    request_frame();
+}
+
+// The session's one end: dropped on a neighbour swaps the two stones, a release elsewhere
+// sets the stone down; Escape, a lost capture or a cancel set it down without a sound.
+void TumbledStonesView::finish_drag(const gf::DragTrackerFrame& frame) {
+    const int pressed = press_cell_;
+    const bool commits = gf::drag_end_commits(frame.end);
+    const bool on_target = frame.hit == gf::DragHit::target;
+    const int target = on_target ? static_cast<int>(frame.target) : -1;
+    dragging_ = false;
+    drag_to_ = -1;
+    if (commits && pressed >= 0) {
+        if (target >= 0)
+            swap_with(pressed, target);
+        else
+            play("ts_set", .25F, .95F);
+    }
+    render_dirty_ = true;
+    request_frame();
 }
 
 void TumbledStonesView::on_mouse_click(gf::MouseEventArgs& event) {
