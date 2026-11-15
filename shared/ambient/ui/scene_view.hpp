@@ -20,6 +20,7 @@
 #include "sound_desk.hpp"
 
 #include "gui_forms/basic_controls.hpp"
+#include "gui_forms/drag/drag_tracker/drag_tracker.hpp"
 #include "gui_forms/timer.hpp"
 #include "gui_forms/events/key_events/key_events.hpp"
 
@@ -120,6 +121,16 @@ class SceneView : public gf::Control, public games::CommandSource {
     void update_card();
     bool window_active_{true};
     bool dragging_{};
+    // The scenery drag's session runs on GUI.Forms' DragTracker: a primary press on a live
+    // scene starts it at once (the scenery took the press), the moves go to the scenery through
+    // on_mouse_move, and the one end comes back through finish_drag, which hands the scenery its
+    // release at the last point, whatever the end (the scenery has no cancel: Escape or a lost
+    // capture lets go where the pointer was). Pausing, the help card or going behind the shelf
+    // ends it first (end_scenery_drag).
+    gf::DragTracker drag_{*this};
+    void plan_drag(gf::DragPlan& plan);
+    void finish_drag(const gf::DragTrackerFrame& frame);
+    void end_scenery_drag();
 
     // Pacing and presentation counters for measurement, printed to the error stream
     // when the view detaches if GAMES_SCENE_TRACE is set (see Stillwater's HANDOFF.md).

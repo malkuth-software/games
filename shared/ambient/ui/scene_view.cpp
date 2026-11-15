@@ -132,6 +132,9 @@ class HelpCard final : public gf::Control {
 
 SceneView::SceneView(gf::StableId id, HostSetup setup, std::unique_ptr<Scenery> scenery, ViewOptions options)
     : gf::Control(std::move(id)), setup_(std::move(setup)), scenery_(std::move(scenery)), options_(options) {
+    drag_.callbacks.plan = gf::Delegate<gf::DragPlan&>::bind<SceneView, &SceneView::plan_drag>(*this);
+    drag_.callbacks.finished =
+        gf::Delegate<const gf::DragTrackerFrame&>::bind<SceneView, &SceneView::finish_drag>(*this);
     front_ = !options_.hosted;
     focusable = true;
     // Every release over the view is a click: a quick second press is another click, not a
@@ -169,7 +172,9 @@ void SceneView::on_attached_to_window() {
     request_frame();
 }
 
-void SceneView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
+void SceneView::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
+    dragging_ = false;
+    drag_.owner_detaching(window);
     try {
         persist();
         report_trace();
@@ -198,7 +203,7 @@ void SceneView::set_cabinet(bool foreground, bool music, bool sound, bool reduce
     sound_.cabinet(foreground, music && !music_muted_, sound && !sound_muted_);
     if (!foreground) {
         // Behind the shelf: no timer, no frames, no sound.
-        dragging_ = false;
+        end_scenery_drag();
         if (timer_)
             (*timer_).stop();
         return;
@@ -565,7 +570,7 @@ void SceneView::update_card() {
 
 void SceneView::set_paused(bool paused) {
     settings_.paused = paused;
-    dragging_ = false;
+    end_scenery_drag();
     persist();
     last_tick_ = Clock::now();
     request_frame();
@@ -584,6 +589,8 @@ void SceneView::set_detail(Detail detail) {
 void SceneView::set_help(bool open) {
     if (open && games::route_help(*this))
         return;
+    if (open)
+        end_scenery_drag();
     help_open_ = open;
     update_card();
     render_dirty_ = true;
@@ -617,7 +624,50 @@ void SceneView::on_mouse_move(gf::MouseEventArgs& event) {
         }
         finish(work);
     }
+    if (drag_.running()) {
+        const gf::PointerEvent moved = gf::pointer_event_of(event);
+        if (drag_.pointer(moved))
+            event.handled = true;
+    }
     gf::Control::on_mouse_move(event);
+}
+
+// A free placement with no targets: the scenery decides what its drag does.
+void SceneView::plan_drag(gf::DragPlan& plan) {
+    if (!dragging_) {
+        plan.refused = true;
+        return;
+    }
+    plan.kind = gf::DragKind::placement;
+    plan.placement.grid_by_default = false;
+    plan.placement.free_drop = true;
+    plan.container = this;
+}
+
+// The session's one end: the scenery lets go at the last point, for every end (it has no
+// cancel), while the scene is live.
+void SceneView::finish_drag(const gf::DragTrackerFrame& frame) {
+    if (!dragging_)
+        return;
+    dragging_ = false;
+    double x = 0;
+    double y = 0;
+    const gf::Point local = point_from_window(frame.pointer);
+    if (pointer_fraction(local, x, y)) {
+        const bool live = scene_ready() && !settings_.paused && !help_open_;
+        SceneContext work = context();
+        if (live)
+            (*scenery_).release(x, y, work);
+        request_frame();
+        finish(work);
+    }
+}
+
+// Ends the drag without the scenery's release (pausing, going behind the shelf).
+void SceneView::end_scenery_drag() {
+    dragging_ = false;
+    if (drag_.running())
+        drag_.cancel(gf::DragEnd::model_changed);
 }
 
 void SceneView::on_mouse_leave() {
@@ -639,6 +689,15 @@ void SceneView::on_mouse_down(gf::MouseEventArgs& event) {
             dragging_ = true;
             (*scenery_).press(x, y, work);
             request_frame();
+            // The session starts at once (no threshold) and takes the capture; the whole view
+            // is its source.
+            gf::DragStart start{};
+            const gf::Rect bounds = client_rectangle();
+            const gf::Point corner = point_to_window(gf::Point{bounds.x, bounds.y});
+            start.source = gf::Rect{corner.x, corner.y, bounds.width, bounds.height};
+            start.threshold = 0;
+            const gf::PointerEvent press = gf::pointer_event_of(event);
+            static_cast<void>(drag_.press(press, start));
         }
         event.handled = true;
         finish(work);
@@ -649,6 +708,13 @@ void SceneView::on_mouse_down(gf::MouseEventArgs& event) {
 void SceneView::on_mouse_up(gf::MouseEventArgs& event) {
     double x = 0;
     double y = 0;
+    // The release ends the session; finish_drag hands the scenery its release. A press that
+    // could not start one (busy, detached) is released here as before.
+    if (drag_.running() && event.button == gf::PointerButton::primary) {
+        const gf::PointerEvent released = gf::pointer_event_of(event);
+        if (drag_.pointer(released))
+            event.handled = true;
+    }
     if (dragging_ && pointer_fraction(event.location, x, y)) {
         const bool live = scene_ready() && !settings_.paused && !help_open_;
         SceneContext work = context();
