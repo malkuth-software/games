@@ -426,12 +426,21 @@ int main() {
         (*std::static_pointer_cast<fp::FourPegsView>(fourpegs)).host_command("help");
         assert((*collection).help_open());
         assert(window.active_focus_scope_root() == child(*collection, "collection.help-book"));
-        // The business card (GUI.Forms' since cp33) comes out of help into the hand, says a
-        // remark through the shell's remark source, and goes back with help.
+        // The business card (GUI.Forms' since cp33) comes out of help into the hand, its
+        // remarks from the shell's remark source (GUI.Forms' card says them around itself
+        // while the pointer stays over it), and goes back with help. The page card in help lies
+        // under the book's heading band (set_heading_band).
+        {
+            const std::shared_ptr<gf::Control> book = child(*collection, "collection.help-book");
+            const std::shared_ptr<gf::BusinessCard> page =
+                std::dynamic_pointer_cast<gf::BusinessCard>(child(*book, "help.business-card"));
+            assert(page && (*page).heading_band_bottom().has_value());
+        }
+        assert(gf::business_card_remark_source().context == collection.get());
         (*collection).show_card();
         assert((*collection).card_open() && gf::business_card_shown(window));
         const std::shared_ptr<gf::BusinessCard> hand = gf::shown_business_card(window);
-        assert(hand && (*hand).presentation() == gf::BusinessCardPresentation::hand && !(*hand).remark().empty());
+        assert(hand && (*hand).presentation() == gf::BusinessCardPresentation::hand);
         (*collection).close_help();
         assert(!(*collection).card_open());
         assert((*std::static_pointer_cast<fp::FourPegsView>(fourpegs)).host_panel().empty());

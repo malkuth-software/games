@@ -34,7 +34,7 @@ class HelpPages final : public gf::ScrollableControl {
     // Where the business card rests beside the front lines, in these pages' visible points:
     // its middle and width, and how far above the pages it may still be seen. Told on every
     // layout and scroll.
-    std::function<void(gf::Point, double, double)> card_moved;
+    std::function<void(gf::Point, double)> card_moved;
 
   protected:
     void on_scroll_position_changed() override;
@@ -76,14 +76,25 @@ class HelpBook final : public gf::Control {
     std::function<void()> open_card;  // the business card was clicked: open it in the hand
 
   private:
+    // The book's heading band (its title and rule, painted by the book above the pages): a
+    // control with no paint and no hit, so GUI.Forms' card can keep the page card under it
+    // (BusinessCard::set_heading_band) as the pages scroll it up.
+    class HeadingBand final : public gf::Control {
+      public:
+        explicit HeadingBand(gf::StableId id) : gf::Control(std::move(id)) {}
+        [[nodiscard]] bool hit_test_local(gf::Point) const override {
+            return false;
+        }
+    };
     std::shared_ptr<HelpPages> pages_;
-    // GUI.Forms' business card (cp33), lying on the page beside the dedication; its look is
-    // themes/playsuite's business-card rules.
+    std::shared_ptr<HeadingBand> band_;
+    // GUI.Forms' business card, lying on the page beside the dedication and kept under the
+    // heading band; its look is themes/playsuite's business-card rules.
     std::shared_ptr<gf::BusinessCard> card_;
     std::shared_ptr<HelpGlyph> close_;
     PaperSheet sheet_;
     void clicked_close();
-    void place_card(gf::Point centre, double width, double top_room);
+    void place_card(gf::Point centre, double width);
     void card_clicked(gf::BusinessCardRequest& request);
     void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
 };

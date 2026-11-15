@@ -2,7 +2,6 @@
 #include "audio.hpp"
 #include "pcm_player.hpp"
 #include "storage.hpp"
-#include "open_link.hpp"
 #include "gui_forms/controls/text_box.hpp"
 #include <array>
 #include <span>
@@ -608,15 +607,9 @@ void Collection::show_card() {
     gf::Window* window = attached_window();
     if (window == nullptr || card_open() || !help_open())
         return;
+    // The card opens its website itself, through the host's open-URL capability.
     if (!gf::show_business_card(*window))
         return;
-    // GUI.Forms makes the card the first time and keeps it: the website request is answered
-    // once per card.
-    const std::shared_ptr<gf::BusinessCard> card = gf::shown_business_card(*window);
-    if (card && card != hand_card_.lock()) {
-        hand_card_ = card;
-        gf::on((*card).website_requested(), *this, &Collection::open_website);
-    }
     wake();
 }
 void Collection::close_card() {
@@ -629,13 +622,5 @@ void Collection::close_card() {
 void Collection::write_remark(void* context, std::string& remark) {
     Collection& shell = *static_cast<Collection*>(context);
     remark = shell.remarks_.next();
-}
-// GUI.Forms has no host service that opens an address yet: the shell opens it.
-void Collection::open_website(gf::BusinessCardRequest& request) {
-    const std::string& website = gf::program_identity().website;
-    if (website.empty())
-        return;
-    open_link(website);
-    request.handled = true;
 }
 } // namespace games

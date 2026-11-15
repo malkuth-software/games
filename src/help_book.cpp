@@ -166,10 +166,9 @@ void HelpPages::build(int scope) {
     add_topic(-1, "about", "About PlaySuite", help_about());
 }
 void HelpPages::report_card() {
-    const double room = 54;  // the book's heading band above the pages, less a margin
     const double scrolled = scroll_position().y;
     if (card_moved)
-        card_moved({card_centre_.x, card_centre_.y - scrolled}, card_width_, std::max(0.0, room - scrolled));
+        card_moved({card_centre_.x, card_centre_.y - scrolled}, card_width_);
 }
 void HelpPages::on_scroll_position_changed() {
     report_card();
@@ -278,13 +277,17 @@ void HelpBook::initialize_control_tree() {
     // Shown once the pages have placed it.
     (*card_).visible = false;
     gf::on((*card_).open_requested(), *this, &HelpBook::card_clicked);
+    band_ = gf::make_control<HeadingBand>(gf::StableId("help.heading-band"));
     close_ = gf::make_control<HelpGlyph>(gf::StableId("help.close"), "×");
     (*close_).set_paint_plane(gf::PaintPlane::overlay);
     (*close_).accessible_name = "Close PlaySuite help (H or Escape)";
     gf::on((*close_).clicked(), *this, &HelpBook::clicked_close);
     add_child(pages_);
     add_child(card_);
+    add_child(band_);
     add_child(close_);
+    // The card is drawn, and takes the pointer, only below the band's lower edge.
+    (*card_).set_heading_band(band_);
 }
 void HelpBook::on_key_bubble(gf::KeyEvent& event) {
     (*pages_).on_key_bubble(event);
@@ -304,9 +307,9 @@ void HelpBook::select(int entry, std::string_view topic) {
 // (the pages sit at (20, 62) in the book). GUI.Forms' card keeps a fixed margin around its
 // stock for the shadow and the tilt and fits the stock in the rest, at the card's proportion
 // (3.5 by 2), so the margin is read from its measure: W = w + 2m and H = h + 2m with
-// w = 1.75 h give h = (W - H) / 0.75. The card is hidden once it has scrolled wholly under
-// the book's heading band (`top_room` above the pages).
-void HelpBook::place_card(gf::Point centre, double width, double top_room) {
+// w = 1.75 h give h = (W - H) / 0.75. Scrolled up, the card goes under the book's heading band
+// (set_heading_band), which GUI.Forms' card clips it to.
+void HelpBook::place_card(gf::Point centre, double width) {
     const gf::Size wanted = (*card_).measure(gf::Size{});
     const double stock_height_wanted = (wanted.width - wanted.height) / 0.75;
     const double margin = std::max(0.0, (wanted.height - stock_height_wanted) / 2);
@@ -314,9 +317,8 @@ void HelpBook::place_card(gf::Point centre, double width, double top_room) {
     const gf::Rect placed{20 + centre.x - width / 2 - margin, 62 + centre.y - stock_height / 2 - margin,
                           width + 2 * margin, stock_height + 2 * margin};
     set_child_layout(card_, placed);
-    const bool seen = centre.y + stock_height / 2 > -top_room;
-    if ((*card_).visible.read() != seen)
-        (*card_).visible = seen;
+    if (!(*card_).visible.read())
+        (*card_).visible = true;
 }
 void HelpBook::card_clicked(gf::BusinessCardRequest& request) {
     if (!open_card)
@@ -333,6 +335,8 @@ void HelpBook::arrange(gf::Rect bounds) {
     arrange_self(bounds);
     set_child_layout(close_, {bounds.width - 48, 9, 36, 36});
     set_child_layout(pages_, {20, 62, bounds.width - 36, bounds.height - 82});
+    // The band is the book above the pages: its title and rule.
+    set_child_layout(band_, {0, 0, bounds.width, 62});
 }
 void HelpBook::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
     sheet_.release(window);

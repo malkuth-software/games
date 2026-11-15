@@ -76,14 +76,10 @@ class Collection final : public gf::Control, public HelpHost {
     gf::FocusScopeId help_focus_{};
     std::shared_ptr<SettingsSheet> settings_;
     gf::FocusScopeId settings_focus_{};
-    // The card the window shows in the hand, once it has been shown: GUI.Forms makes it and
-    // keeps it while put away, and the shell answers its website request.
-    std::weak_ptr<gf::BusinessCard> hand_card_;
     // The remarks the card in the hand makes (card_remarks.hpp), through GUI.Forms' remark
     // source, which this shell names while it lives.
     CardRemarks remarks_{0x51ed2701U};
     static void write_remark(void* context, std::string& remark);
-    void open_website(gf::BusinessCardRequest& request);
     void declare_release_regions(gf::Rect capsule, gf::Rect help_link);
     SettingsObservation masters_{};
     bool music_shown_ = true, sound_shown_ = true, reduced_shown_ = false;

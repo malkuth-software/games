@@ -394,3 +394,21 @@ themes/playsuite gives the card its bone stock, black ink and gold foil. What GU
 5. **The website.** GUI.Forms has no host service that opens an address (see "Opening a
    web address"): the shell answers website_requested with `open_link`.
 
+**Closed by GUI.Forms' business-card parity (claude/business-card-parity 6741c7da9, 2026-11-15).**
+All five now come from GUI.Forms' card, through its API and the theme:
+1. The turn: the hand card turns by drag and by Left and Right, settles face up or down,
+   lit, with its back, wherever the host lends an offscreen renderer. Nothing in PlaySuite.
+2. The stock: themes/playsuite gives business-card::part(stock) a paper-fibre material over
+   the bone colour (make_theme.py); the turned faces are painted through the same rules.
+   The finer finish of PlaySuite's paper engine (dimples, varnish, cut plies, raised ink)
+   is not expressed; the fibre stock is GUI.Forms' material.
+3. Remarks: the card asks the shell's remark source per remark and shows up to three around
+   itself while the pointer stays over it; the sheet's remark ink is pale for the dimmed
+   window.
+4. The heading band: the help book gives the page card its heading band
+   (BusinessCard::set_heading_band, a no-paint, no-hit control over the book's title), and
+   the card is clipped under it as the pages scroll; the hide-when-gone rule is gone.
+5. The website: the shell no longer answers website_requested; the card hands the address
+   to the host's open-URL capability. src/open_link.* is removed.
+`shared/cards/held_card.*` (PlaySuite's turned card) has no caller; it can go once the
+GUI.Forms turn is seen in the build.
