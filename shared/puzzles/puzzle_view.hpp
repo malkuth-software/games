@@ -1,6 +1,7 @@
 #pragma once
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/controls/text_box.hpp"
+#include "gui_forms/drag/drag_tracker/drag_tracker.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/paint_framebuffer.hpp"
 #include "gui_forms/resources.hpp"
@@ -250,6 +251,22 @@ class PuzzleView final : public gf::Control, public CommandSource {
     gf::Rect target_{}, tray_{};
     gf::Point press_point_{};
     bool tray_turn_ = false;
+    // The drags (a Puzzle Solve piece, a gem, an Untangle peg, the cat) run their sessions on
+    // GUI.Forms' DragTracker: a primary press arms it (the piece past 5 pt, so a release short
+    // of that is still the click that turns it; the gem past 6 pt; a peg and the cat at once),
+    // the moves still go through pointer_move, which owns each kind's geometry (the game picks
+    // its own drop), and the session's one end comes back through finish_drag: the release
+    // drops (end_drag with commits), Escape, a lost capture or a cancel restore. A gem pulled
+    // most of the way swaps before the release: gem_drag ends the session first.
+    enum class DragSubject : std::uint8_t { none, solve_piece, gem, untangle_peg, cat };
+    gf::DragTracker drag_tracker_{*this};
+    DragSubject drag_subject_ = DragSubject::none;
+    void arm_drag(gf::MouseEventArgs& e, DragSubject subject, gf::Rect source, double threshold);
+    void end_tracked_drag();
+    void plan_drag(gf::DragPlan& plan);
+    void preview_drag(const gf::DragTrackerFrame& frame);
+    void finish_drag(const gf::DragTrackerFrame& frame);
+    void end_drag(bool commits, gf::Point local_position, int cell);
     gf::FrameTime animation_start_{}, clock_start_{};
     double animation_duration_ = 0;
     std::array<int, 4> guess_{};

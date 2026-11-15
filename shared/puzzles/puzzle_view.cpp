@@ -392,6 +392,11 @@ static gf::ImageId load_art(gf::Window& window, const std::string& name) {
     return result ? result.image : gf::ImageId{};
 }
 PuzzleView::PuzzleView(gf::StableId id, PuzzleKind kind) : gf::Control(std::move(id)), game(kind) {
+    drag_tracker_.callbacks.plan = gf::Delegate<gf::DragPlan&>::bind<PuzzleView, &PuzzleView::plan_drag>(*this);
+    drag_tracker_.callbacks.preview =
+        gf::Delegate<const gf::DragTrackerFrame&>::bind<PuzzleView, &PuzzleView::preview_drag>(*this);
+    drag_tracker_.callbacks.finished =
+        gf::Delegate<const gf::DragTrackerFrame&>::bind<PuzzleView, &PuzzleView::finish_drag>(*this);
     focusable = true;
     // Every release over the view is a click: a quick second press is another click, not a
     // double click.
@@ -470,6 +475,8 @@ void PuzzleView::on_attached_to_window() {
     clock_start_ = gf::FrameClock::now();
 }
 void PuzzleView::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
+    drag_subject_ = DragSubject::none;
+    drag_tracker_.owner_detaching(window);
     persist();
     framebuffer_.reset();
     surface_.reset();
@@ -2802,6 +2809,7 @@ void PuzzleView::new_game() {
     untangle_idle_ = 0;
     swat_peg_ = frozen_nudge_ = -1;
     puffs_.clear();
+    end_tracked_drag();
     kitten_.reset(game.state.seed);
     cat_carried_ = false;
     // With more than one colour of yarn, say once what the colours mean.
@@ -3003,7 +3011,8 @@ void PuzzleView::gem_drag(gf::Point local) {
     if (std::abs(o.x) + std::abs(o.y) >= .72) {
         const int from = drag_;
         drag_ = -1;
-        set_pointer_capture(false);
+        gem_dragging_ = false;
+        end_tracked_drag();
         gem_swap(from,
                  from +
                      (o.x > 0   ? 1
@@ -3272,6 +3281,13 @@ void PuzzleView::tick() {
 // or dropped. A capture lost mid-trace ends the cube's trace.
 void PuzzleView::on_mouse_move(gf::MouseEventArgs& e) {
     pointer_move(e);
+    // The kind's own geometry ran first; the session then sees the move (it may plan the drag
+    // past its threshold). A gem swapped by its pull has already ended the session.
+    if (drag_tracker_.running()) {
+        const gf::PointerEvent moved = gf::pointer_event_of(e);
+        if (drag_tracker_.pointer(moved))
+            e.handled = true;
+    }
     gf::Control::on_mouse_move(e);
 }
 
@@ -3468,12 +3484,17 @@ void PuzzleView::pointer_down(gf::MouseEventArgs& e) {
             e.handled = true;
             return;
         }
+        // Only the primary button drags a gem (the tracker's sessions are primary).
+        if (e.button != gf::PointerButton::primary) {
+            e.handled = true;
+            return;
+        }
         drag_ = cell;
         gem_press_ = local_position;
         gem_dragging_ = false;
         gem_spring_ = -1;
         gem_offset_ = {};
-        set_pointer_capture(true);
+        arm_drag(e, DragSubject::gem, gf::Rect{local_position.x - 1, local_position.y - 1, 2, 2}, 6);
         if (timer_)
             (*timer_).start();
     } else if (game.kind == PuzzleKind::untangle) {
@@ -3481,21 +3502,25 @@ void PuzzleView::pointer_down(gf::MouseEventArgs& e) {
                           (local_position.y - board_.y) / board_.height};
         if (kitten_.hit(spot) || (cell >= 0 && kitten_.perch() == cell)) {
             // The cat is in the way: pick it up, and set it down somewhere else.
+            if (e.button != gf::PointerButton::primary) {
+                e.handled = true;
+                return;
+            }
             kitten_.pick_up();
             kitten_.carry(spot);
             cat_carried_ = true;
             game.message = cell >= 0 ? "The cat was sitting on that peg." : "Up you come.";
-            set_pointer_capture(true);
+            arm_drag(e, DragSubject::cat, gf::Rect{local_position.x - 1, local_position.y - 1, 2, 2}, 0);
             sound_play("untangle_grab", sound_);
         } else if (cell >= 0 && game.untangle_frozen(cell)) {
             frozen_nudge_ = cell;
             frozen_nudge_t_ = 0;
             game.message = "That peg is frozen until its threads are clear.";
-        } else if (cell >= 0) {
+        } else if (cell >= 0 && e.button == gf::PointerButton::primary) {
             drag_ = cell;
             drag_position_ = game.state.nodes[cell];
             untangle_idle_ = 0;
-            set_pointer_capture(true);
+            arm_drag(e, DragSubject::untangle_peg, gf::Rect{local_position.x - 1, local_position.y - 1, 2, 2}, 0);
             sound_play("untangle_grab", sound_);
             if (game.untangle_layers() > 1) {
                 invalidate_static_scene();
@@ -3540,7 +3565,7 @@ void PuzzleView::pointer_down(gf::MouseEventArgs& e) {
             solve_recenter();
             sound_play("puzzle_solve_pickup", sound_);
             drag_ = cell;
-            set_pointer_capture(true);
+            arm_drag(e, DragSubject::solve_piece, cells_[static_cast<std::size_t>(cell)], 5);
         } else if (in_rect(board_, local_position) && !game.state.over) {
             const int atom = solve_atom_at(local_position);
             const int piece = atom < 0 ? -1 : game.state.grid[atom] / 4 - 1;
@@ -3552,7 +3577,7 @@ void PuzzleView::pointer_down(gf::MouseEventArgs& e) {
                 }
             } else if (piece >= 0 && solve_lift(piece)) {
                 drag_ = piece;
-                set_pointer_capture(true);
+                arm_drag(e, DragSubject::solve_piece, gf::Rect{local_position.x - 1, local_position.y - 1, 2, 2}, 0);
                 sound_play("puzzle_solve_pickup", sound_);
             } else if (piece < 0 && !secondary) {
                 // Clicking empty frame space drops the selected piece there, kept inside the
@@ -3591,11 +3616,49 @@ void PuzzleView::pointer_up(gf::MouseEventArgs& e) {
     if (panel_)
         return;
     int cell = hit(local_position);
-    if (!(game.kind == PuzzleKind::solve && drag_ >= 0 &&
-          e.button == gf::PointerButton::secondary))
+    // A primary release of a drag reaches the session first: dragging, it ends there and
+    // finish_drag drops (end_drag); only armed (short of the threshold), with no session (the
+    // press could not arm one), or a scripted hold ("drag" in scripted_action), the release is
+    // ended here as before.
+    const bool primary = e.button == gf::PointerButton::primary;
+    const bool holding = drag_subject_ != DragSubject::none || drag_ >= 0 || cat_carried_;
+    if (primary && holding) {
+        bool taken = false;
+        if (drag_tracker_.running()) {
+            const gf::PointerEvent released = gf::pointer_event_of(e);
+            taken = drag_tracker_.pointer(released);
+        }
+        if (!taken) {
+            drag_subject_ = DragSubject::none;
+            set_pointer_capture(false);
+            end_drag(true, local_position, cell);
+        }
+    } else if (!(game.kind == PuzzleKind::solve && drag_ >= 0 && !primary)) {
         set_pointer_capture(false);
-    if (game.kind == PuzzleKind::solve && drag_ >= 0 &&
-        e.button != gf::PointerButton::secondary) {
+    }
+    if (game.kind == PuzzleKind::cube) {
+        tracing_ = false;
+        orbit_ = false;
+        persist();
+    }
+    e.handled = true;
+}
+
+// Ends the drag of the current kind at `local_position` over `cell`: `commits` drops it (the
+// release), otherwise it is put back (Escape, a lost capture, a cancel). The cat is put down
+// either way.
+void PuzzleView::end_drag(bool commits, gf::Point local_position, int cell) {
+    if (game.kind == PuzzleKind::solve && drag_ >= 0 && !commits) {
+        // Escape, a lost capture or a cancel: a piece lifted from the frame goes back where it
+        // was; one taken from the tray stays in the tray.
+        drag_ = -1;
+        if (lifted_)
+            game.place_piece(selection_, lift_x_, lift_y_, lift_rotation_, lift_flip_);
+        lifted_ = false;
+        persist();
+        invalidate_scene();
+    }
+    if (game.kind == PuzzleKind::solve && drag_ >= 0) {
         const int carried = drag_;
         drag_ = -1;
         solve_pointer_ = local_position;
@@ -3622,16 +3685,19 @@ void PuzzleView::pointer_up(gf::MouseEventArgs& e) {
         lifted_ = false;
         invalidate_scene();
     }
-    if (game.kind == PuzzleKind::cube) {
-        tracing_ = false;
-        orbit_ = false;
-        persist();
-    }
     if (game.kind == PuzzleKind::untangle && cat_carried_) {
         cat_carried_ = false;
         kitten_.put_down();
         game.message = "";
         invalidate_animation(kitten_.paint_bounds(board_));
+    }
+    if (game.kind == PuzzleKind::untangle && drag_ >= 0 && !commits) {
+        // The peg goes back: nothing moved in the game.
+        drag_ = -1;
+        untangle_idle_ = 0;
+        if (update_untangle_geometry())
+            invalidate_static_scene();
+        invalidate_animation(untangle_board_damage());
     }
     if (game.kind == PuzzleKind::untangle && drag_ >= 0) {
         const std::array<int, 96> marks = game.state.marks;
@@ -3640,6 +3706,14 @@ void PuzzleView::pointer_up(gf::MouseEventArgs& e) {
         untangle_idle_ = 0;
         untangle_released(marks);
         changed("untangle_release");
+    }
+    if (game.kind == PuzzleKind::gems && drag_ >= 0 && !commits) {
+        // The gem settles back into its socket.
+        gem_spring_ = drag_;
+        drag_ = -1;
+        gem_dragging_ = false;
+        if (timer_)
+            (*timer_).start();
     }
     if (game.kind == PuzzleKind::gems && drag_ >= 0) {
         const int from = drag_;
@@ -3666,7 +3740,62 @@ void PuzzleView::pointer_up(gf::MouseEventArgs& e) {
         if (timer_)
             (*timer_).start();
     }
-    e.handled = true;
+}
+
+// Arms the session for `subject`, pressed in `source` (local units). A press the tracker
+// refuses keeps the capture by hand; pointer_up then ends the drag as before.
+void PuzzleView::arm_drag(gf::MouseEventArgs& e, DragSubject subject, gf::Rect source, double threshold) {
+    drag_subject_ = subject;
+    gf::DragStart start{};
+    start.key = static_cast<std::uint64_t>(subject);
+    const gf::Point corner = point_to_window(gf::Point{source.x, source.y});
+    start.source = gf::Rect{corner.x, corner.y, source.width, source.height};
+    start.threshold = threshold;
+    const gf::PointerEvent press = gf::pointer_event_of(e);
+    const gf::DragStartResult armed = drag_tracker_.press(press, start);
+    // A refused plan has already ended the drag through finish_drag; any other refusal (busy,
+    // detached, bad input) leaves it to the hand-held capture.
+    if (armed != gf::DragStartResult::armed && armed != gf::DragStartResult::started &&
+        armed != gf::DragStartResult::refused)
+        set_pointer_capture(true);
+}
+
+// Ends the session without a drop or a restore: the caller has already settled the drag (a
+// gem's swap, a new game).
+void PuzzleView::end_tracked_drag() {
+    drag_subject_ = DragSubject::none;
+    if (drag_tracker_.running())
+        drag_tracker_.cancel(gf::DragEnd::model_changed);
+    set_pointer_capture(false);
+}
+
+// Past the threshold: a free placement with no targets. Every kind picks its own drop (the
+// frame's snap, the neighbouring gem, the peg's new place), so the tracker runs the session only.
+void PuzzleView::plan_drag(gf::DragPlan& plan) {
+    if (drag_subject_ == DragSubject::none || panel_ || game.state.over) {
+        plan.refused = true;
+        return;
+    }
+    plan.kind = gf::DragKind::placement;
+    plan.placement.grid_by_default = false;
+    plan.placement.free_drop = true;
+    plan.container = this;
+}
+
+// The moves themselves are drawn by pointer_move; the frame only asks for one.
+void PuzzleView::preview_drag(const gf::DragTrackerFrame&) {
+    invalidate_scene();
+}
+
+// The session's one end. A subject already settled (end_tracked_drag) does nothing.
+void PuzzleView::finish_drag(const gf::DragTrackerFrame& frame) {
+    if (drag_subject_ == DragSubject::none)
+        return;
+    drag_subject_ = DragSubject::none;
+    const bool commits = gf::drag_end_commits(frame.end);
+    const gf::Point local_position = point_from_window(frame.pointer);
+    const int cell = hit(local_position);
+    end_drag(commits, local_position, cell);
 }
 
 // The keys: the view's own handling runs after the base raised the event, on
