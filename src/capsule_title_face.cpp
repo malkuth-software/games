@@ -2,28 +2,77 @@
 
 #include "runtime_paths.hpp"
 
-#include "gui_forms/composites/composite_control/composite_control.hpp"
-
 #if defined(GAMES_GUI_FORMS_APP_FONTS)
-// GUI.Forms claude/app-fonts. The names below follow its design as the coordinator relayed it
-// (an app-loaded face is admitted for one composite or subsurface and released with it) and
-// are to be matched to the landed header when the pin moves.
 #include "gui_forms/typography/app_fonts/app_fonts.hpp"
+
+#include <array>
+#include <cstddef>
 #include <filesystem>
+#include <fstream>
+#include <ios>
+#include <memory>
+#include <string_view>
+#include <utility>
+#include <vector>
 #endif
 
 namespace games {
 
-CapsuleTitleFaceState CapsuleTitleFace::load(gf::CompositeControl& composite) {
+#if defined(GAMES_GUI_FORMS_APP_FONTS)
+namespace {
+
+// The family's name as looks would write it; one load per process.
+constexpr std::string_view title_family_name = "Barlow Condensed";
+
+// The process's hold on the family: loaded on first use and unloaded when the process ends
+// (the handle's destruction; text still shaped with it stays drawable, AppFontUnload::deferred).
+gf::AppFontFamily& title_family_holder() {
+    static gf::AppFontFamily holder{};
+    return holder;
+}
+
+// The face's bytes, or none when the file is missing or unreadable.
+std::shared_ptr<const std::vector<std::byte>> read_face(const std::filesystem::path& file) {
+    std::ifstream in(file, std::ios::binary | std::ios::ate);
+    if (!in)
+        return {};
+    const std::streamoff end = in.tellg();
+    if (end <= 0 || static_cast<std::uint64_t>(end) > gf::maximum_app_font_bytes)
+        return {};
+    std::shared_ptr<std::vector<std::byte>> bytes =
+        std::make_shared<std::vector<std::byte>>(static_cast<std::size_t>(end));
+    in.seekg(0);
+    in.read(reinterpret_cast<char*>((*bytes).data()), static_cast<std::streamsize>(end));
+    if (!in)
+        return {};
+    return bytes;
+}
+
+} // namespace
+#endif
+
+CapsuleTitleFaceState CapsuleTitleFace::load() {
     if (state_ != CapsuleTitleFaceState::unloaded)
         return state_;
 #if defined(GAMES_GUI_FORMS_APP_FONTS)
     try {
-        const std::filesystem::path file =
-            std::filesystem::path(asset_directory()) / "fonts" / "BarlowCondensed-Bold.ttf";
-        const gf::AppFontLoad loaded = gf::load_app_font(composite, file);
-        if (loaded) {
-            family_ = loaded.family;
+        gf::AppFontFamily& holder = title_family_holder();
+        if (holder.id() == gf::FontFamilyId{}) {
+            const std::filesystem::path file =
+                std::filesystem::path(asset_directory()) / "fonts" / "BarlowCondensed-Bold.ttf";
+            const std::shared_ptr<const std::vector<std::byte>> bytes = read_face(file);
+            if (bytes) {
+                std::array<gf::AppFontFace, 1> faces{};
+                faces[0].bytes = bytes;
+                faces[0].weight = 700;
+                gf::AppFontLoad loaded = gf::load_app_font_family(title_family_name, faces);
+                if (loaded.validation.status == gf::AppFontStatus::loaded)
+                    holder = std::move(loaded.family);
+            }
+        }
+        // A family quarantined or unloaded since draws nothing; the fallback stands then.
+        if (holder.id() != gf::FontFamilyId{} && gf::font_family_drawable(holder.id())) {
+            family_ = holder.id();
             state_ = CapsuleTitleFaceState::loaded;
         } else {
             state_ = CapsuleTitleFaceState::refused;
@@ -32,7 +81,6 @@ CapsuleTitleFaceState CapsuleTitleFace::load(gf::CompositeControl& composite) {
         state_ = CapsuleTitleFaceState::refused;
     }
 #else
-    static_cast<void>(composite);
     state_ = CapsuleTitleFaceState::waiting;
 #endif
     return state_;

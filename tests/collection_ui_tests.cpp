@@ -9,6 +9,9 @@
 #include "pcm_player.hpp"
 #include "settings_sheet.hpp"
 #include "gui_forms/window.hpp"
+#if defined(GAMES_GUI_FORMS_APP_FONTS)
+#include "gui_forms/typography/app_fonts/app_fonts.hpp"
+#endif
 #include "test_paths.hpp"
 #include <cassert>
 #include <cmath>
@@ -317,8 +320,8 @@ int main() {
         {
             // The capsule is a GUI.Forms composite: its pill is the document's part, and its
             // title the document's label, showing the game's name in the capsule's face (the
-            // app-loaded Barlow Condensed once GUI.Forms carries claude/app-fonts, the bundled
-            // control face until then), laid out after the back button.
+            // app-loaded Barlow Condensed with GAMES_GUI_FORMS_APP_FONTS, the bundled control
+            // face without it), laid out after the back button.
             const std::shared_ptr<CommandCapsule> composite = std::static_pointer_cast<CommandCapsule>(capsule);
             assert((*composite).type_name() == "command-capsule");
             assert(!(*composite).part_bounds("pill").empty());
@@ -327,7 +330,12 @@ int main() {
             const gf::FontSpec font = (*title).font.read();
             assert(font.weight == 700 && font.role == gf::FontRole::control);
 #if defined(GAMES_GUI_FORMS_APP_FONTS)
-            assert(font.family != gf::FontFamilyId{});
+            // The family is the app-loaded Barlow Condensed, live, and the composite's context
+            // keeps it (a stock control's interface context would drop it).
+            assert(font.family != gf::FontFamilyId{} && font.family == gf::app_font_family_named("Barlow Condensed"));
+            assert(gf::app_font_family_state(font.family) == gf::AppFontState::live);
+            assert(gf::admit_font(font, gf::FontContext::composite).family == font.family);
+            assert(gf::admit_font(font, gf::FontContext::interface).family == gf::FontFamilyId{});
 #endif
             assert((*title).visible.read() && (*title).arranged_bounds().x > (*button(*capsule, "capsule.back")).arranged_bounds().x);
         }

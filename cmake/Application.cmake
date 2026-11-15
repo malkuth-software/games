@@ -44,10 +44,10 @@ target_include_directories(game_ui PUBLIC src PRIVATE shared/felt)
 # so every target that includes it (the tests) sees the generated directory.
 gui_forms_add_control(game_ui controls/command-capsule.control CLASS CommandCapsuleControl NAMESPACE games)
 target_include_directories(game_ui PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/gui_forms_controls")
-# The capsule title's app-loaded face (src/capsule_title_face.cpp) needs GUI.Forms'
-# app-font API (claude/app-fonts); until the pin carries it, the bundled fallback draws it.
+# The capsule title's app-loaded face (src/capsule_title_face.cpp) uses GUI.Forms' app-font
+# API (claude/app-fonts); with the option off the bundled fallback draws it.
 if(GAMES_GUI_FORMS_APP_FONTS)
-    target_compile_definitions(game_ui PRIVATE GAMES_GUI_FORMS_APP_FONTS=1)
+    target_compile_definitions(game_ui PUBLIC GAMES_GUI_FORMS_APP_FONTS=1)
 endif()
 target_link_libraries(game_ui PUBLIC game_rules game_solver game_raster sudoku_generator vendor_game_ui paper_core
     ambient_core game_wood)

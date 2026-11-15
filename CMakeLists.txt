@@ -15,7 +15,9 @@ if(WIN32)
 endif()
 set(GAMES_RUNTIME_ASSET_DIR "" CACHE PATH "Complete verified portable runtime assets")
 option(GAMES_BUILD_APPLICATION "Build the complete graphical game collection and UI tests" ON)
-option(GAMES_GUI_FORMS_APP_FONTS "GUI.Forms carries the app-font API (claude/app-fonts): the capsule title loads Barlow Condensed" OFF)
+# The capsule title loads Barlow Condensed through GUI.Forms' app-font API (claude/app-fonts,
+# 2558e326c); turn it off only to build against a GUI.Forms without that API.
+option(GAMES_GUI_FORMS_APP_FONTS "Load the capsule title's face through GUI.Forms' app-font API" ON)
 enable_testing()
 add_executable(dogfood_tests tests/dogfood_tests.cpp src/dogfood.cpp)
 target_include_directories(dogfood_tests PRIVATE src)

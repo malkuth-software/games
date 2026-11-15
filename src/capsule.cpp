@@ -21,7 +21,7 @@ void CommandCapsule::initialize_control_tree() {
     // The document's children (the title label) first, then the face it is drawn in.
     CommandCapsuleControl::initialize_control_tree();
     title_label_ = std::dynamic_pointer_cast<gf::Label>(child("title"));
-    static_cast<void>(title_face_.load(*this));
+    static_cast<void>(title_face_.load());
     if (title_label_)
         (*title_label_).font = title_face_.font(kTitleSize);
     back_ = gf::make_control<SuiteButton>(gf::StableId("capsule.back"), "", GlossTone::smoke);
