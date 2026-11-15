@@ -1,4 +1,4 @@
-"""Shared app resources and notices; this does not install a GUI.Forms SDK."""
+"""Shared app resources and notices, read from an installed GUI.Forms SDK prefix (--toolkit)."""
 from pathlib import Path
 import hashlib
 import json
@@ -13,13 +13,54 @@ ROOT = Path(__file__).resolve().parents[1]
 TOOLKIT_REVISION = "757db03a7be63d7dabcf1803c5c9668e0ace61e0"
 
 
-def miniaudio_license(toolkit, fetched):
-    """miniaudio's licence: GUI.Forms' source SDK carries it in third_party/miniaudio;
-    a git checkout of GUI.Forms fetches it at configure time."""
-    vendored = toolkit / "third_party/miniaudio/LICENSE"
-    if vendored.is_file():
-        return vendored
-    return fetched / "gui_forms_miniaudio-src/LICENSE"
+def sdk_notices(prefix):
+    """GUI.Forms' licences in an installed SDK prefix (`cmake --install` of GUI.Forms, or
+    its tools/build_sdk.py): share/licenses/GUIForms, every notice for what the SDK links
+    (its stx packages, HarfBuzz, FreeType, Skia, SheenBidi, Unicode, miniaudio, BFFT, the
+    LLVM runtime on Linux) under the names its install gives them."""
+    notices = prefix / "share/licenses/GUIForms"
+    if not (notices / "LICENSE").is_file():
+        raise RuntimeError(str(prefix) + " is not an installed GUI.Forms SDK prefix "
+                           "(no share/licenses/GUIForms/LICENSE); pass --toolkit <prefix>")
+    return notices
+
+
+def sdk_fonts(prefix):
+    """The SDK's bundled fonts (GUIForms_FONT_DIR): share/GUIForms/fonts."""
+    fonts = prefix / "share/GUIForms/fonts"
+    if not fonts.is_dir():
+        raise RuntimeError(str(prefix) + " has no share/GUIForms/fonts")
+    return fonts
+
+
+def miniaudio_license(notices, build, cache):
+    """miniaudio's licence: the SDK's copy first; otherwise the source the configure used,
+    named by FETCHCONTENT_SOURCE_DIR_GUI_FORMS_MINIAUDIO, under FETCHCONTENT_BASE_DIR, or in
+    the build's _deps. Raises naming every place looked at."""
+    candidates = [notices / "miniaudio-LICENSE.txt"]
+    override = re.search(r"^FETCHCONTENT_SOURCE_DIR_GUI_FORMS_MINIAUDIO:PATH=(.+)$", cache, re.MULTILINE)
+    if override:
+        candidates.append(Path(override.group(1).strip()) / "LICENSE")
+    base = re.search(r"^FETCHCONTENT_BASE_DIR:PATH=(.+)$", cache, re.MULTILINE)
+    if base:
+        candidates.append(Path(base.group(1).strip()) / "gui_forms_miniaudio-src/LICENSE")
+    candidates.append(build / "_deps/gui_forms_miniaudio-src/LICENSE")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise RuntimeError("miniaudio's licence not found; looked at " + ", ".join(str(c) for c in candidates))
+
+
+def source_revision(given):
+    """The packaged source commit: `given` (--source-revision) when set, else this checkout's
+    HEAD through git; a package built from an exported tree passes it."""
+    if given:
+        return given
+    try:
+        return subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True,
+                                       stderr=subprocess.DEVNULL).strip()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise RuntimeError("No git checkout at " + str(ROOT) + "; pass --source-revision") from error
 
 
 def missing_prepared_files(assets):
@@ -72,48 +113,20 @@ def copy_resources(build, toolkit, destination):
     missing = missing_prepared_files(destination / "assets")
     if missing:
         raise RuntimeError("Packaged assets are missing prepared files: " + ", ".join(missing[:10]))
-    shutil.copytree(toolkit / "assets/fonts", destination / "fonts", dirs_exist_ok=True)
+    shutil.copytree(sdk_fonts(toolkit), destination / "fonts", dirs_exist_ok=True)
     notices = destination / "licenses"
     notices.mkdir(exist_ok=True)
-    # Downloaded dependency sources: the build's _deps, or wherever the configure
+    # GUI.Forms and everything it links, as its installed SDK carries the notices.
+    toolkit_notices = sdk_notices(toolkit)
+    shutil.copytree(toolkit_notices, notices / "GUIForms", dirs_exist_ok=True)
+    shutil.copy2(miniaudio_license(toolkit_notices, build, cache), notices / "miniaudio.txt")
+    # PlaySuite's own downloaded dependencies: the build's _deps, or wherever the configure
     # placed them (CI keeps them in a cached FETCHCONTENT_BASE_DIR).
     base = re.search(r"^FETCHCONTENT_BASE_DIR:PATH=(.+)$", cache, re.MULTILINE)
-    fetched = Path(base.group(1)) if base else build / "_deps"
-    entries = {
-        "GUIForms.txt": toolkit / "LICENSE",
-        "Unicode.txt": toolkit / "third_party/unicode/LICENSE.txt",
-        "SheenBidi.txt": toolkit / "third_party/sheenbidi/LICENSE",
-        "HarfBuzz.txt": toolkit / "third_party/harfbuzz/COPYING",
-        "FreeType.txt": toolkit / "third_party/freetype/docs/FTL.TXT",
-        "libunibreak.txt": toolkit / "third_party/libunibreak/LICENCE",
-        "QuickJS.txt": fetched / "quickjs-src/LICENSE",
-        "miniaudio.txt": miniaudio_license(toolkit, fetched),
-        # GUI.Forms decodes PNG with its own stx_png over stx_zlib, and resamples
-        # image faces with stx_conv.
-        "stx_zlib.txt": toolkit / "stx_zlib/LICENSE",
-        "stx_zlib-puff.txt": toolkit / "stx_zlib/LICENSE-puff.txt",
-        "stx_zlib-zlib.txt": toolkit / "stx_zlib/LICENSE-zlib.txt",
-        "stx_png.txt": toolkit / "stx_png/LICENSE",
-        "stx_conv.txt": toolkit / "stx_conv/LICENSE",
-        "Plan-Paint.txt": ROOT / "shared/felt/LICENSE",
-    }
-    for name, source in entries.items():
-        shutil.copy2(source, notices / name)
-    skia = toolkit / "third_party/skia"
-    if skia.is_dir():
-        for name, source in {
-            # Skia is built without its PNG and zlib codecs (GUI.Forms Z-I5).
-            "Skia.txt": skia / "LICENSE",
-            "Skia-FreeType.txt": skia / "third_party/externals/freetype/docs/FTL.TXT",
-        }.items():
-            shutil.copy2(source, notices / name)
-    # Ogg Vorbis is decoded by GUI.Forms' stx_vorbis with its embedded BFFT, and
-    # threads run on GUI.Forms' copy of threadpool_atomic_fast.
+    fetched = Path(base.group(1).strip()) if base else build / "_deps"
     for name, source in {
-        "stx_vorbis.txt": toolkit / "stx_vorbis/LICENSE",
-        "BFFT.txt": toolkit / "stx_vorbis/third_party/bfft/LICENSE",
-        "BFFT-provenance.json": toolkit / "stx_vorbis/third_party/bfft/provenance.json",
-        "threadpool_atomic_fast.txt": toolkit / "src/core/threading/atomic_pool/LICENSE",
+        "QuickJS.txt": fetched / "quickjs-src/LICENSE",
+        "Plan-Paint.txt": ROOT / "shared/felt/LICENSE",
     }.items():
         shutil.copy2(source, notices / name)
     (destination / "README.txt").write_text(
@@ -128,13 +141,12 @@ def copy_resources(build, toolkit, destination):
         "Reasoning Agents.\nSponsor: Rainstar\n", encoding="utf-8")
 
 
-def write_manifest(bundle, system, architecture):
+def write_manifest(bundle, system, architecture, revision=None):
     files = {}
     for path in sorted(bundle.rglob("*")):
         if path.is_file():
             files[path.relative_to(bundle).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
-    revision = subprocess.check_output(["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True).strip()
-    manifest = {"version": project_version(), "source_revision": revision,
+    manifest = {"version": project_version(), "source_revision": source_revision(revision),
                 "system": system, "architecture": architecture,
                 "toolkit_source_revision": TOOLKIT_REVISION, "files": files}
     (bundle / "package-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
