@@ -13,10 +13,10 @@ add_library(game_felt STATIC shared/felt/carpet.cpp shared/felt/image.cpp)
 # The felt and drawn card backs every card table shares, made once per run (Koi-Koi too).
 # Also the room's light on a card's face, baked offline (shared/cards/table_light.hpp), and
 # the cards printed in it (card_print.hpp, card_press.hpp): their PNGs read with the ambient
-# engine's inflater, on the paper engine's stock. And a card held in the hand (held_card.hpp).
+# engine's inflater, on the paper engine's stock.
 add_library(game_table_art STATIC shared/cards/table_art.cpp shared/cards/card_backs.cpp
             shared/cards/table_light.cpp shared/cards/table_light_bake.cpp
-            shared/cards/card_print.cpp shared/cards/card_press.cpp shared/cards/held_card.cpp)
+            shared/cards/card_print.cpp shared/cards/card_press.cpp)
 target_include_directories(game_table_art PUBLIC shared PRIVATE shared/cards shared/felt)
 target_link_libraries(game_table_art PUBLIC game_felt game_paths GUIForms::Application PRIVATE paper_core ambient_core)
 # The shelf's wood (src/wood.cpp), in a library of its own so a game can stand its own

@@ -381,7 +381,7 @@ themes/playsuite gives the card its bone stock, black ink and gold foil. What GU
 1. **The card turned in three dimensions.** Dragged in the hand it turned, spun down when
    let go and settled face up or face down, lit as it faced the lamp, with a back face.
    GUI.Forms' card only tilts toward the pointer; its header says the turned card comes
-   later. `shared/cards/held_card.*` (and its tests) stay, now without a caller.
+   later. `shared/cards/held_card.*` and its tests are removed (no caller).
 2. **The stock's material.** The paper engine's stock with the Settings screen's finish
    (dimples, the varnish's sheen, the facets' glint, the two plies of the cut edge) and
    thermographed ink standing above it. A theme gives the stock a fill and an edge only.
@@ -410,5 +410,5 @@ All five now come from GUI.Forms' card, through its API and the theme:
    the card is clipped under it as the pages scroll; the hide-when-gone rule is gone.
 5. The website: the shell no longer answers website_requested; the card hands the address
    to the host's open-URL capability. src/open_link.* is removed.
-`shared/cards/held_card.*` (PlaySuite's turned card) has no caller; it can go once the
-GUI.Forms turn is seen in the build.
+`shared/cards/held_card.*` (PlaySuite's turned card) is removed: it had no caller, and
+GUI.Forms' turn was seen in the dogfood build.

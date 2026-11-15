@@ -87,9 +87,9 @@ Two branches, by the owner's ruling (option C, provisional):
      the help book gives the page card its heading band (`set_heading_band`, a no-paint, no-hit control
      over the book's title); the website goes to the host's open-URL capability, and src/open_link.* is
      gone. Not expressed: the paper engine's finer finish (dimples, varnish, cut plies, raised ink).
-     `shared/cards/held_card.*` has no caller and can go once the GUI.Forms turn is seen.
+     `shared/cards/held_card.*` is removed (no caller; GUI.Forms' turn seen in the dogfood build).
    - tests: collection_ui (the hand card opens with a remark and closes with help), catalog_ui,
-     playsuite_theme, business_card_tests (held_card and the remarks).
+     playsuite_theme, business_card_tests (the remarks).
 
 ## The raisers branch (`claude/conformance-raisers`)
 
@@ -205,7 +205,6 @@ between the two. Tests that should cover this branch:
 - The help book places the page card from the pages' arrange and scroll (set_child_layout inside layout).
 - Zen's orbit assumes the relative release sample arrives before `relative_pointer_ended`.
 - The theme's `business-card` rules may raise new theme findings (unknown part names show only when compiled).
-- `held_card` is left without a caller; business_card_tests still covers it.
 - The heading band control lies over the book's title with no hit; the card is clipped at its lower edge
   (y 62, the pages' top).
 - Crossings now read `pointer_location()` during the crossing; if it lags the crossing event, an enter is
