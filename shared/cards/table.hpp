@@ -3,6 +3,7 @@
 #include "dealer.hpp"
 #include "game.hpp"
 #include "gui_forms/basic_controls.hpp"
+#include "gui_forms/drag/drag_tracker/drag_tracker.hpp"
 #include "gui_forms/controls/text_box.hpp"
 #include "gui_forms/timer.hpp"
 #include "gui_forms/events/key_events/key_events.hpp"
@@ -54,6 +55,17 @@ class Table final : public gf::Control, public CommandSource {
     }
 
   private:
+    // The card drag runs on GUI.Forms' DragTracker: a press on a selected run arms it, past
+    // 4 pt it starts (plan_drag), and it ends once. Its plan is a free placement with no
+    // targets: the pile is chosen at the release by the held card's overlap with each legal
+    // landing (drop_target), the table's own rule, which the tracker's nearest-centre magnet
+    // would change. The release's drop stays in on_mouse_up; finish_drag puts the run back
+    // for every other end (Escape, a lost capture, the window's deactivation, a cancel).
+    gf::DragTracker drag_{*this};
+    bool resetting_drag_ = false;  // release_pointer_drag is cancelling: the caller lays out
+    void plan_drag(gf::DragPlan& plan);
+    void finish_drag(const gf::DragTrackerFrame& frame);
+    void release_pointer_drag();
     void primary_press(gf::MouseEventArgs& event, gf::Point local_position);
     [[nodiscard]] int foundation_for(int pile, int index) const;
     void key_down(gf::KeyEventArgs& event);

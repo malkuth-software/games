@@ -105,6 +105,8 @@ gf::ImageId load_image(gf::Window& window, const std::string& name) {
 } // namespace
 Table::Table(gf::StableId id) : gf::Control(std::move(id)) {
     focusable = true;
+    drag_.callbacks.plan = gf::Delegate<gf::DragPlan&>::bind<Table, &Table::plan_drag>(*this);
+    drag_.callbacks.finished = gf::Delegate<const gf::DragTrackerFrame&>::bind<Table, &Table::finish_drag>(*this);
     accessible_name = "Card table. Arrow keys choose piles, Enter selects or places, H hints, "
                         "Space deals, Z undoes, F1 opens help.";
     next_seed_ =
@@ -187,6 +189,7 @@ void Table::on_attached_to_window() {
     request_tick();
 }
 void Table::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
+    drag_.owner_detaching(window);
     try {
         save_due_ = false;
         persist();
@@ -1305,7 +1308,7 @@ void Table::open_panel(int panel) {
     panel_ = panel;
     pointer_down_ = false;
     dragging_ = false;
-    set_pointer_capture(false);
+    release_pointer_drag();
     for (int i = 0; i < 9; ++i)
         (*buttons_[i]).enabled = panel == 0;
     for (int i = 9; i < 22; ++i)
@@ -1400,7 +1403,7 @@ void Table::new_game(Kind kind) {
         selected_index_ = -1;
         dragging_ = false;
         pointer_down_ = false;
-        set_pointer_capture(false);
+        release_pointer_drag();
         layout_cards(false);
         request_tick();
         invalidate(gf::Dirty::paint);
@@ -1415,7 +1418,7 @@ void Table::new_game(Kind kind) {
     pass_cards_.clear();
     dragging_ = false;
     pointer_down_ = false;
-    set_pointer_capture(false);
+    release_pointer_drag();
     layout_cards(true);
     music_play(audio_name(kind), music_);
     sound_play("deal", sound_);
@@ -1469,7 +1472,7 @@ void Table::switch_game(Kind kind) {
         selected_index_ = -1;
         dragging_ = false;
         pointer_down_ = false;
-        set_pointer_capture(false);
+        release_pointer_drag();
         pass_cards_.clear();
         layout_cards(false);
         music_play(audio_name(kind), music_);
@@ -1758,7 +1761,7 @@ void Table::changed(const char* effect) {
     selected_index_ = -1;
     dragging_ = false;
     hover_ = -1;
-    set_pointer_capture(false);
+    release_pointer_drag();
     layout_cards(true);
     if (game.state.over)
         sound_play("win", sound_);
@@ -1852,6 +1855,49 @@ void Table::track_hover(gf::Point point) {
     if (glint_)
         request_tick();
 }
+// Past the threshold: the selected run is lifted. A free placement over the window; the
+// pile is drop_target's at the release.
+void Table::plan_drag(gf::DragPlan& plan) {
+    if (selection_ < 0 || panel_ || cascading_) {
+        plan.refused = true;
+        return;
+    }
+    plan.kind = gf::DragKind::placement;
+    plan.placement.grid_by_default = false;
+    plan.placement.free_drop = true;
+    plan.container = this;
+    dragging_ = true;
+}
+
+// The session's one end. A release (free) is dropped by on_mouse_up, which handed it in.
+// Any other end puts the run back where it lies, still selected, and forgets the press.
+void Table::finish_drag(const gf::DragTrackerFrame& frame) {
+    if (gf::drag_end_commits(frame.end))
+        return;
+    const bool lifted = dragging_;
+    dragging_ = false;
+    pointer_down_ = false;
+    pending_from_ = pending_index_ = pending_to_ = -1;
+    if (hover_ >= 0) {
+        invalidate(enlarged(slots_[hover_], 12));
+        invalidate(enlarged(landing(hover_), 12));
+        hover_ = -1;
+    }
+    if (lifted && !resetting_drag_)
+        layout_cards(true);
+    invalidate(gf::Dirty::paint);
+}
+
+// Ends a running pointer drag without its drop (a panel, a deal, a finished game, Escape)
+// and the capture the press took; the caller lays the cards out.
+void Table::release_pointer_drag() {
+    resetting_drag_ = true;
+    if (drag_.running())
+        drag_.cancel(gf::DragEnd::model_changed);
+    resetting_drag_ = false;
+    set_pointer_capture(false);
+}
+
 int Table::drop_target() const {
     if (selection_ < 0 || selected_index_ < 0 || game.state.kind == Kind::hearts)
         return hit_slot(pointer_);
@@ -1939,8 +1985,9 @@ void Table::select_or_move(int pile, int index) {
 }
 // The pointer, in GUI.Forms' raisers. A press during a cascade finishes it. A
 // primary press plays a card (Hearts), presses a pile (TriPeaks) or selects
-// what it presses, under capture; past 4 pt the moves drag the selection, and
-// the release drops it on the target under it (and suppresses the click), or
+// what it presses; a selected run arms GUI.Forms' DragTracker, past 4 pt the
+// moves drag it, and the release drops it on the target under it (and
+// suppresses the click), Escape or a lost capture putting it back; or the release
 // completes a click-to-place started by the press. A double click on a card
 // that can go to a foundation sends it there: its second press only notes it,
 // and the derived double click moves it. Hover follows the moves.
@@ -2001,7 +2048,17 @@ void Table::primary_press(gf::MouseEventArgs& e, gf::Point local_position) {
         pointer_down_ = true;
         dragging_ = false;
         press_ = pointer_ = local_position;
-        set_pointer_capture(true);
+        // A selected run arms the tracker, which takes the capture (the primary press
+        // captures in any case); past 4 pt it plans the drag.
+        if (selection_ >= 0) {
+            gf::DragStart start{};
+            start.key = static_cast<std::uint64_t>(selection_);
+            const gf::Point at = point_to_window(local_position);
+            start.source = gf::Rect{at.x - 1, at.y - 1, 2, 2};
+            start.threshold = 4.0;
+            const gf::PointerEvent press = gf::pointer_event_of(e);
+            static_cast<void>(drag_.press(press, start));
+        }
     }
 }
 
@@ -2036,8 +2093,16 @@ void Table::on_mouse_move(gf::MouseEventArgs& e) {
     } else if (!panel_) {
         gf::Point previous = pointer_;
         pointer_ = local_position;
-        if (selection_ >= 0 && std::hypot(pointer_.x - press_.x, pointer_.y - press_.y) > 4)
-            dragging_ = true;
+        // The tracker starts the drag past its threshold (plan_drag sets dragging_).
+        if (drag_.running()) {
+            const gf::PointerEvent event = gf::pointer_event_of(e);
+            static_cast<void>(drag_.pointer(event));
+        }
+        // A cancel inside the tracker's callbacks ended the press.
+        if (!pointer_down_) {
+            gf::Control::on_mouse_move(e);
+            return;
+        }
         // The destination outline lies where the card would land; repaint both places.
         if (hover_ >= 0) {
             invalidate(enlarged(slots_[hover_], 12));
@@ -2071,8 +2136,13 @@ void Table::on_mouse_move(gf::MouseEventArgs& e) {
 void Table::on_mouse_up(gf::MouseEventArgs& e) {
     const gf::Point local_position = e.location;
     if (!panel_ && pointer_down_) {
+        // The release reaches the tracker first: dragging, it ends the session (free) and the
+        // drop below places the run; only armed, it is the press's click.
+        if (drag_.running()) {
+            const gf::PointerEvent event = gf::pointer_event_of(e);
+            static_cast<void>(drag_.pointer(event));
+        }
         pointer_down_ = false;
-        set_pointer_capture(false);
         if (dragging_) {
             // a drop is not a click
             e.suppress_click = true;
@@ -2147,7 +2217,7 @@ void Table::key_down(gf::KeyEventArgs& e) {
         open_panel(0);
         selection_ = -1;
         dragging_ = false;
-        set_pointer_capture(false);
+        release_pointer_drag();
         e.handled = true;
         return;
     }

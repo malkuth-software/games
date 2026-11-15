@@ -1,7 +1,7 @@
 // The views' input on GUI.Forms' raisers, through real window dispatch: a card table's
 // double click is the derived double click (its second press only notes it, the release
 // places the card), a drag's release suppresses the click, a press whose release lands off
-// the view raises no click, and a key bubbling from a child reaches the view's own key
+// the view raises no click, Escape ends a card drag (GUI.Forms' DragTracker), and a key bubbling from a child reaches the view's own key
 // handling with its fields intact (gf::key_event_arguments, public in GUI.Forms cp33).
 #include "gui_forms/window.hpp"
 #include "gui_forms/events/key_events/key_events.hpp"
@@ -95,6 +95,26 @@ void drag_release_is_not_a_click() {
     require(!(*table).has_pointer_capture(), "the drag released the capture");
 }
 
+// The card drag is a GUI.Forms DragTracker session: Escape ends it (the window routes the key
+// to the drag engine first, before the table's own Escape opens its panel), no move is made,
+// and the release that follows is no click.
+void escape_ends_a_card_drag() {
+    std::shared_ptr<games::Table> table = gf::make_control<games::Table>(gf::StableId("test.table.escape"));
+    (*table).game.deal(games::Kind::freecell, 42);
+    std::unique_ptr<gf::Window> window = std::make_unique<gf::Window>(table, gf::Size{1180, 800});
+    (*window).perform_layout();
+    (*window).set_active(true);
+    pointer(*window, gf::PointerAction::down, {220, 500}, 1);
+    pointer(*window, gf::PointerAction::move, {80, 180}, 0);
+    gf::KeyEvent escape{};
+    escape.action = gf::KeyAction::down;
+    escape.physical_key = gf::PhysicalKey::escape;
+    static_cast<void>((*window).dispatch_key(escape));
+    pointer(*window, gf::PointerAction::up, {80, 180}, 1);
+    require((*table).game.state.moves == 0, "Escape mid-drag makes no move");
+    require(!(*table).has_pointer_capture(), "the ended drag holds no capture");
+}
+
 void bubbled_key_keeps_its_fields() {
     gf::KeyEvent event{};
     event.action = gf::KeyAction::down;
@@ -117,6 +137,7 @@ int main() {
         games_test::isolate_saves(games_test::scratch_directory("games-view-input-"));
         double_click_places_on_release();
         drag_release_is_not_a_click();
+        escape_ends_a_card_drag();
         bubbled_key_keeps_its_fields();
         std::cout << "view_input_tests: ok\n";
     } catch (const std::exception& error) {
