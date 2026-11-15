@@ -3,6 +3,8 @@
 #include "pcm_player.hpp"
 #include "storage.hpp"
 #include "gui_forms/controls/text_box.hpp"
+#include <array>
+#include <span>
 #include <sstream>
 #include "gui_forms/window.hpp"
 #include <fstream>
@@ -405,6 +407,29 @@ void Collection::arrange(gf::Rect b) {
     set_child_layout(help_, {b.width - paper_width - 16, 16, paper_width, b.height - 32});
     set_child_layout(settings_, full);
     set_child_layout(card_, full);
+    // The capsule is hidden while the shelf is open; the help link is where it was just laid out.
+    const gf::Rect help_link = shelf_open_ ? ShelfView::help_slot({b.width, b.height})
+                                           : gf::Rect{b.width - 46, 8, 38, 38};
+    declare_release_regions(shelf_open_ ? gf::Rect{} : capsule, help_link);
+}
+// The shell stays clickable while a game holds the pointer (owner, 2026-11-15: every
+// PlaySuite game can always click the capsule): the capsule and the help link are the
+// window's pointer release regions, in window units, declared again at every layout. Over
+// one, a game's confined pointer is suspended and the ordinary pointer clicks it.
+void Collection::declare_release_regions(gf::Rect capsule, gf::Rect help_link) {
+    gf::Window* window = attached_window();
+    if (window == nullptr)
+        return;
+    const gf::Rect origin = absolute_bounds();
+    std::array<gf::Rect, 2> regions{};
+    std::size_t count = 0;
+    for (const gf::Rect local : {capsule, help_link}) {
+        if (local.width <= 0 || local.height <= 0)
+            continue;
+        regions[count] = gf::Rect{origin.x + local.x, origin.y + local.y, local.width, local.height};
+        count = count + 1;
+    }
+    static_cast<void>((*window).set_pointer_release_regions(std::span<const gf::Rect>(regions.data(), count)));
 }
 void Collection::on_paint(gf::Painter& p, gf::Rect) {
     if (shelf_open_ || !railed(active_))

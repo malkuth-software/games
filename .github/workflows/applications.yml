@@ -197,6 +197,10 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sh template_harness/harness/install_linux_ci_packages.sh packages "$RUNNER_TEMP/apt-archives"
+          # GUI.Forms builds against LLVM's libc++ 22 and libc++abi on Linux (cp33; owner, 2026-11-15):
+          # gui_forms/cmake/llvm22.cmake passes -stdlib=libc++. apt.llvm.org, which the harness
+          # script has just added, has them; they move into the harness tables at its next bump.
+          sudo apt-get install -y --no-install-recommends libc++-22-dev libc++abi-22-dev
           echo "CC=clang" >> "$GITHUB_ENV"
           echo "CXX=clang++" >> "$GITHUB_ENV"
       - uses: actions/cache/save@v4
@@ -442,7 +446,12 @@ jobs:
           key: linux-debs-v1-core-${{ runner.arch }}-${{ hashFiles('template_harness/harness/install_linux_ci_packages.sh', 'template_harness/projects/games.toml') }}-${{ steps.linux-image.outputs.image }}
           restore-keys: linux-debs-v1-core-${{ runner.arch }}-${{ hashFiles('template_harness/harness/install_linux_ci_packages.sh', 'template_harness/projects/games.toml') }}-
       - name: Install the compiler and build tools
-        run: sh template_harness/harness/install_linux_ci_packages.sh core "$RUNNER_TEMP/apt-archives"
+        run: |
+          sh template_harness/harness/install_linux_ci_packages.sh core "$RUNNER_TEMP/apt-archives"
+          # GUI.Forms builds against LLVM's libc++ 22 and libc++abi on Linux (cp33; owner, 2026-11-15):
+          # gui_forms/cmake/llvm22.cmake passes -stdlib=libc++. apt.llvm.org, which the harness
+          # script has just added, has them; they move into the harness tables at its next bump.
+          sudo apt-get install -y --no-install-recommends libc++-22-dev libc++abi-22-dev
       - uses: actions/cache/save@v4
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.linux-packages.outputs.cache-hit != 'true'
         with:

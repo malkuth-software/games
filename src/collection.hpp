@@ -78,6 +78,7 @@ class Collection final : public gf::Control, public HelpHost {
     gf::FocusScopeId settings_focus_{};
     std::shared_ptr<BusinessCard> card_;
     gf::FocusScopeId card_focus_{};
+    void declare_release_regions(gf::Rect capsule, gf::Rect help_link);
     SettingsObservation masters_{};
     bool music_shown_ = true, sound_shown_ = true, reduced_shown_ = false;
     ModuleContext modules_;

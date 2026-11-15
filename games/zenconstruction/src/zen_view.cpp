@@ -97,6 +97,8 @@ ZenView::ZenView(gf::StableId id, Options options) : games::RoutedInput<gf::Cont
         set_authored_surface_material(none);
     }
     accessible_name = "Rock Stack. Stack rocks from the bowl with a little crane.";
+    gf::on(relative_pointer(), *this, &ZenView::relative_sample);
+    gf::on(relative_pointer_ended(), *this, &ZenView::relative_ended);
     camera_goal_ = camera_.target;
     if (!load()) {
         seed_entry_ = fresh_seed();
@@ -865,17 +867,15 @@ void ZenView::handle_pointer(gf::PointerEvent& e) {
         return;
     }
     if (e.action == gf::PointerAction::move) {
-        if (dragging_) {
+        if (dragging_ && !orbit_relative_) {
             const double dx = mx_ - drag_x_;
             const double dy = my_ - drag_y_;
             if (std::abs(dx) + std::abs(dy) > 2) {
                 drag_moved_ = true;
             }
-            camera_.yaw = camera_.yaw - dx * 0.008;
-            camera_.pitch = std::clamp(camera_.pitch + dy * 0.006, 0.18, 1.35);
+            orbit_by(dx, dy);
             drag_x_ = mx_;
             drag_y_ = my_;
-            camera_dirty_ = true;
         } else {
             update_hover();
         }
@@ -890,31 +890,107 @@ void ZenView::handle_pointer(gf::PointerEvent& e) {
             e.handled = true;
             return;
         }
-        dragging_ = true;
-        drag_moved_ = false;
-        drag_x_ = mx_;
-        drag_y_ = my_;
+        begin_orbit();
         e.handled = true;
         return;
     }
     if (e.action == gf::PointerAction::up) {
-        if (dragging_) {
-            dragging_ = false;
-            // a click (not a drag) on a rock sends the crane for it
-            if (!drag_moved_ && e.button == gf::PointerButton::primary && run_) {
-                update_hover();
-                if (hover_rock_ >= 0) {
-                    if ((*run_).fetch(hover_rock_)) {
-                        play("zc_relay", .6f);
-                    } else if ((*run_).crane.mode == CraneMode::parked) {
-                        say_one(kCovered, 2);
-                    }
+        end_orbit(e.button);
+        e.handled = true;
+    }
+}
+
+void ZenView::begin_orbit() {
+    dragging_ = true;
+    drag_moved_ = false;
+    drag_x_ = mx_;
+    drag_y_ = my_;
+    orbit_travel_ = 0;
+    // Every PlaySuite game keeps the cursor visible; the shell's capsule stays clickable
+    // through the window's release regions (Collection declares them).
+    gf::RelativePointerRequest request{};
+    request.mode = gf::RelativePointerMode::confined;
+    request.hide_cursor = false;
+    request.raw_motion = false;
+    request.until_release = true;
+    const gf::RelativePointerGrant grant = request_relative_pointer(request);
+    // Free mode (a window that can only derive deltas from positions) keeps the ordinary moves
+    // as well, which already turn the camera: the samples would turn it twice.
+    orbit_relative_ = grant.accepted() && grant.mode != gf::RelativePointerMode::free;
+    if (grant.accepted() && !orbit_relative_) {
+        static_cast<void>(release_relative_pointer());
+    }
+}
+
+void ZenView::orbit_by(double dx, double dy) {
+    camera_.yaw = camera_.yaw - dx * 0.008;
+    camera_.pitch = std::clamp(camera_.pitch + dy * 0.006, 0.18, 1.35);
+    camera_dirty_ = true;
+}
+
+// The release that ends an orbit: a click (not a drag) on a rock sends the crane for it.
+void ZenView::end_orbit(gf::PointerButton button) {
+    if (dragging_) {
+        dragging_ = false;
+        if (!drag_moved_ && button == gf::PointerButton::primary && run_) {
+            update_hover();
+            if (hover_rock_ >= 0) {
+                if ((*run_).fetch(hover_rock_)) {
+                    play("zc_relay", .6f);
+                } else if ((*run_).crane.mode == CraneMode::parked) {
+                    say_one(kCovered, 2);
                 }
             }
         }
-        e.handled = true;
-        want_render_ = true;
     }
+    want_render_ = true;
+}
+
+// A relative-pointer sample while the orbit holds the pointer: motion turns the camera by its
+// delta, the release ends the orbit (and may be the click on a rock), the wheel zooms as the
+// ordinary wheel does. The position is in this view's coordinates.
+void ZenView::relative_sample(gf::RelativePointerEventArgs& sample) {
+    if (!orbit_relative_) {
+        return;
+    }
+    mx_ = sample.position.x;
+    my_ = sample.position.y;
+    switch (sample.kind) {
+    case gf::RelativePointerSampleKind::motion:
+        if (dragging_) {
+            orbit_travel_ = orbit_travel_ + std::abs(sample.delta.x) + std::abs(sample.delta.y);
+            if (orbit_travel_ > 2) {
+                drag_moved_ = true;
+            }
+            orbit_by(sample.delta.x, sample.delta.y);
+        }
+        break;
+    case gf::RelativePointerSampleKind::button_up:
+        end_orbit(sample.button);
+        break;
+    case gf::RelativePointerSampleKind::wheel:
+        if (panel_ == Panel::none) {
+            camera_.distance = std::clamp(camera_.distance * std::exp(-sample.wheel_delta.y * 0.06), 0.7, 4.5);
+            camera_.yaw = camera_.yaw + sample.wheel_delta.x * 0.01;
+            camera_dirty_ = true;
+        }
+        break;
+    case gf::RelativePointerSampleKind::button_down:
+    default:
+        break;
+    }
+    sample.handled = true;
+}
+
+// The mode ended. With until_release the release sample came first and ended the orbit; any
+// other end (Escape, focus, deactivation, a dialog) drops the orbit without a click.
+void ZenView::relative_ended(const gf::RelativePointerEnded& ended) {
+    static_cast<void>(ended);
+    if (!orbit_relative_) {
+        return;
+    }
+    orbit_relative_ = false;
+    dragging_ = false;
 }
 
 void ZenView::handle_key(gf::KeyEvent& e) {

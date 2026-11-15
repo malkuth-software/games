@@ -44,6 +44,27 @@ set(GAMES_GUI_FORMS_INSTALLED OFF)
 if(GAMES_BUILD_APPLICATION)
   set(GAMES_TOOLKIT_SOURCE_DIR "" CACHE PATH "GUI.Forms source to build with the application; empty to use an installed GUI.Forms")
 endif()
+# GUI.Forms on Linux builds against LLVM's libc++ 22 and libc++abi (cp33; owner, 2026-11-15),
+# and an application that links it must use the same C++ library: gui_forms/cmake/llvm22.cmake
+# passes -stdlib=libc++. A tree that would compile against libstdc++ is refused here, as
+# GUI.Forms' own configure refuses it, rather than at the first link or library difference.
+if(GAMES_BUILD_APPLICATION AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  include(CheckCXXSourceCompiles)
+  check_cxx_source_compiles([=[
+#include <version>
+#if !defined(_LIBCPP_VERSION) || _LIBCPP_VERSION < 220000 || _LIBCPP_VERSION >= 230000
+#error "not libc++ 22"
+#endif
+int main() { return 0; }
+]=] GAMES_LINUX_LIBCXX_22)
+  if(NOT GAMES_LINUX_LIBCXX_22)
+    # Not cached as a failure: the next configure checks again.
+    unset(GAMES_LINUX_LIBCXX_22 CACHE)
+    message(FATAL_ERROR "PlaySuite on Linux builds against libc++ 22 and libc++abi, as GUI.Forms does: "
+                        "configure with gui_forms/cmake/llvm22.cmake and install libc++-22-dev and "
+                        "libc++abi-22-dev")
+  endif()
+endif()
 if(GAMES_BUILD_APPLICATION AND GAMES_TOOLKIT_SOURCE_DIR STREQUAL "")
   find_package(GUIForms 0.6 CONFIG REQUIRED COMPONENTS Application Audio TextMasks AudioLoopTransport)
   set(GAMES_GUI_FORMS_INSTALLED ON)

@@ -294,6 +294,9 @@ int main() {
         assert(business_card && !(*business_card).visible.read());
         assert((*collection).children().size() == 6);
         assert((*shelf).visible.read() && !(*capsule).visible.read());
+        // The shell's pointer release regions (cp33's relative pointer): on the shelf only the
+        // help link, the capsule being hidden.
+        assert(window.pointer_release_regions().size() == 1);
         // PlaySuite lists all thirteen games in one place, with no categories.
         for (Entry entry : entries)
             assert(button(*shelf, "shelf.box." + std::to_string(static_cast<int>(entry))) &&
@@ -307,6 +310,8 @@ int main() {
         assert(eggy);
         window.perform_layout();
         assert(!(*shelf).visible.read() && (*eggy).visible.read() && (*capsule).visible.read());
+        // In a game the capsule and the help link stay clickable over a held pointer.
+        assert(window.pointer_release_regions().size() == 2);
         assert(!std::filesystem::exists(scratch / "eggy-v1.txt"));
         click(window, *eggy, {200, 200}); // Begin the first climb, using nested coordinates.
         assert((*button(*capsule, "capsule.back")).perform_click());

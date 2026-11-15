@@ -87,6 +87,18 @@ private:
     double mx_ = 0, my_ = 0;
     bool dragging_ = false, drag_moved_ = false;
     double drag_x_ = 0, drag_y_ = 0;
+    // The orbit on GUI.Forms' relative pointer (cp33): a press asks for the pointer confined to
+    // the view, visible, until its release, so the orbit goes on past the view's edge. While
+    // granted, the motion, the release and the wheel arrive as samples; a host or a window that
+    // cannot grant it leaves the ordinary moves (the orbit then stops at the edge, as before).
+    // `orbit_travel_` adds up the sample deltas, which decide whether the release was a click.
+    bool orbit_relative_ = false;
+    double orbit_travel_ = 0;
+    void begin_orbit();
+    void orbit_by(double dx, double dy);
+    void end_orbit(gf::PointerButton button);
+    void relative_sample(gf::RelativePointerEventArgs& sample);
+    void relative_ended(const gf::RelativePointerEnded& ended);
     int hover_rock_ = -1;
     bool hover_ok_ = false;
     double hold_reset_ = 0;             // seconds Start over has been held
