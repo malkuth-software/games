@@ -89,16 +89,26 @@ Two branches, by the owner's ruling (option C, provisional):
 - dc87433: the 21 views on GUI.Forms' raisers (the 9abfee0 port), with `gf::key_event_arguments` in place
   of src/key_arguments.hpp (cp33 made it public); Zen's relative-pointer orbit merged into its raisers;
   tests/view_input_tests.cpp (ctest `view_input`).
-- On GUI.Forms' DragTracker: Four Pegs' peg drag (09d04ba), the card table (0135809), Tumbled Stones'
-  stone drag with the neighbours as targets (ed415bf), Specimen Cabinet's stone drag (b09651d). Where the
-  game hit-tests itself (Four Pegs' 3D pick, the table's overlap rule, the cabinet's sockets and felt) the
-  tracker runs the session only: a free placement with no targets, the game picking the drop.
-- Kept as hand-rolled, by design: the Cube trace (a path, not a placement), Zen's orbit (the relative
-  pointer), Switchbox's switch hold and Eggy's hold (holds, not drags).
-- Still to do: the puzzles' per-kind drags (shared/puzzles, slide, gem, untangle node, orbit) and the
-  scenery drag in shared/ambient's SceneView.
+- On GUI.Forms' DragTracker: Four Pegs' peg drag, the card table's card drag, Tumbled Stones' stone drag
+  (the neighbours as targets), Specimen Cabinet's stone drag, the puzzles' drags (a Puzzle Solve piece, a
+  gem, an Untangle peg, the cat) and SceneView's scenery drag. Where the game hit-tests itself (Four Pegs'
+  3D pick, the table's overlap rule, the cabinet's sockets, the puzzles' snaps) the tracker runs the
+  session only: a free placement with no targets, the game picking the drop. Escape and a lost capture end
+  every one of them the same way (put back, or the scenery let go).
+- Kept hand-rolled, and why:
+  - the Cube trace (Cube and the puzzles' cube): a path drawn cell by cell through the grid, extended on
+    every move and routed round corners. It has no subject that moves or lands, so a placement session
+    has nothing to carry; it ends on the release or a lost capture (on_mouse_capture_changed).
+  - Zen Construction's orbit: a camera turn, not a drag of anything. It runs on GUI.Forms' relative
+    pointer (confined, until the release), which a drag session would fight for the pointer.
+  - Switchbox's switch hold and Eggy's hold: a button held down, not moved. Nothing travels or drops; they
+    end on the release or a lost capture.
 - tests: view_input (Escape ends a card drag), fourpegs_pointer (Escape mid-drag drops nothing; a tracker
-  drop into a socket), the view_contract tests, ui_routing, collection_ui, puzzle_frames.
+  drop into a socket), the view_contract tests (tumbledstones, specimencabinet, the puzzles, stillwater
+  and the other ambient scenes), ui_routing, collection_ui, puzzle_frames.
+- Behaviour changes to try: only the primary button drags a gem, an Untangle peg or the cat; the scenery
+  drag now keeps the pointer past the view's edge; the thresholds are per axis (the tracker's rule)
+  rather than by distance.
 
 ## The capsule
 
