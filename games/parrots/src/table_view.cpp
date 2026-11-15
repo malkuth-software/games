@@ -57,12 +57,9 @@ std::string read_checked(const std::filesystem::path& p, const std::string& head
 V3 bezier(V3 a, V3 c, V3 b, double t) { return a * ((1 - t) * (1 - t)) + c * (2 * t * (1 - t)) + b * (t * t); }
 }  // namespace
 
-TableView::TableView(gf::StableId id, Options opt) : gf::Control(std::move(id)), opt_(opt), rng_(seed_now()) {
+TableView::TableView(gf::StableId id, Options opt) : games::RoutedInput<gf::Control>(std::move(id)), opt_(opt), rng_(seed_now()) {
     cab_front_ = !opt_.hosted;
     focusable = true;
-    // Every release over the view is a click: a quick second press is another click, not a
-    // double click. (The opaque style went in GUI.Forms 0.6, audit A17.)
-    set_style(gf::ControlStyles::standard_double_click, false);
     {
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
@@ -707,93 +704,55 @@ void TableView::publish() {
 }
 
 // ------------------------------------------------------------------ input
-// The pointer, in GUI.Forms' raisers. The painted buttons fire on the derived
-// click (a release over the view after a press on the same button), so the
-// window's order rules apply; every other press acts on the press itself.
-void TableView::track_pointer(gf::Point local) {
+void TableView::handle_pointer(gf::PointerEvent& e) {
+    const gf::Point local = point_from_window(e.position);
     mouse_x_ = local.x / pixel_;
     mouse_y_ = local.y / pixel_;
-}
-
-std::string TableView::hit_button() const {
-    for (const Button& b : buttons_)
-        if (b.enabled && mouse_x_ >= b.x && mouse_x_ < b.x + b.w && mouse_y_ >= b.y && mouse_y_ < b.y + b.h) return b.id;
-    return {};
-}
-
-bool TableView::in_popup() const {
-    if (popup_.who < 0 || panel_ != Panel::none) return false;
-    int x, y, w, h, th, oy;
-    popup_box(x, y, w, h, th, oy);
-    return mouse_x_ >= x && mouse_x_ < x + w && mouse_y_ >= y && mouse_y_ < y + h;
-}
-
-// The wheel is not the table's: it is left unhandled for the ancestors.
-void TableView::on_mouse_move(gf::MouseEventArgs& e) {
-    track_pointer(e.location);
-    hover_ = hit_button();
-    hover_bird_ = hover_.empty() && panel_ == Panel::none && !in_popup() && mouse_y_ > top_h_ ? aviary_.pick_bird(mouse_x_, mouse_y_, st_) : -1;
-    cursor = phase_ == Phase::aim && hover_.empty() ? gf::CursorKind::crosshair : !hover_.empty() || hover_bird_ >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
-    gf::Control::on_mouse_move(e);
-}
-
-void TableView::on_mouse_down(gf::MouseEventArgs& e) {
-    track_pointer(e.location);
-    if (e.button == gf::PointerButton::secondary) {
+    auto hit = [&]() -> std::string {
+        for (const Button& b : buttons_)
+            if (b.enabled && mouse_x_ >= b.x && mouse_x_ < b.x + b.w && mouse_y_ >= b.y && mouse_y_ < b.y + b.h) return b.id;
+        return {};
+    };
+    auto in_popup = [&]() {
+        if (popup_.who < 0 || panel_ != Panel::none) return false;
+        int x, y, w, h, th, oy;
+        popup_box(x, y, w, h, th, oy);
+        return mouse_x_ >= x && mouse_x_ < x + w && mouse_y_ >= y && mouse_y_ < y + h;
+    };
+    if (e.action == gf::PointerAction::wheel) return;
+    if (e.action == gf::PointerAction::move) {
+        hover_ = hit();
+        hover_bird_ = hover_.empty() && panel_ == Panel::none && !in_popup() && mouse_y_ > top_h_ ? aviary_.pick_bird(mouse_x_, mouse_y_, st_) : -1;
+        cursor = phase_ == Phase::aim && hover_.empty() ? gf::CursorKind::crosshair : !hover_.empty() || hover_bird_ >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+    }
+    if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::secondary) {
         activate();
         const int b = panel_ == Panel::none && mouse_y_ > top_h_ ? aviary_.pick_bird(mouse_x_, mouse_y_, st_) : -1;
         if (b >= 0) cycle_mark(b);
         e.handled = true;
-    } else if (e.button == gf::PointerButton::primary) {
+        return;
+    }
+    if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
         activate();
-        const std::string h = hit_button();
-        if (!h.empty()) {
-            pressed_ = h;
-        } else if (panel_ == Panel::none && !in_popup()) {
-            const int b = mouse_y_ > top_h_ ? aviary_.pick_bird(mouse_x_, mouse_y_, st_) : -1;
-            if (b >= 0) click_bird(b);
-            else if (phase_ == Phase::aim) {}  // a shot at the leaves is no shot: aim again
-            else if (phase_ == Phase::arrive) settle_now();
-            else if (popup_.who >= 0) { popup_ = Popup{}; layout_buttons(); }  // a click on the leaves: the popup closes
-        }
+        const std::string h = hit();
+        if (!h.empty()) { pressed_ = h; e.handled = true; return; }
+        if (panel_ != Panel::none) { e.handled = true; return; }
+        if (in_popup()) { e.handled = true; return; }
+        const int b = mouse_y_ > top_h_ ? aviary_.pick_bird(mouse_x_, mouse_y_, st_) : -1;
+        if (b >= 0) click_bird(b);
+        else if (phase_ == Phase::aim) {}  // a shot at the leaves is no shot: aim again
+        else if (phase_ == Phase::arrive) settle_now();
+        else if (popup_.who >= 0) { popup_ = Popup{}; layout_buttons(); }  // a click on the leaves: the popup closes
+        e.handled = true;
+    } else if (e.action == gf::PointerAction::up) {
+        if (!pressed_.empty() && hit() == pressed_) action(pressed_);
+        pressed_.clear();
         e.handled = true;
     }
-    if (is_alive()) gf::Control::on_mouse_down(e);
 }
 
-void TableView::on_mouse_up(gf::MouseEventArgs& e) {
-    track_pointer(e.location);
-    released_ = pressed_;
-    pressed_.clear();
-    e.handled = true;
-    gf::Control::on_mouse_up(e);
-}
-
-void TableView::on_mouse_click(gf::MouseEventArgs& e) {
-    track_pointer(e.location);
-    const std::string released = released_;
-    released_.clear();
-    if (!released.empty() && hit_button() == released) action(released);
-    if (is_alive()) gf::Control::on_mouse_click(e);
-}
-
-// The keys: the view's own handling runs after the base raised the event, on
-// a key its subscribers left unhandled; keys bubbling from a focused child
-// take the same handling.
-void TableView::on_key_down(gf::KeyEventArgs& e) {
-    gf::Control::on_key_down(e);
-    key_down(e);
-}
-
-void TableView::on_key_bubble(gf::KeyEvent& e) {
-    if (e.action != gf::KeyAction::down) return;
-    gf::KeyEventArgs arguments = games::key_arguments_of(e);
-    key_down(arguments);
-    e.handled = arguments.handled;
-}
-
-void TableView::key_down(gf::KeyEventArgs& e) {
-    if (e.handled) return;
+void TableView::handle_key(gf::KeyEvent& e) {
+    if (e.handled || e.action != gf::KeyAction::down) return;
     using K = gf::PhysicalKey;
     const std::uint32_t k = e.physical_key;
     if (k == K::escape) {
@@ -813,7 +772,6 @@ void TableView::key_down(gf::KeyEventArgs& e) {
     }
     if (!opt_.hosted && k == K::m) { action("music"); e.handled = true; return; }
 }
-
 
 void TableView::action(const std::string& id) {
     play("pt_click", .4f);

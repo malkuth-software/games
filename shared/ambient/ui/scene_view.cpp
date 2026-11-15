@@ -91,9 +91,9 @@ Detail next_detail(Detail detail) {
 
 // The help card: a picture of the card, made by the view, laid over the scene. It
 // takes a click to close.
-class HelpCard final : public gf::Control {
+class HelpCard final : public games::RoutedInput<gf::Control> {
   public:
-    explicit HelpCard(gf::StableId id) : gf::Control(std::move(id)) {
+    explicit HelpCard(gf::StableId id) : games::RoutedInput<gf::Control>(std::move(id)) {
         set_paint_plane(gf::PaintPlane::overlay);
     }
     std::function<void()> close{};
@@ -109,14 +109,11 @@ class HelpCard final : public gf::Control {
         if (image_.value)
             painter.draw_image(image_, client_rectangle());
     }
-    // A primary press closes the card (close may dispose it).
-    void on_mouse_down(gf::MouseEventArgs& event) override {
-        if (event.button == gf::PointerButton::primary && close) {
+    void handle_pointer(gf::PointerEvent& event) override {
+        if (event.action == gf::PointerAction::down && event.button == gf::PointerButton::primary && close) {
             close();
             event.handled = true;
         }
-        if (is_alive())
-            gf::Control::on_mouse_down(event);
     }
     void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override {
         if (image_.value)
@@ -131,12 +128,9 @@ class HelpCard final : public gf::Control {
 // ---------------------------------------------------------------- construction
 
 SceneView::SceneView(gf::StableId id, HostSetup setup, std::unique_ptr<Scenery> scenery, ViewOptions options)
-    : gf::Control(std::move(id)), setup_(std::move(setup)), scenery_(std::move(scenery)), options_(options) {
+    : games::RoutedInput<gf::Control>(std::move(id)), setup_(std::move(setup)), scenery_(std::move(scenery)), options_(options) {
     front_ = !options_.hosted;
     focusable = true;
-    // Every release over the view is a click: a quick second press is another click, not a
-    // double click. (The opaque style went in GUI.Forms 0.6, audit A17.)
-    set_style(gf::ControlStyles::standard_double_click, false);
     gf::SurfaceMaterial plain;
     plain.fills = {gf::MaterialFillLayer::solid(backdrop_color(setup_.backdrop))};
     set_authored_surface_material(plain);
@@ -590,24 +584,16 @@ void SceneView::set_help(bool open) {
     request_frame();
 }
 
-// The pointer, in GUI.Forms' raisers: a primary press grabs the scenery (or
-// closes the help card), the moves drag it and the release lets it go; there
-// is no click. The cursor shows what can be grabbed.
-bool SceneView::pointer_fraction(gf::Point local, double& x, double& y) const {
+void SceneView::handle_pointer(gf::PointerEvent& event) {
+    const gf::Point local = point_from_window(event.position);
     const gf::Rect bounds = client_rectangle();
     if (bounds.width <= 0 || bounds.height <= 0)
-        return false;
-    x = std::clamp(local.x / bounds.width, 0.0, 1.0);
-    y = std::clamp(local.y / bounds.height, 0.0, 1.0);
-    return true;
-}
-
-void SceneView::on_mouse_move(gf::MouseEventArgs& event) {
-    double x = 0;
-    double y = 0;
-    if (pointer_fraction(event.location, x, y)) {
-        const bool live = scene_ready() && !settings_.paused && !help_open_;
-        SceneContext work = context();
+        return;
+    const double x = std::clamp(local.x / bounds.width, 0.0, 1.0);
+    const double y = std::clamp(local.y / bounds.height, 0.0, 1.0);
+    const bool live = scene_ready() && !settings_.paused && !help_open_;
+    SceneContext work = context();
+    if (event.action == gf::PointerAction::move) {
         if (dragging_ && live) {
             (*scenery_).drag(x, y, work);
             request_frame();
@@ -615,23 +601,7 @@ void SceneView::on_mouse_move(gf::MouseEventArgs& event) {
         } else if (!dragging_) {
             cursor = live && (*scenery_).grabbable(x, y) ? gf::CursorKind::hand : gf::CursorKind::arrow;
         }
-        finish(work);
-    }
-    gf::Control::on_mouse_move(event);
-}
-
-void SceneView::on_mouse_leave() {
-    if (!dragging_)
-        cursor = gf::CursorKind::arrow;
-    gf::Control::on_mouse_leave();
-}
-
-void SceneView::on_mouse_down(gf::MouseEventArgs& event) {
-    double x = 0;
-    double y = 0;
-    if (event.button == gf::PointerButton::primary && pointer_fraction(event.location, x, y)) {
-        const bool live = scene_ready() && !settings_.paused && !help_open_;
-        SceneContext work = context();
+    } else if (event.action == gf::PointerAction::down && event.button == gf::PointerButton::primary) {
         activate();
         if (help_open_) {
             set_help(false);
@@ -641,50 +611,19 @@ void SceneView::on_mouse_down(gf::MouseEventArgs& event) {
             request_frame();
         }
         event.handled = true;
-        finish(work);
-    }
-    if (is_alive()) gf::Control::on_mouse_down(event);
-}
-
-void SceneView::on_mouse_up(gf::MouseEventArgs& event) {
-    double x = 0;
-    double y = 0;
-    if (dragging_ && pointer_fraction(event.location, x, y)) {
-        const bool live = scene_ready() && !settings_.paused && !help_open_;
-        SceneContext work = context();
+    } else if (event.action == gf::PointerAction::up && dragging_) {
         dragging_ = false;
         if (live)
             (*scenery_).release(x, y, work);
         request_frame();
         event.handled = true;
-        finish(work);
+    } else if (event.action == gf::PointerAction::leave && !dragging_) {
+        cursor = gf::CursorKind::arrow;
     }
-    gf::Control::on_mouse_up(event);
+    finish(work);
 }
 
-// The keys: the view's own handling runs after the base raised the event, on
-// a key its subscribers left unhandled; keys bubbling from a focused child
-// take the same handling. A scene's steering keys are marked handled both
-// ways (the scene reads their state); a key up the window raises because it
-// lost activation is skipped.
-void SceneView::on_key_down(gf::KeyEventArgs& event) {
-    gf::Control::on_key_down(event);
-    key_input(event, true);
-}
-
-void SceneView::on_key_up(gf::KeyEventArgs& event) {
-    gf::Control::on_key_up(event);
-    if (!event.released_by_deactivation)
-        key_input(event, false);
-}
-
-void SceneView::on_key_bubble(gf::KeyEvent& event) {
-    gf::KeyEventArgs arguments = games::key_arguments_of(event);
-    key_input(arguments, event.action == gf::KeyAction::down);
-    event.handled = arguments.handled;
-}
-
-void SceneView::key_input(gf::KeyEventArgs& event, bool down) {
+void SceneView::handle_key(gf::KeyEvent& event) {
     if (event.handled)
         return;
     using Key = gf::PhysicalKey;
@@ -695,7 +634,7 @@ void SceneView::key_input(gf::KeyEventArgs& event, bool down) {
         request_frame();
         return;
     }
-    if (!down)
+    if (event.action != gf::KeyAction::down)
         return;
     event.handled = true;
     if (event.repeat)
@@ -718,7 +657,6 @@ void SceneView::key_input(gf::KeyEventArgs& event, bool down) {
             run_command(command);
     }
 }
-
 
 std::vector<games::GameCommand> SceneView::commands() const {
     std::vector<games::GameCommand> list{};

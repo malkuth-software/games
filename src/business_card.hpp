@@ -19,6 +19,7 @@
 #include "cards/held_card.hpp"
 #include "game_text.hpp"
 #include "gui_forms/timer.hpp"
+#include "routed_input.hpp"
 #include "presentation.hpp"
 
 #include <chrono>
@@ -29,7 +30,7 @@
 
 namespace games {
 
-class BusinessCard final : public gf::Control {
+class BusinessCard final : public games::RoutedInput<gf::Control> {
   public:
     enum class Kind { page, hand };
     BusinessCard(gf::StableId id, Kind kind);
@@ -48,13 +49,8 @@ class BusinessCard final : public gf::Control {
 
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void on_mouse_down(gf::MouseEventArgs& event) override;
-    void on_mouse_up(gf::MouseEventArgs& event) override;
-    void on_mouse_move(gf::MouseEventArgs& event) override;
-    void on_mouse_wheel(gf::MouseEventArgs& event) override;
-    void on_mouse_leave() override;
-    void on_mouse_click(gf::MouseEventArgs& event) override;
-    void on_key_down(gf::KeyEventArgs& event) override;
+    void handle_pointer(gf::PointerEvent& event) override;
+    void handle_key(gf::KeyEvent& event) override;
     void on_focus_cue_changed(bool visible) override;
     [[nodiscard]] bool hit_test_local(gf::Point local) const override;
     [[nodiscard]] gf::Insets visual_outsets() const noexcept override;
@@ -116,8 +112,6 @@ class BusinessCard final : public gf::Control {
     bool over_company_ = false;
     gf::Point pointer_{};
     bool pressed_on_card_ = false;
-    // What a release that did not drag ended, for the click that follows it.
-    bool click_on_card_ = false, click_on_black_ = false;
     bool pressed_on_black_ = false;
     bool dragged_ = false;
     gf::Point pressed_{};

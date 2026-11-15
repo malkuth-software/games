@@ -80,12 +80,9 @@ bool neighbours(int a, int b) {
 
 }  // namespace
 
-TumbledStonesView::TumbledStonesView(gf::StableId id, Options options) : gf::Control(std::move(id)), options_(options) {
+TumbledStonesView::TumbledStonesView(gf::StableId id, Options options) : games::RoutedInput<gf::Control>(std::move(id)), options_(options) {
     front_ = !options_.hosted;
     focusable = true;
-    // Every release over the view is a click: a quick second press is another click, not a
-    // double click. (The opaque style went in GUI.Forms 0.6, audit A17.)
-    set_style(gf::ControlStyles::standard_double_click, false);
     gf::SurfaceMaterial plain;
     plain.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(30, 19, 12))};
     set_authored_surface_material(plain);
@@ -650,47 +647,61 @@ void TumbledStonesView::cancel_press() {
 
 // ---------------------------------------------------------------- input
 
-// The pointer, in GUI.Forms' raisers. Under a panel, its buttons fire on the
-// derived click after a press on the same button. Under help, a press closes
-// it. On the tray a primary press holds a cell under capture; past 0.2 of a
-// cell the moves drag its stone toward a neighbour, and the release swaps them
-// (and suppresses the click); a press that did not drag is a click on its cell,
-// which picks the stone up and turns it over. A secondary press picks the
-// stone up and turns it round. Hover follows the moves and clears on leave.
-void TumbledStonesView::show_hover(int hover) {
-    if (hover != hover_) {
-        hover_ = hover;
-        hover_time_ = 0;
-        keyboard_ = false;
-        // The keys carry on from the stone under the pointer.
-        if (hover >= 0)
-            cursor_ = hover;
-        cursor = hover >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
-        render_dirty_ = true;
-    }
-    // Moving off the stone in hand sets it down.
-    if (hand_.serial != 0 && hover != hand_.cell && !dragging_)
-        set_down();
-}
-
-void TumbledStonesView::on_mouse_move(gf::MouseEventArgs& event) {
-    const double x = event.location.x;
-    const double y = event.location.y;
+void TumbledStonesView::handle_pointer(gf::PointerEvent& event) {
+    const gf::Point local = point_from_window(event.position);
+    const double x = local.x;
+    const double y = local.y;
     if (panel_ != Panel::none) {
         const int button = panel_button(x, y);
-        cursor = button != 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
-    } else if (!help_) {
-        const int under = pick_cell(layout_, x, y);
+        if (event.action == gf::PointerAction::move) {
+            cursor = button != 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        } else if (event.action == gf::PointerAction::down && event.button == gf::PointerButton::primary) {
+            activate();
+            pressed_button_ = button;
+            if (button != 0)
+                set_pointer_capture(true);
+            request_frame();
+            event.handled = true;
+        } else if (event.action == gf::PointerAction::up && event.button == gf::PointerButton::primary) {
+            const int pressed = pressed_button_;
+            cancel_press();
+            if (pressed != 0 && pressed == button)
+                press_panel_button(pressed);
+            request_frame();
+            event.handled = true;
+        }
+        return;
+    }
+    if (help_) {
+        if (event.action == gf::PointerAction::down)
+            set_help(false);
+        event.handled = event.action == gf::PointerAction::down;
+        return;
+    }
+    const int under = pick_cell(layout_, x, y);
+    if (event.action == gf::PointerAction::move || event.action == gf::PointerAction::leave) {
+        const int hover = event.action == gf::PointerAction::leave ? -1 : under;
         const bool moved = std::abs(x - pointer_x_) + std::abs(y - pointer_y_) > .5;
         pointer_x_ = x;
         pointer_y_ = y;
-        if (under >= 0 && moved)
+        if (hover >= 0 && moved)
             render_dirty_ = true;  // the glint follows the pointer
-        show_hover(under);
-        bool cancelled = false;
+        if (hover != hover_) {
+            hover_ = hover;
+            hover_time_ = 0;
+            keyboard_ = false;
+            // The keys carry on from the stone under the pointer.
+            if (hover >= 0)
+                cursor_ = hover;
+            cursor = hover >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+            render_dirty_ = true;
+        }
+        // Moving off the stone in hand sets it down.
+        if (hand_.serial != 0 && hover != hand_.cell && !dragging_)
+            set_down();
         if (press_cell_ >= 0 && !busy()) {
-            const double travel = std::hypot(x - press_x_, y - press_y_);
-            if (!dragging_ && travel > layout_.cell * .2) {
+            const double moved = std::hypot(x - press_x_, y - press_y_);
+            if (!dragging_ && moved > layout_.cell * .2) {
                 dragging_ = true;
                 if (hand_.serial != 0) {
                     const bool same = hand_.cell == press_cell_;
@@ -698,136 +709,64 @@ void TumbledStonesView::on_mouse_move(gf::MouseEventArgs& event) {
                     if (busy() || (same && session_.board.cells[static_cast<std::size_t>(press_cell_)].family < 0)) {
                         cancel_press();
                         request_frame();
-                        cancelled = true;
+                        return;
                     }
                 }
-                if (!cancelled)
-                    play("ts_lift", .3F, 1.05F);
+                play("ts_lift", .3F, 1.05F);
             }
-            if (dragging_ && !cancelled) {
+            if (dragging_) {
                 drag_x_ = x;
                 drag_y_ = y;
                 drag_to_ = under >= 0 && neighbours(under, press_cell_) ? under : -1;
                 render_dirty_ = true;
             }
         }
-        if (render_dirty_ && !cancelled)
-            request_frame();
-    }
-    gf::Control::on_mouse_move(event);
-}
-
-void TumbledStonesView::on_mouse_leave() {
-    if (panel_ == Panel::none && !help_) {
-        show_hover(-1);
         if (render_dirty_)
             request_frame();
+        return;
     }
-    gf::Control::on_mouse_leave();
-}
-
-void TumbledStonesView::on_mouse_down(gf::MouseEventArgs& event) {
-    const double x = event.location.x;
-    const double y = event.location.y;
-    if (panel_ != Panel::none) {
-        if (event.button == gf::PointerButton::primary) {
-            activate();
-            pressed_button_ = panel_button(x, y);
-            if (pressed_button_ != 0)
-                set_pointer_capture(true);
-            request_frame();
-            event.handled = true;
-        }
-    } else if (help_) {
-        set_help(false);
-        event.handled = true;
-    } else {
-        const int under = pick_cell(layout_, x, y);
+    if (event.action == gf::PointerAction::down) {
         activate();
         event.handled = true;
-        if (!busy() && under >= 0 && session_.playing && !session_.board.won) {
-            if (event.button == gf::PointerButton::primary) {
-                press_cell_ = under;
-                press_x_ = x;
-                press_y_ = y;
-                dragging_ = false;
-                set_pointer_capture(true);
-            } else if (event.button == gf::PointerButton::secondary) {
-                pick_up(under);
-                turn_round();
-            }
+        if (busy() || under < 0 || !session_.playing || session_.board.won)
+            return;
+        if (event.button == gf::PointerButton::primary) {
+            press_cell_ = under;
+            press_x_ = x;
+            press_y_ = y;
+            dragging_ = false;
+            set_pointer_capture(true);
+        } else if (event.button == gf::PointerButton::secondary) {
+            pick_up(under);
+            turn_round();
         }
+        return;
     }
-    if (is_alive()) gf::Control::on_mouse_down(event);
-}
-
-void TumbledStonesView::on_mouse_up(gf::MouseEventArgs& event) {
-    if (event.button == gf::PointerButton::primary) {
-        if (panel_ != Panel::none) {
-            released_button_ = pressed_button_;
-            cancel_press();
+    if (event.action == gf::PointerAction::up && event.button == gf::PointerButton::primary) {
+        event.handled = true;
+        const int pressed = press_cell_;
+        const bool dragged = dragging_;
+        const int target = drag_to_;
+        cancel_press();
+        if (pressed < 0) {
             request_frame();
-            event.handled = true;
-        } else if (!help_) {
-            event.handled = true;
-            const int pressed = press_cell_;
-            const bool dragged = dragging_;
-            const int target = drag_to_;
-            cancel_press();
-            if (pressed >= 0 && dragged) {
-                if (target >= 0)
-                    swap_with(pressed, target);
-                else
-                    play("ts_set", .25F, .95F);
-                // a drag is not a click
-                event.suppress_click = true;
-            } else if (pressed >= 0) {
-                released_cell_ = pressed;
-            }
-            request_frame();
+            return;
         }
-    }
-    gf::Control::on_mouse_up(event);
-}
-
-void TumbledStonesView::on_mouse_click(gf::MouseEventArgs& event) {
-    const double x = event.location.x;
-    const double y = event.location.y;
-    const int released_button = released_button_;
-    const int released_cell = released_cell_;
-    released_button_ = 0;
-    released_cell_ = -1;
-    if (event.button == gf::PointerButton::primary) {
-        if (panel_ != Panel::none) {
-            if (released_button != 0 && released_button == panel_button(x, y))
-                press_panel_button(released_button);
-            request_frame();
-        } else if (!help_ && released_cell >= 0 && pick_cell(layout_, x, y) == released_cell) {
-            pick_up(released_cell);
+        if (dragged) {
+            if (target >= 0)
+                swap_with(pressed, target);
+            else
+                play("ts_set", .25F, .95F);
+        } else if (under == pressed) {
+            pick_up(under);
             turn_over();
-            request_frame();
         }
+        request_frame();
     }
-    if (is_alive()) gf::Control::on_mouse_click(event);
 }
 
-// The keys: the view's own handling runs after the base raised the event, on
-// a key its subscribers left unhandled; keys bubbling from a focused child
-// take the same handling.
-void TumbledStonesView::on_key_down(gf::KeyEventArgs& event) {
-    gf::Control::on_key_down(event);
-    key_down(event);
-}
-
-void TumbledStonesView::on_key_bubble(gf::KeyEvent& event) {
-    if (event.action != gf::KeyAction::down) return;
-    gf::KeyEventArgs arguments = games::key_arguments_of(event);
-    key_down(arguments);
-    event.handled = arguments.handled;
-}
-
-void TumbledStonesView::key_down(gf::KeyEventArgs& event) {
-    if (event.handled)
+void TumbledStonesView::handle_key(gf::KeyEvent& event) {
+    if (event.handled || event.action != gf::KeyAction::down)
         return;
     using Key = gf::PhysicalKey;
     const std::uint32_t key = event.physical_key;
@@ -905,7 +844,6 @@ void TumbledStonesView::key_down(gf::KeyEventArgs& event) {
         event.handled = false;
     }
 }
-
 
 // ---------------------------------------------------------------- the capsule
 

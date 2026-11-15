@@ -16,7 +16,7 @@
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
-#include "key_arguments.hpp"
+#include "routed_input.hpp"
 
 #include <chrono>
 #include <memory>
@@ -32,7 +32,7 @@ struct Options {
     bool dev = false;     // a separate save file, for tests and development
 };
 
-class TemplateView final : public gf::Control, public games::CommandSource {
+class TemplateView final : public games::RoutedInput<gf::Control>, public games::CommandSource {
 public:
     TemplateView(gf::StableId id, Options options);
     ~TemplateView() override;
@@ -40,11 +40,11 @@ public:
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void on_mouse_down(gf::MouseEventArgs& event) override;
-    void on_mouse_move(gf::MouseEventArgs& event) override;
-    void on_mouse_leave() override;
-    void on_key_down(gf::KeyEventArgs& event) override;
-    void on_key_bubble(gf::KeyEvent& event) override;
+    void handle_pointer(gf::PointerEvent& event) override;
+    void handle_key(gf::KeyEvent& event) override;
+    void on_key_bubble(gf::KeyEvent& event) override {
+        handle_key(event);
+    }
 
     // The shell calls these. activate: the game has just been shown; take the keyboard.
     void activate();
@@ -57,9 +57,6 @@ public:
     void change_setting(std::string_view id, double value) override;
 
 private:
-    int cell_under(gf::Point local) const;
-    void show_hover(int hover);
-    void key_down(gf::KeyEventArgs& event);
     Options options_;
     Session session_;
     Layout layout_;

@@ -207,13 +207,10 @@ CardFaceMap print_face(int width, int height, double density, double grain, std:
 }  // namespace
 
 BusinessCard::BusinessCard(gf::StableId id, Kind kind)
-    : gf::Control(std::move(id)), kind_(kind),
+    : games::RoutedInput<gf::Control>(std::move(id)), kind_(kind),
       remarks_(static_cast<std::uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count())) {
     set_paint_plane(gf::PaintPlane::overlay);
     focusable = true;
-    // Every release over the card is a click: a quick second press is another click, not a
-    // double click.
-    set_style(gf::ControlStyles::standard_double_click, false);
     if (kind_ == Kind::page) {
         accessible_name = "Malkuthsoft business card";
         accessible_description = "Opens the card (Enter).";
@@ -765,65 +762,46 @@ void BusinessCard::unhover() {
     wake();
 }
 
-// The pointer, in GUI.Forms' raisers. A primary press on the card (or, with
-// the card in the hand, anywhere) holds it under capture; past 3 pt the moves
-// spin a card in the hand, and the release lets it go with its fling (and
-// suppresses the click). A press that did not drag is a click: on the page it
-// opens the card; in the hand it visits the company (on its name) or, off the
-// card, puts the card away. A secondary press switches the overlay on when
-// asked. The wheel over the card on the page scrolls the help pages.
-void BusinessCard::on_mouse_wheel(gf::MouseEventArgs& e) {
+void BusinessCard::handle_pointer(gf::PointerEvent& e) {
+    const gf::Point local = point_from_window(e.position);
     now_ = clock();
-    if (!in_hand() && scroll) {
-        gf::PointerEvent event = gf::pointer_event_of(e);
-        scroll(event);
+    if (e.action == gf::PointerAction::wheel) {
+        if (!in_hand() && scroll)
+            scroll(e);
+        e.handled = true;
+        return;
     }
-    e.handled = true;
-    if (is_alive())
-        gf::Control::on_mouse_wheel(e);
-}
-
-void BusinessCard::on_mouse_leave() {
-    now_ = clock();
-    if (!pressed_on_card_)
-        unhover();
-    gf::Control::on_mouse_leave();
-}
-
-void BusinessCard::on_mouse_down(gf::MouseEventArgs& e) {
-    const gf::Point local = e.location;
-    now_ = clock();
-    click_on_card_ = click_on_black_ = false;
-    if (e.button == gf::PointerButton::secondary) {
+    if (e.action == gf::PointerAction::leave) {
+        if (!pressed_on_card_)
+            unhover();
+        return;
+    }
+    if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::secondary) {
         switch_on_overlay_if_asked(local);
         e.handled = true;
-    } else if (e.button == gf::PointerButton::primary) {
+        return;
+    }
+    if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
         bool company = false;
         const bool hit = card_hit(local, company);
-        if (hit || in_hand()) {
-            if (attached_window() != nullptr)
-                static_cast<void>((*attached_window()).request_focus(shared_from_this()));
-            set_pointer_capture(true);
-            pressed_on_card_ = hit;
-            pressed_on_black_ = !hit;
-            dragged_ = false;
-            pressed_ = local;
-            last_ = local;
-            last_time_ = now_;
-            if (hit && in_hand())
-                spin_x_ = spin_y_ = 0;
-            e.handled = true;
-            wake();
-        }
+        if (!hit && !in_hand())
+            return;
+        if (attached_window() != nullptr)
+            static_cast<void>((*attached_window()).request_focus(shared_from_this()));
+        set_pointer_capture(true);
+        pressed_on_card_ = hit;
+        pressed_on_black_ = !hit;
+        dragged_ = false;
+        pressed_ = local;
+        last_ = local;
+        last_time_ = now_;
+        if (hit && in_hand())
+            spin_x_ = spin_y_ = 0;
+        e.handled = true;
+        wake();
+        return;
     }
-    if (is_alive())
-        gf::Control::on_mouse_down(e);
-}
-
-void BusinessCard::on_mouse_up(gf::MouseEventArgs& e) {
-    const gf::Point local = e.location;
-    now_ = clock();
-    if (pressed_on_card_ || pressed_on_black_) {
+    if (e.action == gf::PointerAction::up && (pressed_on_card_ || pressed_on_black_)) {
         set_pointer_capture(false);
         const bool on_card = pressed_on_card_, on_black = pressed_on_black_;
         pressed_on_card_ = pressed_on_black_ = false;
@@ -832,50 +810,30 @@ void BusinessCard::on_mouse_up(gf::MouseEventArgs& e) {
             spin_x_ *= 25 / fling;
             spin_y_ *= 25 / fling;
         }
-        e.handled = true;
-        if (dragged_) {
-            // a spin is not a click
-            e.suppress_click = true;
-            hover(local);
-        } else {
-            click_on_card_ = on_card;
-            click_on_black_ = on_black;
-        }
-    }
-    gf::Control::on_mouse_up(e);
-}
-
-void BusinessCard::on_mouse_click(gf::MouseEventArgs& e) {
-    const gf::Point local = e.location;
-    now_ = clock();
-    const bool on_card = click_on_card_, on_black = click_on_black_;
-    click_on_card_ = click_on_black_ = false;
-    if (on_card || on_black) {
         bool company = false;
         const bool hit = card_hit(local, company);
-        if (on_card && hit && !in_hand()) {
+        e.handled = true;
+        if (!dragged_ && on_card && hit && !in_hand()) {
             if (open)
                 open();
-        } else if (on_black && !hit) {
-            put_away();
-        } else {
-            if (on_card && hit && company)
-                visit();
-            hover(local);
+            return;
         }
-    }
-    if (is_alive())
-        gf::Control::on_mouse_click(e);
-}
-
-void BusinessCard::on_mouse_move(gf::MouseEventArgs& e) {
-    const gf::Point local = e.location;
-    now_ = clock();
-    if (std::hypot(local.x - pressed_.x, local.y - pressed_.y) > 3)
-        dragged_ = true;
-    if (!pressed_on_card_ || !in_hand()) {
+        if (!dragged_ && on_card && hit && company)
+            visit();
+        if (!dragged_ && on_black && !hit) {
+            put_away();
+            return;
+        }
         hover(local);
-    } else {
+        return;
+    }
+    if (e.action == gf::PointerAction::move) {
+        if (std::hypot(local.x - pressed_.x, local.y - pressed_.y) > 3)
+            dragged_ = true;
+        if (!pressed_on_card_ || !in_hand()) {
+            hover(local);
+            return;
+        }
         const double dx = local.x - last_.x, dy = local.y - last_.y;
         const double distance = std::hypot(dx, dy);
         if (distance > 0) {
@@ -892,15 +850,10 @@ void BusinessCard::on_mouse_move(gf::MouseEventArgs& e) {
         e.handled = true;
         wake();
     }
-    gf::Control::on_mouse_move(e);
 }
 
-// The keys: the card's own handling runs after the base raised the event, on
-// a key its subscribers left unhandled. The card has no children, so nothing
-// bubbles to it.
-void BusinessCard::on_key_down(gf::KeyEventArgs& e) {
-    gf::Control::on_key_down(e);
-    if (e.handled)
+void BusinessCard::handle_key(gf::KeyEvent& e) {
+    if (e.handled || e.action != gf::KeyAction::down)
         return;
     const bool activate = e.physical_key == gf::PhysicalKey::enter || e.physical_key == gf::PhysicalKey::space;
     if (!in_hand()) {
@@ -930,7 +883,6 @@ void BusinessCard::on_key_down(gf::KeyEventArgs& e) {
     e.handled = true;
     wake();
 }
-
 
 void BusinessCard::on_focus_cue_changed(bool visible) {
     focused_ = visible;

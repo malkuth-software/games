@@ -27,11 +27,8 @@ std::uint64_t seed_now() {
 }  // namespace
 
 SwitchboxView::SwitchboxView(gf::StableId id, Options opt)
-    : gf::Control(std::move(id)), opt_(opt), puzzle_(seed_now()), actor_(seed_now() ^ 0xA5A5) {
+    : games::RoutedInput<gf::Control>(std::move(id)), opt_(opt), puzzle_(seed_now()), actor_(seed_now() ^ 0xA5A5) {
     focusable = true;
-    // Every release over the view is a click: a quick second press is another click, not a
-    // double click. (The opaque style went in GUI.Forms 0.6, audit A17.)
-    set_style(gf::ControlStyles::standard_double_click, false);
     {
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
@@ -465,125 +462,67 @@ void SwitchboxView::mole_tick(double dt) {
 }
 
 // ------------------------------------------------------------------ input
-// The pointer, in GUI.Forms' raisers. The painted buttons fire on the derived
-// click (a release over the view after a press on the same button), so the
-// window's order rules apply. A press on a switch flips it and holds it under
-// capture until the release, a capture loss, or the pointer leaving the
-// switch; presses on a socket, the head or a mole act at once.
-void SwitchboxView::track_pointer(gf::Point local) {
+void SwitchboxView::handle_pointer(gf::PointerEvent& e) {
+    const gf::Point local = point_from_window(e.position);
     mouse_x_ = local.x / pixel_;
     mouse_y_ = local.y / pixel_;
-}
-
-std::string SwitchboxView::hit_button() const {
-    for (const Button& b : buttons_)
-        if (mouse_x_ >= b.x && mouse_x_ < b.x + b.w && mouse_y_ >= b.y && mouse_y_ < b.y + b.h) return b.id;
-    return {};
-}
-
-void SwitchboxView::on_mouse_move(gf::MouseEventArgs& e) {
-    track_pointer(e.location);
-    mouse_in_ = true;
-    hover_ = hit_button();
-    // dragging off the switch ends the hold
-    if (hold_sw_ >= 0 && stage_.pick_socket(mouse_x_, mouse_y_) != hold_sw_ && stage_.pick_switch(mouse_x_, mouse_y_, st_) != hold_sw_) hold_sw_ = -1;
-    const bool over = !hover_.empty() || stage_.pick_switch(mouse_x_, mouse_y_, st_) >= 0 || stage_.pick_socket(mouse_x_, mouse_y_) >= 0 ||
-                      (!actor_.hidden() && stage_.pick_head(mouse_x_, mouse_y_, st_.girl));
-    cursor = over ? gf::CursorKind::hand : gf::CursorKind::arrow;
-    gf::Control::on_mouse_move(e);
-}
-
-void SwitchboxView::on_mouse_leave() {
-    mouse_in_ = false;
-    gf::Control::on_mouse_leave();
-}
-
-void SwitchboxView::on_mouse_down(gf::MouseEventArgs& e) {
-    track_pointer(e.location);
-    mouse_in_ = true;
-    if (e.button == gf::PointerButton::primary) {
+    mouse_in_ = e.action != gf::PointerAction::leave;
+    auto hit = [&]() -> std::string {
+        for (const Button& b : buttons_)
+            if (mouse_x_ >= b.x && mouse_x_ < b.x + b.w && mouse_y_ >= b.y && mouse_y_ < b.y + b.h) return b.id;
+        return {};
+    };
+    if (e.action == gf::PointerAction::move) {
+        hover_ = hit();
+        // dragging off the switch ends the hold
+        if (hold_sw_ >= 0 && stage_.pick_socket(mouse_x_, mouse_y_) != hold_sw_ && stage_.pick_switch(mouse_x_, mouse_y_, st_) != hold_sw_) hold_sw_ = -1;
+        const bool over = !hover_.empty() || stage_.pick_switch(mouse_x_, mouse_y_, st_) >= 0 || stage_.pick_socket(mouse_x_, mouse_y_) >= 0 ||
+                          (!actor_.hidden() && stage_.pick_head(mouse_x_, mouse_y_, st_.girl));
+        cursor = over ? gf::CursorKind::hand : gf::CursorKind::arrow;
+    }
+    if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
         activate();
-        const std::string h = hit_button();
-        if (!h.empty()) {
-            pressed_ = h;
-        } else if (panel_ == Panel::none) {
-            mouse_down_ = true;
-            set_pointer_capture(true);
-            if (mole_.active()) {
-                const int s = stage_.pick_socket(mouse_x_, mouse_y_);
-                if (s >= 0 && mole_.hit(s)) {
-                    st_.sw[static_cast<size_t>(s)].wiggle = 1;
-                    play("switchbox_switch_off_0" + std::to_string(1 + std::rand() % 3), 1, 1.35f);
-                    if (mole_.hits() % 10 == 0) play("switchbox_giggle_boing", .5f, 1.3f);
-                }
-            } else {
-                const int sw = stage_.pick_switch(mouse_x_, mouse_y_, st_);
-                const int hole = sw >= 0 ? -1 : stage_.pick_socket(mouse_x_, mouse_y_);
-                if (sw >= 0) {
-                    flip(sw);
-                    hold_sw_ = sw;
-                    hold_blocked_ = false;
-                } else if (hole >= 0 && hole == actor_.stolen()) {
-                    actor_.hole_clicked(hole);
-                } else if (stage_.pick_head(mouse_x_, mouse_y_, st_.girl)) {
-                    actor_.head_clicked();
-                }
+        const std::string h = hit();
+        if (!h.empty()) { pressed_ = h; e.handled = true; return; }
+        if (panel_ != Panel::none) { e.handled = true; return; }
+        mouse_down_ = true;
+        set_pointer_capture(true);
+        if (mole_.active()) {
+            const int s = stage_.pick_socket(mouse_x_, mouse_y_);
+            if (s >= 0 && mole_.hit(s)) {
+                st_.sw[static_cast<size_t>(s)].wiggle = 1;
+                play("switchbox_switch_off_0" + std::to_string(1 + std::rand() % 3), 1, 1.35f);
+                if (mole_.hits() % 10 == 0) play("switchbox_giggle_boing", .5f, 1.3f);
             }
+            e.handled = true;
+            return;
+        }
+        const int sw = stage_.pick_switch(mouse_x_, mouse_y_, st_);
+        if (sw >= 0) {
+            flip(sw);
+            hold_sw_ = sw;
+            hold_blocked_ = false;
+        } else if (const int hole = stage_.pick_socket(mouse_x_, mouse_y_); hole >= 0 && hole == actor_.stolen()) {
+            actor_.hole_clicked(hole);
+        } else if (stage_.pick_head(mouse_x_, mouse_y_, st_.girl)) {
+            actor_.head_clicked();
         }
         e.handled = true;
+    } else if (e.action == gf::PointerAction::up) {
+        if (!pressed_.empty() && hit() == pressed_) action(pressed_);
+        pressed_.clear();
+        if (mouse_down_) set_pointer_capture(false);
+        mouse_down_ = false;
+        hold_sw_ = -1;
+        hold_blocked_ = false;
+        e.handled = true;
     }
-    if (is_alive()) gf::Control::on_mouse_down(e);
 }
 
-void SwitchboxView::on_mouse_up(gf::MouseEventArgs& e) {
-    track_pointer(e.location);
-    released_ = pressed_;
-    pressed_.clear();
-    if (mouse_down_) set_pointer_capture(false);
-    end_hold();
-    e.handled = true;
-    gf::Control::on_mouse_up(e);
-}
-
-void SwitchboxView::on_mouse_click(gf::MouseEventArgs& e) {
-    track_pointer(e.location);
-    const std::string released = released_;
-    released_.clear();
-    if (!released.empty() && hit_button() == released) action(released);
-    if (is_alive()) gf::Control::on_mouse_click(e);
-}
-
-// A capture lost before the release (a modal, the window deactivating) ends
-// the hold, as the release would.
-void SwitchboxView::on_mouse_capture_changed() {
-    end_hold();
-    gf::Control::on_mouse_capture_changed();
-}
-
-void SwitchboxView::end_hold() {
-    mouse_down_ = false;
-    hold_sw_ = -1;
-    hold_blocked_ = false;
-}
-
-// The keys: the view's own handling runs after the base raised the event, on
-// a key its subscribers left unhandled; keys bubbling from a focused child
-// take the same handling.
-void SwitchboxView::on_key_down(gf::KeyEventArgs& e) {
-    gf::Control::on_key_down(e);
-    key_down(e);
-}
-
-void SwitchboxView::on_key_bubble(gf::KeyEvent& e) {
-    if (e.action != gf::KeyAction::down) return;
-    gf::KeyEventArgs arguments = games::key_arguments_of(e);
-    key_down(arguments);
-    e.handled = arguments.handled;
-}
-
-void SwitchboxView::key_down(gf::KeyEventArgs& e) {
+void SwitchboxView::handle_key(gf::KeyEvent& e) {
     if (e.handled) return;
     using K = gf::PhysicalKey;
+    if (e.action != gf::KeyAction::down) return;
     const std::uint32_t k = e.physical_key;
     if (panel_ == Panel::name) {
         if (k == K::backspace && !name_entry_.empty()) { name_entry_.pop_back(); play("ui_name_backspace", .6f); }
@@ -603,11 +542,9 @@ void SwitchboxView::key_down(gf::KeyEventArgs& e) {
     if (k == K::enter && panel_ != Panel::none) { open(Panel::none); e.handled = true; }
 }
 
-// Committed text, for the name entry.
-void SwitchboxView::on_key_press(gf::KeyPressEventArgs& e) {
-    gf::Control::on_key_press(e);
-    if (e.handled || panel_ != Panel::name) return;
-    for (char c : e.text) {
+void SwitchboxView::on_text_input(gf::TextInputEvent& e) {
+    if (panel_ != Panel::name) return;
+    for (char c : e.text_utf8) {
         if (name_entry_.size() >= 12) break;
         if (std::isalnum(static_cast<unsigned char>(c)) || c == ' ' || c == '-' || c == '.') {
             name_entry_ += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
@@ -616,8 +553,6 @@ void SwitchboxView::on_key_press(gf::KeyPressEventArgs& e) {
     }
     e.handled = true;
 }
-
-
 
 void SwitchboxView::host_command(const std::string& id) {
     if (id == "new") { action("new"); return; }

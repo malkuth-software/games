@@ -9,7 +9,7 @@
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
-#include "key_arguments.hpp"
+#include "routed_input.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -31,7 +31,7 @@ struct Options {
     bool storm = false;        // bring a storm in a few seconds (dev)
 };
 
-class EggyView final : public gf::Control {
+class EggyView final : public games::RoutedInput<gf::Control> {
 public:
     bool editing_name() const { return panel_ == Panel::finale && !score_saved_; }
     EggyView(gf::StableId id, Options opt);
@@ -39,16 +39,10 @@ public:
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& p, gf::Rect damage) override;
-    void on_mouse_down(gf::MouseEventArgs& e) override;
-    void on_mouse_up(gf::MouseEventArgs& e) override;
-    void on_mouse_move(gf::MouseEventArgs& e) override;
-    void on_mouse_wheel(gf::MouseEventArgs& e) override;
-    void on_mouse_click(gf::MouseEventArgs& e) override;
-    void on_mouse_capture_changed() override;
-    void on_key_down(gf::KeyEventArgs& e) override;
-    void on_key_up(gf::KeyEventArgs& e) override;
-    void on_key_bubble(gf::KeyEvent& e) override;
-    void on_key_press(gf::KeyPressEventArgs& e) override;
+    void handle_pointer(gf::PointerEvent& e) override;
+    void handle_key(gf::KeyEvent& e) override;
+    void on_key_bubble(gf::KeyEvent& e) override { handle_key(e); }
+    void on_text_input(gf::TextInputEvent& e) override;
     void activate();
     void set_cabinet_preferences(bool music, bool sound, bool reduced);
     // Ticks the game has run: the count advances whether or not the picture changes.
@@ -135,11 +129,6 @@ private:
     [[nodiscard]] WalkKeys held_walk_keys() const;
     bool hop_edge_ = false;
     bool mouse_down_ = false;
-    void track_pointer(gf::Point local);
-    std::string hit_button() const;
-    void key_input(gf::KeyEventArgs& e, bool down);
-    // The painted button a release ended, for the click that follows it.
-    std::string released_;
     double mouse_x_ = 0, mouse_y_ = 0;  // physical pixels
     double bs_ = 2;            // backing scale
     int pw_ = 0, ph_ = 0;      // framebuffer size in game pixels

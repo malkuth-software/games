@@ -15,7 +15,7 @@
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
-#include "key_arguments.hpp"
+#include "routed_input.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -31,19 +31,16 @@ struct Options {
     bool dev = false;  // separate save; PT_SCRIPT allowed
 };
 
-class TableView final : public gf::Control, public games::CommandSource {
+class TableView final : public games::RoutedInput<gf::Control>, public games::CommandSource {
 public:
     TableView(gf::StableId id, Options opt);
     static constexpr bool initialize_tree_after_construction = true;
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& p, gf::Rect damage) override;
-    void on_mouse_down(gf::MouseEventArgs& e) override;
-    void on_mouse_up(gf::MouseEventArgs& e) override;
-    void on_mouse_move(gf::MouseEventArgs& e) override;
-    void on_mouse_click(gf::MouseEventArgs& e) override;
-    void on_key_down(gf::KeyEventArgs& e) override;
-    void on_key_bubble(gf::KeyEvent& e) override;
+    void handle_pointer(gf::PointerEvent& e) override;
+    void handle_key(gf::KeyEvent& e) override;
+    void on_key_bubble(gf::KeyEvent& e) override { handle_key(e); }
     void activate();
     std::vector<games::GameCommand> commands() const override;
     void run_command(std::string_view id) override;
@@ -125,12 +122,6 @@ private:
     Panel panel_ = Panel::none;
     std::vector<Button> buttons_;
     std::string pressed_, hover_;
-    void track_pointer(gf::Point local);
-    std::string hit_button() const;
-    void key_down(gf::KeyEventArgs& e);
-    // The painted button a release ended, for the click that follows it.
-    std::string released_;
-    bool in_popup() const;
     int hover_bird_ = -1;
     double mouse_x_ = 0, mouse_y_ = 0;
     bool cab_reduced_ = false;

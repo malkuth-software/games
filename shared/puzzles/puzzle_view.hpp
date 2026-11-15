@@ -5,7 +5,7 @@
 #include "gui_forms/paint_framebuffer.hpp"
 #include "gui_forms/resources.hpp"
 #include "gui_forms/timer.hpp"
-#include "key_arguments.hpp"
+#include "routed_input.hpp"
 #include "kitten.hpp"
 #include "gem_art.hpp"
 #include "puzzle_render.hpp"
@@ -21,21 +21,17 @@
 namespace games {
 namespace gf = gui_forms;
 class PuzzleScenePart;
-class PuzzleView final : public gf::Control, public CommandSource {
+class PuzzleView final : public games::RoutedInput<gf::Control>, public CommandSource {
   public:
     PuzzleView(gf::StableId id, PuzzleKind kind);
     static constexpr bool initialize_tree_after_construction = true;
     void initialize_control_tree();
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& p, gf::Rect damage) override;
-    void on_mouse_down(gf::MouseEventArgs& e) override;
-    void on_mouse_up(gf::MouseEventArgs& e) override;
-    void on_mouse_move(gf::MouseEventArgs& e) override;
-    void on_mouse_click(gf::MouseEventArgs& e) override;
-    void on_mouse_capture_changed() override;
-    void on_key_down(gf::KeyEventArgs& e) override;
+    void handle_pointer(gf::PointerEvent& e) override;
+    void handle_key(gf::KeyEvent& e) override;
     void on_key_bubble(gf::KeyEvent& e) override;
-    void on_key_press(gf::KeyPressEventArgs& e) override;
+    void on_text_input(gf::TextInputEvent& e) override;
     void activate();
     [[nodiscard]] std::vector<GameCommand> commands() const override;
     void run_command(std::string_view id) override;
@@ -55,14 +51,6 @@ class PuzzleView final : public gf::Control, public CommandSource {
     PuzzleGame game;
 
   private:
-    void pointer_move(gf::MouseEventArgs& e);
-    void pointer_down(gf::MouseEventArgs& e);
-    void pointer_up(gf::MouseEventArgs& e);
-    void key_down(gf::KeyEventArgs& e);
-    // A release in place, for the click that follows it: the solve tray piece
-    // (turned when already chosen) or the gem (picked or dropped).
-    int solve_click_ = -1;
-    int gem_click_ = -1;
     friend class PuzzleScenePart;
     friend struct PuzzleFramebufferTest;
     std::array<std::shared_ptr<gf::Control>, 3> scene_parts_;

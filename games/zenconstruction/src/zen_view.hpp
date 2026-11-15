@@ -14,7 +14,7 @@
 #include "gui_forms/controls/text_box.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
-#include "key_arguments.hpp"
+#include "routed_input.hpp"
 
 #include <chrono>
 #include <future>
@@ -31,21 +31,16 @@ struct Options {
     bool dev = false;   // a separate save; ZC_SCRIPT allowed
 };
 
-class ZenView final : public gf::Control, public games::CommandSource {
+class ZenView final : public games::RoutedInput<gf::Control>, public games::CommandSource {
 public:
     ZenView(gf::StableId id, Options options);
     static constexpr bool initialize_tree_after_construction = true;
     void initialize_control_tree();
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void on_mouse_down(gf::MouseEventArgs& e) override;
-    void on_mouse_up(gf::MouseEventArgs& e) override;
-    void on_mouse_move(gf::MouseEventArgs& e) override;
-    void on_mouse_wheel(gf::MouseEventArgs& e) override;
-    void on_mouse_click(gf::MouseEventArgs& e) override;
-    void on_key_down(gf::KeyEventArgs& e) override;
-    void on_key_up(gf::KeyEventArgs& e) override;
-    void on_key_bubble(gf::KeyEvent& e) override;
+    void handle_pointer(gf::PointerEvent& event) override;
+    void handle_key(gf::KeyEvent& event) override;
+    void on_key_bubble(gf::KeyEvent& event) override { handle_key(event); }
     void activate();
     // in the cabinet: whether this game is in front, and the master switches
     void set_cabinet(bool foreground, bool music, bool sound, bool reduced = false);
@@ -54,7 +49,6 @@ public:
     void on_focus_changed(bool focused) override;
 
 private:
-    void key_down(gf::KeyEventArgs& e);
     enum class Panel { none, new_site, sites, help };
     struct SavedSite {
         std::string text;   // the run's own save

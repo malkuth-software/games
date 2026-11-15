@@ -208,12 +208,12 @@ A view uses a small part of it, all visible in the template:
 
 | Piece | Use |
 |---|---|
-| `gf::Control` | Base class: `arrange`, `on_paint`, the input raisers (`on_mouse_down`, `on_mouse_up`, `on_mouse_move`, `on_mouse_wheel`, `on_mouse_leave`, `on_mouse_click`, `on_mouse_double_click`, `on_mouse_capture_changed`, `on_key_down`, `on_key_up`, `on_key_press`), `on_attached_to_window`, `on_detaching_from_window`, `visible`, `invalidate`, `set_cursor`, `point_from_window`, `client_rectangle` |
+| `gf::Control` | Base class: `arrange`, `on_paint`, `on_pointer`, `on_key`, `on_attached_to_window`, `on_detaching_from_window`, `visible`, `invalidate`, `set_cursor`, `point_from_window`, `client_rectangle` |
 | `gf::LiveSurface` | The game's pixels: `create`, `reconfigure`, `try_acquire_write` returning a lease with `pixels`, `row_bytes`, `publish` |
 | `gf::Window` | `scale`, `request_focus`, `queue_live_surface_presentation`, `active`, `occluded` |
 | `gf::Timer` | `start`, `stop`, `enabled`, `interval`, `set_interval`, and a `tick()` event bound with `gf::on(timer.tick(), *this, &View::tick)` |
 | `gf::on`, `gf::Command`, `gf::Value<T>` | Named handlers, and state that controls bind to; see [controls](04-controls.md) |
-| `gf::MouseEventArgs`, `gf::KeyEventArgs`, `gf::KeyPressEventArgs`, `gf::PhysicalKey` | Input (the routed `gf::PointerEvent` and `gf::KeyEvent` reach `on_key_bubble` and the preview handlers) |
+| `gf::PointerEvent`, `gf::KeyEvent`, `gf::PhysicalKey` | Input |
 | `gf::Painter` | Only for `draw_live_surface` in `on_paint`, and for the emblem |
 
 **Do not change the toolkit to suit a game.** Reusable capabilities are meant to
