@@ -343,6 +343,22 @@ int main() {
 #endif
             assert((*title).visible.read() && (*title).arranged_bounds().x > (*button(*capsule, "capsule.back")).arranged_bounds().x);
         }
+        {
+            // A real click, through the window's hit test (not an accessibility press), reaches a
+            // capsule button over the game: the games lie below the capsule in z-order.
+            const std::optional<std::size_t> capsule_place = (*collection).child_index_from_top((*capsule).runtime_id());
+            const std::optional<std::size_t> game_place = (*collection).child_index_from_top((*eggy).runtime_id());
+            assert(capsule_place.has_value() && game_place.has_value() && *capsule_place < *game_place);
+            const std::shared_ptr<SuiteButton> more = std::static_pointer_cast<SuiteButton>(button(*capsule, "capsule.more"));
+            const gf::Rect more_bounds = (*more).arranged_bounds();
+            const gf::Point middle{more_bounds.width * .5, more_bounds.height * .5};
+            assert(!(*more).checked());
+            click(window, *more, middle);
+            assert((*more).checked());
+            window.perform_layout();
+            click(window, *more, middle);
+            assert(!(*more).checked());
+        }
         assert(!std::filesystem::exists(scratch / "eggy-v1.txt"));
         click(window, *eggy, {200, 200}); // Begin the first climb, using nested coordinates.
         assert((*button(*capsule, "capsule.back")).perform_click());
