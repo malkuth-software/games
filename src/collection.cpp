@@ -74,10 +74,13 @@ Collection::Collection(gf::StableId id, bool dev) : Control(std::move(id)) {
     set_skin_class(*this, ButtonSkin::ivory);
 }
 // The remark source names this shell: cleared when it goes, if it is still the one named.
+// The capsule title's family is released here, in the shell's teardown before the
+// application shuts down (no static destructor holds it).
 Collection::~Collection() {
     const gf::BusinessCardRemarkSource source = gf::business_card_remark_source();
     if (source.context == this)
         gf::set_business_card_remark_source(gf::BusinessCardRemarkSource{});
+    title_family_.release();
 }
 void Collection::set_development(bool dev) {
     modules_.dev = dev;
@@ -89,7 +92,9 @@ void Collection::initialize_control_tree() {
     (*shelf_).open = std::bind_front(&Collection::open_entry, this);
     (*shelf_).bind_masters(model_);
     (*shelf_).select(active_);
-    capsule_ = gf::make_control<CommandCapsule>(gf::StableId("collection.capsule"));
+    // The capsule title's family, loaded before the capsule that borrows it.
+    static_cast<void>(title_family_.load());
+    capsule_ = gf::make_control<CommandCapsule>(gf::StableId("collection.capsule"), title_family_);
     add_child(capsule_);
     (*capsule_).back = std::bind_front(&Collection::back, this);
     (*capsule_).command = std::bind_front(&Collection::run_command, this);

@@ -17,12 +17,14 @@ namespace games {
 // The capsule is a GUI.Forms composite (controls/command-capsule.control, generated into
 // CommandCapsuleControl by gui_forms_add_control): its pill is the document's themed part and
 // its title the document's label, drawn by GUI.Forms' text engine in Barlow Condensed, loaded
-// for this composite (CapsuleTitleFace; the owner admits app-loaded faces inside composites).
+// by the shell and borrowed here (CapsuleTitleFace; the owner admits app-loaded faces inside
+// composites).
 // This class adds what the document cannot say: the commands, which change with the game, the
 // master switches, and the wrapping, opening layout.
 class CommandCapsule final : public CommandCapsuleControl {
   public:
-    explicit CommandCapsule(gf::StableId id);
+    // `title_family` is the shell's, which owns the family; the capsule copies its number.
+    CommandCapsule(gf::StableId id, const CapsuleTitleFamily& title_family);
     static constexpr bool initialize_tree_after_construction = true;
     // Room round the pill for its soft shadow: the control is this much larger than the pill.
     static constexpr double shadow_margin = 14;

@@ -129,8 +129,11 @@ is now a GUI.Forms composite:
   game's commands (they change with the game), the master switches bound to SuiteModel, and the wrapping,
   opening layout. The buttons are still `SuiteButton`s (`gf::Button`, faces through the theme).
 - The title is drawn by GUI.Forms' text engine in Barlow Condensed Bold, an application font family loaded
-  once per process through GUI.Forms' app-font API (`gf::load_app_font_family`, held by an
-  `gf::AppFontFamily` for the process) in the seam src/capsule_title_face.*. GUI.Forms admits the family by
+  through GUI.Forms' app-font API (`gf::load_app_font_family`) in the seam src/capsule_title_face.*. The
+  shell owns it (`Collection::title_family_`, a `CapsuleTitleFamily` holding the `gf::AppFontFamily`):
+  loaded when the shell's tree is made, before the capsule, and released in `~Collection`, the normal
+  teardown before the application shuts down; no static holds it, so process termination releases
+  nothing (the GUI.Forms and STXlib termination rule). The capsule copies the family's number. GUI.Forms admits the family by
   the control's context: the capsule's title label is a composite child, so it draws it; a stock control
   would drop it. **Dependency:** GUI.Forms claude/app-fonts (2558e326c, being folded). The CMake option
   `GAMES_GUI_FORMS_APP_FONTS` is ON by default; OFF builds against a GUI.Forms without the API, and the

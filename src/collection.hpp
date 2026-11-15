@@ -79,6 +79,9 @@ class Collection final : public gf::Control, public HelpHost {
     // The remarks the card in the hand makes (card_remarks.hpp), through GUI.Forms' remark
     // source, which this shell names while it lives.
     CardRemarks remarks_{0x51ed2701U};
+    // The capsule title's application font family (Barlow Condensed): loaded before the
+    // capsule is made, released in ~Collection; the capsule copies its number.
+    CapsuleTitleFamily title_family_;
     static void write_remark(void* context, std::string& remark);
     void declare_release_regions(gf::Rect capsule, gf::Rect help_link);
     SettingsObservation masters_{};

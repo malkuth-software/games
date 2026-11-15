@@ -3,8 +3,6 @@
 #include "runtime_paths.hpp"
 
 #if defined(GAMES_GUI_FORMS_APP_FONTS)
-#include "gui_forms/typography/app_fonts/app_fonts.hpp"
-
 #include <array>
 #include <cstddef>
 #include <filesystem>
@@ -23,13 +21,6 @@ namespace {
 
 // The family's name as looks would write it; one load per process.
 constexpr std::string_view title_family_name = "Barlow Condensed";
-
-// The process's hold on the family: loaded on first use and unloaded when the process ends
-// (the handle's destruction; text still shaped with it stays drawable, AppFontUnload::deferred).
-gf::AppFontFamily& title_family_holder() {
-    static gf::AppFontFamily holder{};
-    return holder;
-}
 
 // The face's bytes, or none when the file is missing or unreadable.
 std::shared_ptr<const std::vector<std::byte>> read_face(const std::filesystem::path& file) {
@@ -51,31 +42,28 @@ std::shared_ptr<const std::vector<std::byte>> read_face(const std::filesystem::p
 } // namespace
 #endif
 
-CapsuleTitleFaceState CapsuleTitleFace::load() {
+CapsuleTitleFamily::~CapsuleTitleFamily() {
+    release();
+}
+
+CapsuleTitleFaceState CapsuleTitleFamily::load() {
     if (state_ != CapsuleTitleFaceState::unloaded)
         return state_;
 #if defined(GAMES_GUI_FORMS_APP_FONTS)
+    state_ = CapsuleTitleFaceState::refused;
     try {
-        gf::AppFontFamily& holder = title_family_holder();
-        if (holder.id() == gf::FontFamilyId{}) {
-            const std::filesystem::path file =
-                std::filesystem::path(asset_directory()) / "fonts" / "BarlowCondensed-Bold.ttf";
-            const std::shared_ptr<const std::vector<std::byte>> bytes = read_face(file);
-            if (bytes) {
-                std::array<gf::AppFontFace, 1> faces{};
-                faces[0].bytes = bytes;
-                faces[0].weight = 700;
-                gf::AppFontLoad loaded = gf::load_app_font_family(title_family_name, faces);
-                if (loaded.validation.status == gf::AppFontStatus::loaded)
-                    holder = std::move(loaded.family);
+        const std::filesystem::path file =
+            std::filesystem::path(asset_directory()) / "fonts" / "BarlowCondensed-Bold.ttf";
+        const std::shared_ptr<const std::vector<std::byte>> bytes = read_face(file);
+        if (bytes) {
+            std::array<gf::AppFontFace, 1> faces{};
+            faces[0].bytes = bytes;
+            faces[0].weight = 700;
+            gf::AppFontLoad loaded = gf::load_app_font_family(title_family_name, faces);
+            if (loaded.validation.status == gf::AppFontStatus::loaded) {
+                family_ = std::move(loaded.family);
+                state_ = CapsuleTitleFaceState::loaded;
             }
-        }
-        // A family quarantined or unloaded since draws nothing; the fallback stands then.
-        if (holder.id() != gf::FontFamilyId{} && gf::font_family_drawable(holder.id())) {
-            family_ = holder.id();
-            state_ = CapsuleTitleFaceState::loaded;
-        } else {
-            state_ = CapsuleTitleFaceState::refused;
         }
     } catch (...) {
         state_ = CapsuleTitleFaceState::refused;
@@ -86,13 +74,38 @@ CapsuleTitleFaceState CapsuleTitleFace::load() {
     return state_;
 }
 
+void CapsuleTitleFamily::release() noexcept {
+#if defined(GAMES_GUI_FORMS_APP_FONTS)
+    static_cast<void>(family_.unload());
+#endif
+    state_ = CapsuleTitleFaceState::unloaded;
+}
+
+CapsuleTitleFaceState CapsuleTitleFamily::state() const noexcept {
+#if defined(GAMES_GUI_FORMS_APP_FONTS)
+    // A family quarantined since draws nothing: it reads as refused.
+    if (state_ == CapsuleTitleFaceState::loaded && !gf::font_family_drawable(family_.id()))
+        return CapsuleTitleFaceState::refused;
+#endif
+    return state_;
+}
+
+gf::FontFamilyId CapsuleTitleFamily::id() const noexcept {
+#if defined(GAMES_GUI_FORMS_APP_FONTS)
+    if (state() == CapsuleTitleFaceState::loaded)
+        return family_.id();
+#endif
+    return gf::FontFamilyId{};
+}
+
 gf::FontSpec CapsuleTitleFace::font(double size) const {
     gf::FontSpec spec{};
     spec.role = gf::FontRole::control;
     spec.weight = 700;
-    if (state_ == CapsuleTitleFaceState::loaded) {
+    const gf::FontFamilyId family = family_;
+    if (family != gf::FontFamilyId{}) {
         spec.size = size;
-        spec.family = family_;
+        spec.family = family;
     } else {
         // The bundled control face is wider than Barlow Condensed: a little smaller, drawn
         // tighter, so the folded capsule keeps its length.

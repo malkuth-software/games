@@ -13,7 +13,8 @@ double ease(double t) {
 // The title's size in points (Barlow Condensed Bold, as the hand-drawn lettering had it).
 constexpr double kTitleSize = 19;
 } // namespace
-CommandCapsule::CommandCapsule(gf::StableId id) : CommandCapsuleControl(std::move(id)) {
+CommandCapsule::CommandCapsule(gf::StableId id, const CapsuleTitleFamily& title_family)
+    : CommandCapsuleControl(std::move(id)), title_face_(title_family) {
     accessible_name = "Game commands";
     set_paint_plane(gf::PaintPlane::overlay);
 }
@@ -21,7 +22,6 @@ void CommandCapsule::initialize_control_tree() {
     // The document's children (the title label) first, then the face it is drawn in.
     CommandCapsuleControl::initialize_control_tree();
     title_label_ = std::dynamic_pointer_cast<gf::Label>(child("title"));
-    static_cast<void>(title_face_.load());
     if (title_label_)
         (*title_label_).font = title_face_.font(kTitleSize);
     back_ = gf::make_control<SuiteButton>(gf::StableId("capsule.back"), "", GlossTone::smoke);
