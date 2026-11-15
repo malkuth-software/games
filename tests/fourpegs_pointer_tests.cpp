@@ -83,6 +83,21 @@ int main() {
         pointer(fresh_window, *fresh, gf::PointerAction::up, projected(scene, fp::Lair::socket(3)));
         require(placed(*fresh) == 2, "A drag whose capture was lost drops nothing");
         require(!(*fresh).has_pointer_capture(), "The cancelled drag holds no capture");
+        // The drag is GUI.Forms' DragTracker session: Escape ends it dropping nothing, and the
+        // release that follows is no click (the board does not change).
+        pointer(fresh_window, *fresh, gf::PointerAction::down, projected(scene, fp::Lair::palette(1)));
+        pointer(fresh_window, *fresh, gf::PointerAction::move, projected(scene, fp::Lair::socket(3)));
+        gf::KeyEvent escape{};
+        escape.action = gf::KeyAction::down;
+        escape.physical_key = gf::PhysicalKey::escape;
+        static_cast<void>(fresh_window.dispatch_key(escape));
+        pointer(fresh_window, *fresh, gf::PointerAction::up, projected(scene, fp::Lair::socket(3)));
+        require(placed(*fresh) == 2, "Escape mid-drag drops nothing");
+        // A drag that is released over a socket still drops there.
+        pointer(fresh_window, *fresh, gf::PointerAction::down, projected(scene, fp::Lair::palette(2)));
+        pointer(fresh_window, *fresh, gf::PointerAction::move, projected(scene, fp::Lair::socket(3)));
+        pointer(fresh_window, *fresh, gf::PointerAction::up, projected(scene, fp::Lair::socket(3)));
+        require((*fresh).board().draft()[3] == 2, "The tracker's release drops the peg in the socket");
         std::cout << "Four Pegs pointer routing passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

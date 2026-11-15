@@ -11,6 +11,7 @@
 #include "game_text.hpp"
 
 #include "gui_forms/basic_controls.hpp"
+#include "gui_forms/drag/drag_tracker/drag_tracker.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
 #include "gui_forms/window.hpp"
@@ -141,6 +142,18 @@ private:
     void active_changed(bool active);
     void capture_changed(const gf::PointerCaptureChange& change);
     void cancel_drag();
+    // The peg drag runs on GUI.Forms' DragTracker (cp29 public drag client): the tracker arms
+    // on a press on a palette peg or a filled socket, starts past 4 game pixels, holds the
+    // capture, and ends the session once (a release, Escape, a lost capture, the window's
+    // deactivation). Its plan is a free placement with no targets: the sockets are found by
+    // the console's own 3D pick at the release (Lair::pick_socket), which a rectangle cannot
+    // stand for. The tracker borrows this view and is destroyed with it.
+    gf::DragTracker drag_;
+    void plan_drag(gf::DragPlan& plan);
+    void preview_drag(const gf::DragTrackerFrame& frame);
+    void finish_drag(const gf::DragTrackerFrame& frame);
+    void drop_peg();
+    [[nodiscard]] gf::PointerEvent window_event(const gf::MouseEventArgs& e) const;
     void track_pointer(gf::Point local);
     std::string hit_button() const;
     void board_clicked();

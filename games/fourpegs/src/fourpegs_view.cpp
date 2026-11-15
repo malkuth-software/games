@@ -46,8 +46,13 @@ void mini_symbol(Canvas& c, int color, double x, double y, double r, Col col) {
 }
 }  // namespace
 
-FourPegsView::FourPegsView(gf::StableId id, Options opt) : gf::Control(std::move(id)), opt_(opt), board_(seed_now()), actor_(seed_now() ^ 0x5EED) {
+FourPegsView::FourPegsView(gf::StableId id, Options opt) : gf::Control(std::move(id)), opt_(opt), board_(seed_now()), actor_(seed_now() ^ 0x5EED), drag_(*this) {
     focusable = true;
+    drag_.callbacks.plan = gf::Delegate<gf::DragPlan&>::bind<FourPegsView, &FourPegsView::plan_drag>(*this);
+    drag_.callbacks.preview =
+        gf::Delegate<const gf::DragTrackerFrame&>::bind<FourPegsView, &FourPegsView::preview_drag>(*this);
+    drag_.callbacks.finished =
+        gf::Delegate<const gf::DragTrackerFrame&>::bind<FourPegsView, &FourPegsView::finish_drag>(*this);
     // Every release over the view is a click: a quick second press is another click, not a
     // double click. (The opaque style went in GUI.Forms 0.6, audit A17.)
     set_style(gf::ControlStyles::standard_double_click, false);
@@ -98,7 +103,8 @@ void FourPegsView::on_attached_to_window() {
     (*timer_).start();
 }
 
-void FourPegsView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
+void FourPegsView::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
+    drag_.owner_detaching(window);
     try { persist(); } catch (...) {}
     if (timer_) (*timer_).stop();
     timer_.reset();
@@ -130,6 +136,8 @@ void FourPegsView::set_cabinet(bool foreground, bool music, bool sound, bool red
 }
 
 void FourPegsView::cancel_drag() {
+    // A running session ends at once (finished, which drops nothing for this end).
+    if (drag_.running()) drag_.cancel(gf::DragEnd::escaped);
     mouse_down_ = false;
     dragging_ = false;
     drag_color_ = -1;
@@ -452,11 +460,12 @@ void FourPegsView::publish() {
 // The pointer, in GUI.Forms' raisers. The painted buttons fire on the derived
 // click (a release over the view after a press on the same button), so the
 // window's order rules apply. A primary press on a palette peg or a filled
-// socket may become a drag under capture once the pointer moves past 4 pt;
-// its release drops the peg (into a socket, or off the console to remove it)
-// and suppresses the click. A press that did not drag is a click: a palette
-// peg fills the next empty socket, a filled socket empties, CHECK checks.
-// A capture lost mid-press cancels the drag (capture_changed).
+// socket arms GUI.Forms' DragTracker, which becomes a drag once the pointer
+// has moved 4 game pixels; its release drops the peg (into a socket, or off
+// the console to remove it) and suppresses the click, and Escape, a lost
+// capture or the window's deactivation end it dropping nothing. A press that
+// did not drag is a click: a palette peg fills the next empty socket, a filled
+// socket empties, CHECK checks.
 void FourPegsView::track_pointer(gf::Point local) {
     mouse_x_ = local.x / pixel_;
     mouse_y_ = local.y / pixel_;
@@ -472,16 +481,15 @@ void FourPegsView::on_mouse_move(gf::MouseEventArgs& e) {
     track_pointer(e.location);
     mouse_in_ = true;
     ConsoleState& cs = st_.console;
-    if (mouse_down_ && !has_pointer_capture()) cancel_drag();
     hover_ = hit_button();
     cs.hover_palette = panel_ == Panel::none ? lair_.pick_palette(mouse_x_, mouse_y_) : -1;
     cs.hover_socket = panel_ == Panel::none ? lair_.pick_socket(mouse_x_, mouse_y_) : -1;
-    if (mouse_down_ && drag_color_ >= 0 && !dragging_ && std::hypot(mouse_x_ - down_x_, mouse_y_ - down_y_) > 4) {
-        dragging_ = true;
-        cs.drag_color = drag_color_;
-        play("fp_pick", .7f);
+    // The tracker starts the drag past its threshold (plan_drag) and moves the peg
+    // (preview_drag); it takes the move while its session runs.
+    if (drag_.running()) {
+        const gf::PointerEvent event = window_event(e);
+        if (drag_.pointer(event)) e.handled = true;
     }
-    if (dragging_) { V3 w; if (lair_.console_point(mouse_x_, mouse_y_, w)) cs.drag_at = w; }
     const bool over = !hover_.empty() || cs.hover_palette >= 0 || cs.hover_socket >= 0 || lair_.pick_check(mouse_x_, mouse_y_);
     cursor = dragging_ ? gf::CursorKind::hand : over ? gf::CursorKind::hand : gf::CursorKind::arrow;
     gf::Control::on_mouse_move(e);
@@ -504,7 +512,6 @@ void FourPegsView::on_mouse_down(gf::MouseEventArgs& e) {
             mouse_down_ = true;
             down_x_ = mouse_x_;
             down_y_ = mouse_y_;
-            set_pointer_capture(true);
             drag_color_ = -1;
             drag_from_ = -1;
             if (!checking_ && !board_.over()) {
@@ -512,6 +519,18 @@ void FourPegsView::on_mouse_down(gf::MouseEventArgs& e) {
                 const int sk = lair_.pick_socket(mouse_x_, mouse_y_);
                 if (pc >= 0) drag_color_ = pc;
                 else if (sk >= 0 && board_.draft()[static_cast<size_t>(sk)] >= 0) { drag_color_ = board_.draft()[static_cast<size_t>(sk)]; drag_from_ = sk; }
+            }
+            // A peg under the press arms the tracker, which takes the capture; past 4 game
+            // pixels it plans the drag.
+            if (drag_color_ >= 0) {
+                gf::DragStart start{};
+                start.key = static_cast<std::uint64_t>(drag_color_);
+                const gf::Point at = point_to_window(e.location);
+                start.source = gf::Rect{at.x - 1, at.y - 1, 2, 2};
+                start.threshold = 4.0 * pixel_;
+                const gf::PointerEvent press = window_event(e);
+                const gf::DragStartResult armed = drag_.press(press, start);
+                if (armed != gf::DragStartResult::armed && armed != gf::DragStartResult::started) drag_color_ = drag_from_ = -1;
             }
         }
         e.handled = true;
@@ -524,21 +543,14 @@ void FourPegsView::on_mouse_up(gf::MouseEventArgs& e) {
     released_ = pressed_;
     pressed_.clear();
     board_click_ = mouse_down_ && !dragging_;
-    if (mouse_down_) {
-        if (dragging_) {
-            const int sk = lair_.pick_socket(mouse_x_, mouse_y_);
-            selected_color_ = selected_slot_ = auto_slot_ = -1;
-            // a drop: into a socket, or off the console to remove it
-            if (drag_from_ >= 0) {
-                if (sk >= 0 && sk != drag_from_) { const int c = drag_color_; clear_slot(drag_from_); place(sk, c); }
-                else if (sk < 0) clear_slot(drag_from_);
-            } else if (sk >= 0) {
-                place(sk, drag_color_);
-            }
-            // a drop is not a click
-            e.suppress_click = true;
-        }
-        set_pointer_capture(false);
+    // A release while the tracker drags is the drop (finish_drag); while it is only armed
+    // it is the press's click, and the session ends without a plan.
+    if (drag_.running()) {
+        const bool was_dragging = dragging_;
+        const gf::PointerEvent event = window_event(e);
+        static_cast<void>(drag_.pointer(event));
+        // a drop is not a click
+        if (was_dragging) e.suppress_click = true;
     }
     mouse_down_ = dragging_ = false;
     drag_color_ = drag_from_ = -1;
@@ -563,10 +575,62 @@ void FourPegsView::on_mouse_click(gf::MouseEventArgs& e) {
 
 // The view's capture ends after the release's click, when the press is already
 // over, or while the press is still down when it is lost (set_pointer_capture(false),
-// a system cancel): then the drag is cancelled and nothing is dropped.
+// a system cancel): a running drag then ends capture_lost in the tracker (finish_drag
+// drops nothing), and a press that never armed one is forgotten.
 void FourPegsView::on_mouse_capture_changed() {
     if (mouse_down_) cancel_drag();
     gf::Control::on_mouse_capture_changed();
+}
+
+// The routed form of a raiser's arguments, which the tracker takes (window coordinates).
+gf::PointerEvent FourPegsView::window_event(const gf::MouseEventArgs& e) const {
+    const gf::PointerEvent event = gf::pointer_event_of(e);
+    return event;
+}
+
+// Past the threshold: the peg is picked up. A free placement over the window (no grid, no
+// targets); the socket is the console's pick at the release.
+void FourPegsView::plan_drag(gf::DragPlan& plan) {
+    if (drag_color_ < 0 || checking_ || board_.over() || panel_ != Panel::none) {
+        plan.refused = true;
+        return;
+    }
+    plan.kind = gf::DragKind::placement;
+    plan.placement.grid_by_default = false;
+    plan.placement.free_drop = true;
+    plan.container = this;
+    dragging_ = true;
+    st_.console.drag_color = drag_color_;
+    play("fp_pick", .7f);
+}
+
+// The peg follows the pointer over the console.
+void FourPegsView::preview_drag(const gf::DragTrackerFrame& frame) {
+    track_pointer(point_from_window(frame.pointer));
+    V3 w;
+    if (lair_.console_point(mouse_x_, mouse_y_, w)) st_.console.drag_at = w;
+}
+
+// The session's one end. A release (free) drops the peg where the console's pick finds a
+// socket; every other end (Escape, a lost capture, deactivation, a cancel) drops nothing.
+void FourPegsView::finish_drag(const gf::DragTrackerFrame& frame) {
+    track_pointer(point_from_window(frame.pointer));
+    if (gf::drag_end_commits(frame.end) && drag_color_ >= 0) drop_peg();
+    mouse_down_ = dragging_ = false;
+    drag_color_ = drag_from_ = -1;
+    st_.console.drag_color = -1;
+}
+
+// A drop: into a socket, or off the console to remove it.
+void FourPegsView::drop_peg() {
+    const int sk = lair_.pick_socket(mouse_x_, mouse_y_);
+    selected_color_ = selected_slot_ = auto_slot_ = -1;
+    if (drag_from_ >= 0) {
+        if (sk >= 0 && sk != drag_from_) { const int c = drag_color_; clear_slot(drag_from_); place(sk, c); }
+        else if (sk < 0) clear_slot(drag_from_);
+    } else if (sk >= 0) {
+        place(sk, drag_color_);
+    }
 }
 
 // A click on the console: a palette peg fills the next empty socket (or the
