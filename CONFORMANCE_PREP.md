@@ -112,17 +112,23 @@ Two branches, by the owner's ruling (option C, provisional):
 
 ## The capsule
 
-The capsule (src/capsule.*, `CommandCapsule`) is PlaySuite's in-game menu and stays its own. It is a
-`gf::Control` whose children are `SuiteButton`s (`gf::Button`, faces, focus and labels painted through the
-theme's parts) and the master switches bound to SuiteModel; opening and wrapping are its own arrange. Three
-things are still painted by hand:
-1. the pill (shadow, gradient, gold edge) in on_paint: expressible as a keyed theme part in themes/playsuite.
-   Product work, not a gap.
-2. the glyphs, drawn with lines in `SuiteButton::paint_glyph`: expressible as button images or stock icons
-   that the theme replaces by name. Product work, not a gap.
-3. the title, in Barlow Condensed through PlaySuite's own TextSprites. Interface text uses bundled faces
-   only (the 2026-11-13 interface/content split), so a `gf::Label` cannot show it. **GUI.Forms gap or owner
-   decision:** move the title to a bundled face, or admit product display faces for interface text.
+The capsule is PlaySuite's in-game menu and stays its own. By the owner's decision of 2026-11-15 (apps may
+load fonts into GUI.Forms' engine inside composites and subsurfaces; the capsule is declared a composite) it
+is now a GUI.Forms composite:
+- controls/command-capsule.control is the document: the pill is a themed part (the gradient, gold edge and
+  shadow on_paint used to draw are its `<look>`), the title a stock label bound to the `title` property.
+  gui_forms_add_control generates `games::CommandCapsuleControl` on game_ui.
+- `games::CommandCapsule` (src/capsule.*) derives from it and keeps what a document cannot say: the
+  game's commands (they change with the game), the master switches bound to SuiteModel, and the wrapping,
+  opening layout. The buttons are still `SuiteButton`s (`gf::Button`, faces through the theme).
+- The title is drawn by GUI.Forms' text engine in Barlow Condensed Bold, loaded for the composite through
+  the seam src/capsule_title_face.*. **Dependency:** GUI.Forms claude/app-fonts (the app-font API, being
+  written). The CMake option `GAMES_GUI_FORMS_APP_FONTS` (OFF) turns the load on; the call in
+  capsule_title_face.cpp follows the relayed design and must be matched to the landed header. Until then
+  the bundled control face (bold, slightly smaller and tighter) draws the title, GUI.Forms' own fallback.
+- Still hand-drawn: the buttons' glyphs (`SuiteButton::paint_glyph`), expressible as button images or
+  stock icons the theme replaces by name. Product work, not a gap.
+- Pocket Library's shell copy (its src/capsule.cpp) is unchanged; it can follow once this is built.
 
 ## What still waits on GUI.Forms
 
@@ -136,7 +142,8 @@ things are still painted by hand:
     base's dark rules counted as the package's);
   - the business card: the 3D turn, the card stock material, remarks around the card, the page card under
     the heading band, the URL service;
-  - the capsule title's display face (above).
+  - the capsule title's display face: settled by the owner (composites may load fonts); waits on
+    GUI.Forms claude/app-fonts (above).
   - Closed by cp33: the public `key_event_arguments` and the crossing position (`pointer_location`).
 - **Remaining routed-phase overrides:** if a later checkpoint retires `on_key_preview` / `on_key_bubble` /
   `on_pointer_preview` / `on_pointer_bubble`, about 30 sites move (one `on_key_bubble` in each of the 18 game
