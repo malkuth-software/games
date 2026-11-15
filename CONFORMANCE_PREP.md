@@ -128,11 +128,14 @@ is now a GUI.Forms composite:
 - `games::CommandCapsule` (src/capsule.*) derives from it and keeps what a document cannot say: the
   game's commands (they change with the game), the master switches bound to SuiteModel, and the wrapping,
   opening layout. The buttons are still `SuiteButton`s (`gf::Button`, faces through the theme).
-- The title is drawn by GUI.Forms' text engine in Barlow Condensed Bold, loaded for the composite through
-  the seam src/capsule_title_face.*. **Dependency:** GUI.Forms claude/app-fonts (the app-font API, being
-  written). The CMake option `GAMES_GUI_FORMS_APP_FONTS` (OFF) turns the load on; the call in
-  capsule_title_face.cpp follows the relayed design and must be matched to the landed header. Until then
-  the bundled control face (bold, slightly smaller and tighter) draws the title, GUI.Forms' own fallback.
+- The title is drawn by GUI.Forms' text engine in Barlow Condensed Bold, an application font family loaded
+  once per process through GUI.Forms' app-font API (`gf::load_app_font_family`, held by an
+  `gf::AppFontFamily` for the process) in the seam src/capsule_title_face.*. GUI.Forms admits the family by
+  the control's context: the capsule's title label is a composite child, so it draws it; a stock control
+  would drop it. **Dependency:** GUI.Forms claude/app-fonts (2558e326c, being folded). The CMake option
+  `GAMES_GUI_FORMS_APP_FONTS` is ON by default; OFF builds against a GUI.Forms without the API, and the
+  bundled control face (bold, slightly smaller and tighter) draws the title, as it does when the family is
+  refused, quarantined or unloaded.
 - Still hand-drawn: the buttons' glyphs (`SuiteButton::paint_glyph`), expressible as button images or
   stock icons the theme replaces by name. Product work, not a gap.
 - Pocket Library's shell copy (its src/capsule.cpp) is unchanged; it can follow once this is built.
@@ -148,8 +151,8 @@ is now a GUI.Forms composite:
   - W402 `scheme_rules_without_variant` fires on a light-only package over windows_professional (the
     base's dark rules counted as the package's);
   - the business card's five: closed by GUI.Forms 6741c7da9 (business-card parity), adopted here;
-  - the capsule title's display face: settled by the owner (composites may load fonts); waits on
-    GUI.Forms claude/app-fonts (above).
+  - the capsule title's display face: settled by the owner (composites may load fonts); uses GUI.Forms
+    claude/app-fonts 2558e326c (above), which the pin must carry.
   - Closed by cp33: the public `key_event_arguments` and the crossing position (`pointer_location`).
 - **Remaining routed-phase overrides:** if a later checkpoint retires `on_key_preview` / `on_key_bubble` /
   `on_pointer_preview` / `on_pointer_bubble`, about 30 sites move (one `on_key_bubble` in each of the 18 game
