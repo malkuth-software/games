@@ -137,7 +137,7 @@ jobs:
           # GUI.Forms builds against LLVM's libc++ 22 and libc++abi on Linux (cp33; owner, 2026-11-15):
           # gui_forms/cmake/llvm22.cmake passes -stdlib=libc++. apt.llvm.org, which the harness
           # script has just added, has them; they move into the harness tables at its next bump.
-          sudo apt-get install -y --no-install-recommends libc++-22-dev libc++abi-22-dev
+          sudo apt-get install -y --no-install-recommends libc++-22-dev libc++abi-22-dev libunwind-22-dev
           echo "CC=clang" >> "$GITHUB_ENV"
           echo "CXX=clang++" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4

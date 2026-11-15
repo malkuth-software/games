@@ -52,9 +52,17 @@ Two branches, by the owner's ruling (option C, provisional):
 8. **cp33 (claude/batch-cp33).**
    - XML forms: forms/playsuite.form is the `urn:gui-forms:form:1` XML form (tools/convert_form_to_xml.py).
    - Linux: main calls `std::setlocale(LC_CTYPE, "")`; CMakeLists.txt checks for libc++ 22 on Linux
-     (`GAMES_LINUX_LIBCXX_22`, `_LIBCPP_VERSION`) when the application builds; the workflows install
-     libc++-22-dev and libc++abi-22-dev; tools/package_linux.py bundles libc++.so.1, libc++abi.so.1 (and
-     libunwind.so.1 where ldd resolves it) with the LLVM licences.
+     (`GAMES_LINUX_LIBCXX_22`, `_LIBCPP_VERSION`) when the application builds.
+   - One module (owner rule: a shipped program has no native library dependency and is one module):
+     libc++, libc++abi and libunwind link statically through gui_forms/cmake/llvm22.cmake (GUI.Forms
+     claude/cp33-libcxx-static 39d2ea6b0); CMakeLists.txt refuses a Linux tree whose
+     `CMAKE_CXX_STANDARD_LIBRARIES` lacks the static archives; the workflows install libc++-22-dev,
+     libc++abi-22-dev and libunwind-22-dev. GUI.Forms links into the executable once GUI.Forms'
+     claude/one-module lands (its libraries are still SHARED at cp33). tools/package_linux.py bundles no
+     shared library: it strips the program and refuses it if readelf -d or ldd names libc++, libc++abi,
+     libunwind or a libgui_forms library, or ldd resolves anything outside the system's library folders
+     (tools/test_package_linux.py tests that reading; CI runs it before packaging). The LLVM licences
+     (libcxx, libcxxabi, libunwind) still ship.
    - Relative pointer: Zen Construction's camera orbit requests a confined grant (`until_release`, cursor
      shown) and turns on the relative samples; a free grant (headless) is released and the absolute moves
      drive it as before. The collection declares the capsule and the help link as pointer release regions
@@ -65,7 +73,7 @@ Two branches, by the owner's ruling (option C, provisional):
      `stack` are appended too, so the 50 positional initializers still compile; BundledFontFamily was not used.
    - The window band and WindowCapsule belong to the surface window manager; PlaySuite's native window does
      not use them. The capsule is PlaySuite's own in-game menu (see "The capsule").
-   - The std rules are not adopted (owner choice; the products keep the std library as they use it).
+   - The std rules are not adopted yet (coordinator's choice; the products keep the std library as they use it).
 9. **Business card and diagnostic overlay.** GUI.Forms' card (`gui_forms/components/business_card`)
    replaces src/business_card.*. main sets the program identity (PlaySuite, the project version, the vendor,
    the website, the creators as credits). The help book's page card is a `BusinessCard` (page); its press
@@ -158,6 +166,11 @@ between the two. Tests that should cover this branch:
 - the full `ctest -LE design`.
 
 ## Risks (not checked without a build)
+
+- The Linux package fails its one-module check until the GUI.Forms pin carries claude/one-module (and the
+  configure fails until it carries the static libc++ link): intended, since both are the owner's rule.
+- The system-folder rule allows any library under /lib, /lib64, /usr/lib, /usr/lib64 (X11, ALSA, libc);
+  it does not check that each is on the target distribution.
 
 - Release regions are declared during arrange; a window that reads them before the first layout sees none.
 - The help book places the page card from the pages' arrange and scroll (set_child_layout inside layout).

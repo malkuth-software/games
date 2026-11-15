@@ -200,7 +200,7 @@ jobs:
           # GUI.Forms builds against LLVM's libc++ 22 and libc++abi on Linux (cp33; owner, 2026-11-15):
           # gui_forms/cmake/llvm22.cmake passes -stdlib=libc++. apt.llvm.org, which the harness
           # script has just added, has them; they move into the harness tables at its next bump.
-          sudo apt-get install -y --no-install-recommends libc++-22-dev libc++abi-22-dev
+          sudo apt-get install -y --no-install-recommends libc++-22-dev libc++abi-22-dev libunwind-22-dev
           echo "CC=clang" >> "$GITHUB_ENV"
           echo "CXX=clang++" >> "$GITHUB_ENV"
       - uses: actions/cache/save@v4
@@ -368,7 +368,11 @@ jobs:
         run: python3 tools/package_macos.py --build "$GAMES_BUILD_DIR" --toolkit gui_forms --runtime "$GUI_FORMS_LLVM_RUNTIME"
       - name: Package Linux application and installer
         if: runner.os == 'Linux'
-        run: python3 tools/package_linux.py --build "$GAMES_BUILD_DIR" --toolkit gui_forms
+        # One module: the package refuses a program that needs a library beyond the system's
+        # (tools/test_package_linux.py tests the readelf/ldd reading first).
+        run: |
+          python3 -B tools/test_package_linux.py
+          python3 tools/package_linux.py --build "$GAMES_BUILD_DIR" --toolkit gui_forms
       - name: Launch packaged Windows application
         if: runner.os == 'Windows'
         run: |
@@ -451,7 +455,7 @@ jobs:
           # GUI.Forms builds against LLVM's libc++ 22 and libc++abi on Linux (cp33; owner, 2026-11-15):
           # gui_forms/cmake/llvm22.cmake passes -stdlib=libc++. apt.llvm.org, which the harness
           # script has just added, has them; they move into the harness tables at its next bump.
-          sudo apt-get install -y --no-install-recommends libc++-22-dev libc++abi-22-dev
+          sudo apt-get install -y --no-install-recommends libc++-22-dev libc++abi-22-dev libunwind-22-dev
       - uses: actions/cache/save@v4
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.linux-packages.outputs.cache-hit != 'true'
         with:
