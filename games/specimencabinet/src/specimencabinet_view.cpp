@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 
 namespace sc {
@@ -44,6 +45,11 @@ int size_index(int n) {
 }  // namespace
 
 SpecimenCabinetView::SpecimenCabinetView(gf::StableId id, Options options) : gf::Control(std::move(id)), options_(options) {
+    drag_.callbacks.plan = gf::Delegate<gf::DragPlan&>::bind<SpecimenCabinetView, &SpecimenCabinetView::plan_drag>(*this);
+    drag_.callbacks.preview =
+        gf::Delegate<const gf::DragTrackerFrame&>::bind<SpecimenCabinetView, &SpecimenCabinetView::preview_drag>(*this);
+    drag_.callbacks.finished =
+        gf::Delegate<const gf::DragTrackerFrame&>::bind<SpecimenCabinetView, &SpecimenCabinetView::finish_drag>(*this);
     front_ = !options_.hosted;
     focusable = true;
     // Every release over the view is a click: a quick second press is another click, not a
@@ -119,7 +125,8 @@ void SpecimenCabinetView::on_attached_to_window() {
     request_frame();
 }
 
-void SpecimenCabinetView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
+void SpecimenCabinetView::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
+    drag_.owner_detaching(window);
     try {
         persist();
     } catch (...) {
@@ -560,6 +567,9 @@ void SpecimenCabinetView::press_panel_button(int button) {
 }
 
 void SpecimenCabinetView::cancel_press() {
+    // A running drag session ends at once; finish_drag puts its stone back.
+    if (drag_.running())
+        drag_.cancel(gf::DragEnd::model_changed);
     if (pressing_ || dragging_ || pressed_button_ >= 0)
         set_pointer_capture(false);
     if (dragging_ || pressing_) {
@@ -577,8 +587,8 @@ void SpecimenCabinetView::cancel_press() {
 
 // The pointer, in GUI.Forms' raisers. Under a panel, its buttons fire on the
 // derived click after a press on the same button. Under help, a press closes
-// it. On the board a primary press lifts a movable stone under capture; past
-// 0.12 of a stone the moves drag it and the release lets it go there (and
+// it. On the board a primary press lifts a movable stone and arms GUI.Forms'
+// DragTracker; past 0.12 of a stone the moves drag it and the release lets it go there (and
 // suppresses the click); a press that did not drag is a click, and the stone
 // is carried until the next press sets it down. A secondary press puts the
 // stone in hand back. A capture lost mid-press, or a release whose click was
@@ -590,9 +600,15 @@ void SpecimenCabinetView::on_mouse_move(gf::MouseEventArgs& event) {
         const int button = panel_button(x, y);
         cursor = button >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
     } else if (!help_) {
-        if (pressing_ && !dragging_ && std::hypot(x - press_x_, y - press_y_) > layout_.stone * .12)
-            dragging_ = true;
-        if (held_ >= 0 && (dragging_ || carrying_)) {
+        // The tracker starts the drag past its threshold and moves the stone (preview_drag).
+        if (drag_.running()) {
+            const gf::PointerEvent moved = gf::pointer_event_of(event);
+            if (drag_.pointer(moved))
+                event.handled = true;
+        }
+        if (dragging_) {
+            cursor = gf::CursorKind::hand;
+        } else if (held_ >= 0 && carrying_) {
             held_x_ = x - grip_x_;
             held_y_ = y - grip_y_;
             target_ = pick_cell(layout_, held_x_, held_y_);
@@ -643,7 +659,17 @@ void SpecimenCabinetView::on_mouse_down(gf::MouseEventArgs& event) {
                         dragging_ = false;
                         press_x_ = x;
                         press_y_ = y;
-                        set_pointer_capture(true);
+                        // The tracker takes the capture; the stone, as taken, is the source.
+                        gf::DragStart start{};
+                        start.key = static_cast<std::uint64_t>(stone);
+                        const double half = layout_.stone * .5;
+                        const gf::Point corner = point_to_window(gf::Point{held_x_ - half, held_y_ - half});
+                        start.source = gf::Rect{corner.x, corner.y, layout_.stone, layout_.stone};
+                        start.threshold = layout_.stone * .12;
+                        const gf::PointerEvent press = gf::pointer_event_of(event);
+                        const gf::DragStartResult armed = drag_.press(press, start);
+                        if (armed != gf::DragStartResult::armed && armed != gf::DragStartResult::started)
+                            set_pointer_capture(true);
                     }
                 }
             }
@@ -653,8 +679,6 @@ void SpecimenCabinetView::on_mouse_down(gf::MouseEventArgs& event) {
 }
 
 void SpecimenCabinetView::on_mouse_up(gf::MouseEventArgs& event) {
-    const double x = event.location.x;
-    const double y = event.location.y;
     if (event.button == gf::PointerButton::primary) {
         if (panel_ != Panel::none) {
             released_button_ = pressed_button_;
@@ -665,11 +689,20 @@ void SpecimenCabinetView::on_mouse_up(gf::MouseEventArgs& event) {
             event.handled = true;
             if (pressing_) {
                 const bool dragged = dragging_;
-                set_pointer_capture(false);
+                // Cleared before the tracker ends its session, so the capture it frees
+                // does not read as a press lost (on_mouse_capture_changed).
                 pressing_ = false;
                 dragging_ = false;
-                if (held_ >= 0 && dragged) {
-                    let_go(x, y);
+                bool taken = false;
+                if (drag_.running()) {
+                    // Dragging, the tracker ends the session and finish_drag lets the stone
+                    // go; only armed, it returns false and the release is the press's click.
+                    const gf::PointerEvent released = gf::pointer_event_of(event);
+                    taken = drag_.pointer(released);
+                } else {
+                    set_pointer_capture(false);
+                }
+                if (dragged || taken) {
                     // a drop is not a click
                     event.suppress_click = true;
                 } else if (held_ >= 0) {
@@ -679,6 +712,49 @@ void SpecimenCabinetView::on_mouse_up(gf::MouseEventArgs& event) {
         }
     }
     gf::Control::on_mouse_up(event);
+}
+
+// Past the threshold: a free placement with no targets (the cabinet's sockets and felt are
+// picked by let_go from the release point). Refused when the stone is no longer in hand.
+void SpecimenCabinetView::plan_drag(gf::DragPlan& plan) {
+    if (held_ < 0 || !session_.playing || session_.won) {
+        plan.refused = true;
+        return;
+    }
+    plan.kind = gf::DragKind::placement;
+    plan.placement.grid_by_default = false;
+    plan.placement.free_drop = true;
+    plan.container = this;
+    dragging_ = true;
+}
+
+// The stone follows the pointer, over the socket under it.
+void SpecimenCabinetView::preview_drag(const gf::DragTrackerFrame& frame) {
+    if (held_ < 0)
+        return;
+    const gf::Point local = point_from_window(frame.pointer);
+    held_x_ = local.x - grip_x_;
+    held_y_ = local.y - grip_y_;
+    target_ = pick_cell(layout_, held_x_, held_y_);
+    keyboard_ = false;
+    render_dirty_ = true;
+    request_frame();
+}
+
+// The session's one end: a committing release lets the stone go where it was released
+// (a socket, the felt, or back); Escape, a lost capture or a cancel put it back.
+void SpecimenCabinetView::finish_drag(const gf::DragTrackerFrame& frame) {
+    const bool commits = gf::drag_end_commits(frame.end);
+    pressing_ = false;
+    dragging_ = false;
+    if (held_ >= 0 && commits) {
+        const gf::Point local = point_from_window(frame.pointer);
+        let_go(local.x, local.y);
+    } else if (held_ >= 0) {
+        put_back();
+    }
+    render_dirty_ = true;
+    request_frame();
 }
 
 void SpecimenCabinetView::on_mouse_click(gf::MouseEventArgs& event) {
@@ -707,7 +783,9 @@ void SpecimenCabinetView::on_mouse_click(gf::MouseEventArgs& event) {
 // The capture ends after the release's click, or before the release when it is
 // lost. A press still down, or a lifted stone whose click never came, goes back.
 void SpecimenCabinetView::on_mouse_capture_changed() {
-    if (pressing_ || dragging_) {
+    // A running drag session handles its own capture loss (finish_drag puts the stone back).
+    if (drag_.running()) {
+    } else if (pressing_ || dragging_) {
         cancel_press();
         request_frame();
     } else if (carry_pending_) {

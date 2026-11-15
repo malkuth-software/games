@@ -16,6 +16,7 @@
 #include "surface.hpp"
 
 #include "gui_forms/basic_controls.hpp"
+#include "gui_forms/drag/drag_tracker/drag_tracker.hpp"
 #include "gui_forms/threading.hpp"
 #include "gui_forms/timer.hpp"
 #include "gui_forms/events/key_events/key_events.hpp"
@@ -97,6 +98,14 @@ private:
     bool pressing_ = false;       // the button is down on the held stone, not yet a drag
     bool dragging_ = false;
     double press_x_ = 0, press_y_ = 0;
+    // The drag runs on GUI.Forms' DragTracker: the press on a stone arms it, past 0.12 of a
+    // stone plan_drag starts a free placement (the cabinet picks its own socket), and
+    // finish_drag lets the stone go where it was released, or puts it back on Escape, a lost
+    // capture or a cancel. A release before the threshold is the press's click (a carry).
+    gf::DragTracker drag_{*this};
+    void plan_drag(gf::DragPlan& plan);
+    void preview_drag(const gf::DragTrackerFrame& frame);
+    void finish_drag(const gf::DragTrackerFrame& frame);
     void key_down(gf::KeyEventArgs& event);
     // What a release ended, for the click that follows it: the panel button
     // pressed, or a lifted stone that did not drag (the click carries it).
