@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <set>
 namespace gf = gui_forms;
 using namespace games;
@@ -327,7 +328,10 @@ int main() {
             assert(!(*composite).part_bounds("pill").empty());
             const std::shared_ptr<gf::Label> title = std::dynamic_pointer_cast<gf::Label>((*composite).child("title"));
             assert(title && (*title).text.read() == (*composite).read_title() && !(*title).text.read().empty());
-            const gf::FontSpec font = (*title).font.read();
+            // The label's own font (unset would mean inherited): the capsule sets it.
+            const std::optional<gf::FontSpec> own_font = (*title).font.read();
+            assert(own_font.has_value());
+            const gf::FontSpec font = *own_font;
             assert(font.weight == 700 && font.role == gf::FontRole::control);
 #if defined(GAMES_GUI_FORMS_APP_FONTS)
             // The family is the app-loaded Barlow Condensed, live, and the composite's context
