@@ -90,7 +90,7 @@ void Collection::initialize_control_tree() {
     (*shelf_).open = std::bind_front(&Collection::open_entry, this);
     (*shelf_).bind_masters(model_);
     (*shelf_).select(active_);
-    capsule_ = gf::make_control<CommandCapsule>(gf::StableId("collection.capsule"), sprites_);
+    capsule_ = gf::make_control<CommandCapsule>(gf::StableId("collection.capsule"));
     add_child(capsule_);
     (*capsule_).back = std::bind_front(&Collection::back, this);
     (*capsule_).command = std::bind_front(&Collection::run_command, this);

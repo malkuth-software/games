@@ -314,6 +314,23 @@ int main() {
         assert(!(*shelf).visible.read() && (*eggy).visible.read() && (*capsule).visible.read());
         // In a game the capsule and the help link stay clickable over a held pointer.
         assert(window.pointer_release_regions().size() == 2);
+        {
+            // The capsule is a GUI.Forms composite: its pill is the document's part, and its
+            // title the document's label, showing the game's name in the capsule's face (the
+            // app-loaded Barlow Condensed once GUI.Forms carries claude/app-fonts, the bundled
+            // control face until then), laid out after the back button.
+            const std::shared_ptr<CommandCapsule> composite = std::static_pointer_cast<CommandCapsule>(capsule);
+            assert((*composite).type_name() == "command-capsule");
+            assert(!(*composite).part_bounds("pill").empty());
+            const std::shared_ptr<gf::Label> title = std::dynamic_pointer_cast<gf::Label>((*composite).child("title"));
+            assert(title && (*title).text.read() == (*composite).read_title() && !(*title).text.read().empty());
+            const gf::FontSpec font = (*title).font.read();
+            assert(font.weight == 700 && font.role == gf::FontRole::control);
+#if defined(GAMES_GUI_FORMS_APP_FONTS)
+            assert(font.family != gf::FontFamilyId{});
+#endif
+            assert((*title).visible.read() && (*title).arranged_bounds().x > (*button(*capsule, "capsule.back")).arranged_bounds().x);
+        }
         assert(!std::filesystem::exists(scratch / "eggy-v1.txt"));
         click(window, *eggy, {200, 200}); // Begin the first climb, using nested coordinates.
         assert((*button(*capsule, "capsule.back")).perform_click());

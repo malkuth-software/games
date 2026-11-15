@@ -35,10 +35,20 @@ target_link_libraries(vendor_game_ui ${module_link_scope} ${GAMES_MODULE_LIBRARI
     game_audio_adapters game_text_frames game_felt game_table_art game_wood GUIForms::Application)
 target_compile_definitions(vendor_game_ui INTERFACE _USE_MATH_DEFINES)
 add_library(game_ui ${GAMES_MODULE_SOURCES} "${GAMES_CATALOG_DIR}/game_registry.cpp" shared/cards/table.cpp shared/cards/dealer.cpp src/presentation.cpp shared/puzzles/puzzle_view.cpp src/collection.cpp src/open_link.cpp
-    games/sudoku/src/sudoku_view.cpp src/suite.cpp src/text_sprites.cpp src/shelf.cpp src/capsule.cpp shared/puzzles/kitten.cpp
+    games/sudoku/src/sudoku_view.cpp src/suite.cpp src/text_sprites.cpp src/shelf.cpp src/capsule.cpp src/capsule_title_face.cpp shared/puzzles/kitten.cpp
     src/help_book.cpp src/help_content.cpp src/card_remarks.cpp src/settings_sheet.cpp
     src/suite_model.cpp src/paper_sheet.cpp)
 target_include_directories(game_ui PUBLIC src PRIVATE shared/felt)
+# The capsule is a GUI.Forms composite: its class derives from the one the form compiler
+# generates from controls/command-capsule.control. capsule.hpp includes the generated header,
+# so every target that includes it (the tests) sees the generated directory.
+gui_forms_add_control(game_ui controls/command-capsule.control CLASS CommandCapsuleControl NAMESPACE games)
+target_include_directories(game_ui PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/gui_forms_controls")
+# The capsule title's app-loaded face (src/capsule_title_face.cpp) needs GUI.Forms'
+# app-font API (claude/app-fonts); until the pin carries it, the bundled fallback draws it.
+if(GAMES_GUI_FORMS_APP_FONTS)
+    target_compile_definitions(game_ui PRIVATE GAMES_GUI_FORMS_APP_FONTS=1)
+endif()
 target_link_libraries(game_ui PUBLIC game_rules game_solver game_raster sudoku_generator vendor_game_ui paper_core
     ambient_core game_wood)
 if(WIN32)
