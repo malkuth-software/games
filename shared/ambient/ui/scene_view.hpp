@@ -20,8 +20,9 @@
 #include "sound_desk.hpp"
 
 #include "gui_forms/basic_controls.hpp"
+#include "gui_forms/drag/drag_tracker/drag_tracker.hpp"
 #include "gui_forms/timer.hpp"
-#include "routed_input.hpp"
+#include "gui_forms/events/key_events/key_events.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -51,7 +52,7 @@ struct HostSetup {
 
 class HelpCard;
 
-class SceneView : public games::RoutedInput<gf::Control>, public games::CommandSource {
+class SceneView : public gf::Control, public games::CommandSource {
   public:
     SceneView(gf::StableId id, HostSetup setup, std::unique_ptr<Scenery> scenery, ViewOptions options);
     ~SceneView() override;
@@ -59,11 +60,13 @@ class SceneView : public games::RoutedInput<gf::Control>, public games::CommandS
     void initialize_control_tree();
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void handle_pointer(gf::PointerEvent& event) override;
-    void handle_key(gf::KeyEvent& event) override;
-    void on_key_bubble(gf::KeyEvent& event) override {
-        handle_key(event);
-    }
+    void on_mouse_down(gf::MouseEventArgs& event) override;
+    void on_mouse_up(gf::MouseEventArgs& event) override;
+    void on_mouse_move(gf::MouseEventArgs& event) override;
+    void on_mouse_leave() override;
+    void on_key_down(gf::KeyEventArgs& event) override;
+    void on_key_up(gf::KeyEventArgs& event) override;
+    void on_key_bubble(gf::KeyEvent& event) override;
 
     void activate();
     void set_cabinet(bool foreground, bool music, bool sound, bool reduced = false);
@@ -84,6 +87,8 @@ class SceneView : public games::RoutedInput<gf::Control>, public games::CommandS
     [[nodiscard]] Rates rates() const;
 
   private:
+    bool pointer_fraction(gf::Point local, double& x, double& y) const;
+    void key_input(gf::KeyEventArgs& event, bool down);
     HostSetup setup_;
     std::unique_ptr<Scenery> scenery_;
     ViewOptions options_;
@@ -116,6 +121,16 @@ class SceneView : public games::RoutedInput<gf::Control>, public games::CommandS
     void update_card();
     bool window_active_{true};
     bool dragging_{};
+    // The scenery drag's session runs on GUI.Forms' DragTracker: a primary press on a live
+    // scene starts it at once (the scenery took the press), the moves go to the scenery through
+    // on_mouse_move, and the one end comes back through finish_drag, which hands the scenery its
+    // release at the last point, whatever the end (the scenery has no cancel: Escape or a lost
+    // capture lets go where the pointer was). Pausing, the help card or going behind the shelf
+    // ends it first (end_scenery_drag).
+    gf::DragTracker drag_{*this};
+    void plan_drag(gf::DragPlan& plan);
+    void finish_drag(const gf::DragTrackerFrame& frame);
+    void end_scenery_drag();
 
     // Pacing and presentation counters for measurement, printed to the error stream
     // when the view detaches if GAMES_SCENE_TRACE is set (see Stillwater's HANDOFF.md).

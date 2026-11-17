@@ -16,7 +16,7 @@
 
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/timer.hpp"
-#include "routed_input.hpp"
+#include "gui_forms/events/key_events/key_events.hpp"
 
 #include <chrono>
 #include <deque>
@@ -40,16 +40,19 @@ struct Options {
     bool dev = false;  // separate save file; MZ_SCRIPT allowed
 };
 
-class MazeView final : public games::RoutedInput<gf::Control>, public games::CommandSource {
+class MazeView final : public gf::Control, public games::CommandSource {
 public:
     MazeView(gf::StableId id, Options opt);
     static constexpr bool initialize_tree_after_construction = true;
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& p, gf::Rect damage) override;
-    void handle_pointer(gf::PointerEvent& e) override;
-    void handle_key(gf::KeyEvent& e) override;
-    void on_key_bubble(gf::KeyEvent& e) override { handle_key(e); }
+    void on_mouse_down(gf::MouseEventArgs& e) override;
+    void on_mouse_up(gf::MouseEventArgs& e) override;
+    void on_mouse_move(gf::MouseEventArgs& e) override;
+    void on_mouse_click(gf::MouseEventArgs& e) override;
+    void on_key_down(gf::KeyEventArgs& e) override;
+    void on_key_bubble(gf::KeyEvent& e) override;
     void activate();
     void set_cabinet(bool foreground, bool music, bool sound, bool reduced = false);
     std::vector<games::GameCommand> commands() const override;
@@ -106,6 +109,11 @@ private:
     int credits_page_ = 0;
     std::vector<Button> buttons_;
     std::string pressed_, hover_;
+    void track_pointer(gf::Point local);
+    std::string hit_button() const;
+    void key_down(gf::KeyEventArgs& e);
+    // The painted button a release ended, for the click that follows it.
+    std::string released_;
     double mouse_x_ = 0, mouse_y_ = 0;
     bool cab_front_ = true, cab_music_ = true, cab_sound_ = true;
     std::vector<std::pair<double, std::string>> script_;

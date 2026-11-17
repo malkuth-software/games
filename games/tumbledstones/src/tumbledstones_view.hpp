@@ -15,10 +15,12 @@
 #include "surface.hpp"
 
 #include "gui_forms/basic_controls.hpp"
+#include "gui_forms/drag/drag_tracker/drag_tracker.hpp"
 #include "gui_forms/threading.hpp"
 #include "gui_forms/timer.hpp"
-#include "routed_input.hpp"
+#include "gui_forms/events/key_events/key_events.hpp"
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <memory>
@@ -34,7 +36,7 @@ struct Options {
     bool dev = false;     // a separate save file, for tests and development
 };
 
-class TumbledStonesView final : public games::RoutedInput<gf::Control>, public games::CommandSource {
+class TumbledStonesView final : public gf::Control, public games::CommandSource {
 public:
     TumbledStonesView(gf::StableId id, Options options);
     ~TumbledStonesView() override;
@@ -42,11 +44,13 @@ public:
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void handle_pointer(gf::PointerEvent& event) override;
-    void handle_key(gf::KeyEvent& event) override;
-    void on_key_bubble(gf::KeyEvent& event) override {
-        handle_key(event);
-    }
+    void on_mouse_down(gf::MouseEventArgs& event) override;
+    void on_mouse_up(gf::MouseEventArgs& event) override;
+    void on_mouse_move(gf::MouseEventArgs& event) override;
+    void on_mouse_leave() override;
+    void on_mouse_click(gf::MouseEventArgs& event) override;
+    void on_key_down(gf::KeyEventArgs& event) override;
+    void on_key_bubble(gf::KeyEvent& event) override;
 
     void activate();
     void set_cabinet(bool foreground, bool music, bool sound, bool reduced = false);
@@ -112,6 +116,20 @@ private:
     double drag_x_ = 0, drag_y_ = 0;
     int drag_to_ = -1;
     int pressed_button_ = 0;
+    // What a release ended, for the click that follows it: the panel button
+    // pressed, or the tray cell pressed without a drag.
+    int released_button_ = 0;
+    int released_cell_ = -1;
+    // The stone drag runs on GUI.Forms' DragTracker: a primary press on a stone arms it, past
+    // 0.2 of a cell it starts (plan_drag lifts the stone), and its targets are the pressed
+    // cell's up to four neighbours, hit while the pointer is over one; the release swaps with
+    // the target or sets the stone down (finish_drag). Escape, a lost capture or the window's
+    // deactivation set it down without a swap. `drag_targets_` is the plan's borrowed storage.
+    gf::DragTracker drag_{*this};
+    std::array<gf::DragTarget, 4> drag_targets_{};
+    void plan_drag(gf::DragPlan& plan);
+    void preview_drag(const gf::DragTrackerFrame& frame);
+    void finish_drag(const gf::DragTrackerFrame& frame);
     int land_sounds_ = 0;
     bool help_ = false;
     // The workshop: shapes, minerals and lit pictures made on a worker while play goes on.
@@ -153,6 +171,8 @@ private:
     [[nodiscard]] int panel_button(double x, double y) const;
     void press_panel_button(int button);
     void cancel_press();
+    void show_hover(int hover);
+    void key_down(gf::KeyEventArgs& event);
 
     void persist();
     [[nodiscard]] bool restore();

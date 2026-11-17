@@ -391,8 +391,16 @@ static gf::ImageId load_art(gf::Window& window, const std::string& name) {
     gf::ImageLoadResult result = window.load_png(bytes);
     return result ? result.image : gf::ImageId{};
 }
-PuzzleView::PuzzleView(gf::StableId id, PuzzleKind kind) : games::RoutedInput<gf::Control>(std::move(id)), game(kind) {
+PuzzleView::PuzzleView(gf::StableId id, PuzzleKind kind) : gf::Control(std::move(id)), game(kind) {
+    drag_tracker_.callbacks.plan = gf::Delegate<gf::DragPlan&>::bind<PuzzleView, &PuzzleView::plan_drag>(*this);
+    drag_tracker_.callbacks.preview =
+        gf::Delegate<const gf::DragTrackerFrame&>::bind<PuzzleView, &PuzzleView::preview_drag>(*this);
+    drag_tracker_.callbacks.finished =
+        gf::Delegate<const gf::DragTrackerFrame&>::bind<PuzzleView, &PuzzleView::finish_drag>(*this);
     focusable = true;
+    // Every release over the view is a click: a quick second press is another click, not a
+    // double click.
+    set_style(gf::ControlStyles::standard_double_click, false);
     accessible_name = puzzle_title(kind);
     if (!game.load(path())) {
         if (game.kind == PuzzleKind::cube || game.kind == PuzzleKind::solve) {
@@ -467,6 +475,8 @@ void PuzzleView::on_attached_to_window() {
     clock_start_ = gf::FrameClock::now();
 }
 void PuzzleView::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
+    drag_subject_ = DragSubject::none;
+    drag_tracker_.owner_detaching(window);
     persist();
     framebuffer_.reset();
     surface_.reset();
@@ -2799,6 +2809,7 @@ void PuzzleView::new_game() {
     untangle_idle_ = 0;
     swat_peg_ = frozen_nudge_ = -1;
     puffs_.clear();
+    end_tracked_drag();
     kitten_.reset(game.state.seed);
     cat_carried_ = false;
     // With more than one colour of yarn, say once what the colours mean.
@@ -3000,7 +3011,8 @@ void PuzzleView::gem_drag(gf::Point local) {
     if (std::abs(o.x) + std::abs(o.y) >= .72) {
         const int from = drag_;
         drag_ = -1;
-        set_pointer_capture(false);
+        gem_dragging_ = false;
+        end_tracked_drag();
         gem_swap(from,
                  from +
                      (o.x > 0   ? 1
@@ -3260,353 +3272,550 @@ void PuzzleView::tick() {
     if (!moving && timer_)
         (*timer_).stop();
 }
-void PuzzleView::handle_pointer(gf::PointerEvent& e) {
-    const gf::Point local_position = point_from_window(e.position);
+// The pointer, in GUI.Forms' raisers. Each puzzle reads the press, the moves
+// and the release in its own way (pointer_down, pointer_move, pointer_up):
+// tracing on the cube, swapping or dragging gems, carrying untangle pegs and
+// the cat, carrying and placing solve pieces, setting sticks. Two clicks are
+// the derived click: a tray piece pressed and released in place turns (when
+// it was already chosen), and a gem pressed and released in place is picked
+// or dropped. A capture lost mid-trace ends the cube's trace.
+void PuzzleView::on_mouse_move(gf::MouseEventArgs& e) {
+    pointer_move(e);
+    // The kind's own geometry ran first; the session then sees the move (it may plan the drag
+    // past its threshold). A gem swapped by its pull has already ended the session.
+    if (drag_tracker_.running()) {
+        const gf::PointerEvent moved = gf::pointer_event_of(e);
+        if (drag_tracker_.pointer(moved))
+            e.handled = true;
+    }
+    gf::Control::on_mouse_move(e);
+}
+
+void PuzzleView::on_mouse_down(gf::MouseEventArgs& e) {
+    solve_click_ = -1;
+    gem_click_ = -1;
+    pointer_down(e);
+    if (is_alive())
+        gf::Control::on_mouse_down(e);
+}
+
+void PuzzleView::on_mouse_up(gf::MouseEventArgs& e) {
+    pointer_up(e);
+    gf::Control::on_mouse_up(e);
+}
+
+void PuzzleView::on_mouse_click(gf::MouseEventArgs& e) {
+    const gf::Point local_position = e.location;
+    const int solve_click = solve_click_;
+    const int gem_click = gem_click_;
+    solve_click_ = -1;
+    gem_click_ = -1;
+    if (!panel_ && game.kind == PuzzleKind::solve && solve_click >= 0 &&
+        solve_click < static_cast<int>(cells_.size()) &&
+        in_rect(cells_[static_cast<std::size_t>(solve_click)], local_position)) {
+        if (tray_turn_) {
+            rotation_ = (rotation_ + 1) % 4;
+            sound_play("puzzle_solve_rotate", sound_);
+        }
+        tray_turn_ = false;
+        invalidate_scene();
+    } else if (!panel_ && game.kind == PuzzleKind::gems && gem_click >= 0 && hit(local_position) == gem_click) {
+        gem_pick_ = gem_pick_ == gem_click ? -1 : gem_click;
+        if (gem_pick_ >= 0)
+            sound_play("gems_hover", sound_);
+        invalidate_scene();
+    }
+    if (is_alive())
+        gf::Control::on_mouse_click(e);
+}
+
+// A capture lost before the release (a modal, the window deactivating) ends
+// the cube's trace, as the release would.
+void PuzzleView::on_mouse_capture_changed() {
+    if (game.kind == PuzzleKind::cube && tracing_) {
+        tracing_ = false;
+        orbit_ = false;
+        persist();
+    }
+    gf::Control::on_mouse_capture_changed();
+}
+
+void PuzzleView::pointer_move(gf::MouseEventArgs& e) {
+    const gf::Point local_position = e.location;
     if (panel_)
         return;
     int cell = hit(local_position);
-    if (e.action == gf::PointerAction::move) {
-        if (game.kind == PuzzleKind::sticks) {
-            int next = -1;
-            for (int i = 0; i < 21; ++i)
-                if (in_rect(clues_[i], local_position))
-                    next = 100 + i;
-            if (next != hover_) {
-                hover_ = next;
-                invalidate_scene();
-            }
-        }
-        if (game.kind == PuzzleKind::solve && drag_ >= 0) {
-            solve_pointer_ = local_position;
+    if (game.kind == PuzzleKind::sticks) {
+        int next = -1;
+        for (int i = 0; i < 21; ++i)
+            if (in_rect(clues_[i], local_position))
+                next = 100 + i;
+        if (next != hover_) {
+            hover_ = next;
             invalidate_scene();
-            e.handled = true;
         }
-
-        if (game.kind == PuzzleKind::gems && drag_ >= 0)
-            gem_drag(local_position);
-        if (game.kind == PuzzleKind::gems) {
-            if (hover_ != cell) {
-                hover_ = cell;
-                if (reduced_) {
-                    request_render();
-                    invalidate_animation(board_);
-                }
-            }
-        }
-        if (game.kind == PuzzleKind::untangle)
-            pointer_seen_ = local_position;
-        if (game.kind == PuzzleKind::untangle && cat_carried_) {
-            const gf::Rect before = kitten_.paint_bounds(board_);
-            kitten_.carry({(local_position.x - board_.x) / board_.width, (local_position.y - board_.y) / board_.height});
-            invalidate_animation(gf::Rect::united(before, kitten_.paint_bounds(board_)));
-            e.handled = true;
-        }
-        if (game.kind == PuzzleKind::untangle && drag_ < 0 && hover_ != cell) {
-            hover_ = cell;
-            invalidate_animation(untangle_board_damage());
-        }
-        if (game.kind == PuzzleKind::untangle && drag_ >= 0) {
-            drag_position_ = {
-                std::clamp((local_position.x - board_.x) / board_.width, .035, .965),
-                std::clamp((local_position.y - board_.y) / board_.height, .035, .965)};
-            // Keep yarn and heads in the same input frame, even before the next timer tick.
-            if (update_untangle_geometry()) {
-                invalidate_static_scene();
-            }
-            invalidate_animation(untangle_board_damage());
-        }
-        if (game.kind == PuzzleKind::cube) {
-            if (!tracing_) {
-                gf::Rect bounds = client_rectangle();
-                target_yaw_ =
-                    std::clamp(.75 + (local_position.x / bounds.width - .5) * .8, .40, 1.10);
-                target_pitch_ =
-                    std::clamp(-.56 + (local_position.y / bounds.height - .5) * .55, -.78, -.34);
-                if (timer_)
-                    (*timer_).start();
-            }
-            if (tracing_ && cell >= 0) {
-                const int pair = game.state.stage - 1;
-                const bool held = pair >= 0 && pair < game.cube_pairs();
-                const std::size_t before = held ? game.state.paths[pair].size() : 0;
-                bool extended = game.cube_extend(cell);
-                // A quick diagonal flick skips a cell; route through the free corner cell.
-                if (!extended && pair >= 0 && pair < game.cube_pairs() &&
-                    !game.state.paths[pair].empty()) {
-                    const int back = game.state.paths[pair].back();
-                    for (int m = 0; m < 96 && !extended; ++m)
-                        if (PuzzleGame::cube_adjacent(back, m) &&
-                            PuzzleGame::cube_adjacent(m, cell)) {
-                            PuzzleGame trial = game;
-                            if (trial.cube_extend(m) && trial.cube_extend(cell)) {
-                                game = trial;
-                                extended = true;
-                            }
-                        }
-                }
-                if (extended)
-                    changed(cube_step_sound(game, before));
-                else if (held && cell != hover_ && cube_refused(game, cell))
-                    sound_play("nature_cube_blocked", sound_);
-            }
-            if (hover_ != cell)
-                raster_dirty_ = true;
-            hover_ = cell;
-            last_pointer_ = local_position;
-            // Rendering happens once per frame in tick(), however many moves arrive.
-            if (timer_)
-                (*timer_).start();
-        }
-        return;
     }
-    if (e.action == gf::PointerAction::down) {
-        if (attached_window())
-            static_cast<void>((*attached_window()).request_focus(shared_from_this()));
-        if (game.state.over)
-            return;
-        if (game.kind == PuzzleKind::cube) {
-            last_pointer_ = local_position;
-            orbit_ = false;
-            if (e.button != gf::PointerButton::primary)
-                return;
-            if (cell >= 0) {
-                bool started = false;
-                for (int pair = 0; pair < game.cube_pairs(); ++pair)
-                    if (!game.state.paths[pair].empty() && game.state.paths[pair].back() == cell &&
-                        !game.cube_pair(cell)) {
-                        game.state.stage = pair + 1;
-                        started = true;
-                    }
-                if (!started)
-                    started = game.cube_start(cell);
-                if (started) {
-                    tracing_ = true;
-                    set_pointer_capture(true);
-                    target_yaw_ = yaw_;
-                    target_pitch_ = pitch_;
-                    changed("nature_cube_pick");
-                }
-            }
-            return;
-        }
-        if (animation_duration_ > 0)
-            return;
-        if (game.kind == PuzzleKind::gems && cell >= 0) {
-            gem_idle_ = 0;
-            gem_hint_ = gem_hint_to_ = -1;
-            if (gem_pick_ >= 0 && cell != gem_pick_ &&
-                std::abs(gem_pick_ / 8 - cell / 8) + std::abs(gem_pick_ % 8 - cell % 8) == 1) {
-                gem_swap(gem_pick_, cell, 0);
-                e.handled = true;
-                return;
-            }
-            drag_ = cell;
-            gem_press_ = local_position;
-            gem_dragging_ = false;
-            gem_spring_ = -1;
-            gem_offset_ = {};
-            set_pointer_capture(true);
-            if (timer_)
-                (*timer_).start();
-        } else if (game.kind == PuzzleKind::untangle) {
-            const Point2 spot{(local_position.x - board_.x) / board_.width,
-                              (local_position.y - board_.y) / board_.height};
-            if (kitten_.hit(spot) || (cell >= 0 && kitten_.perch() == cell)) {
-                // The cat is in the way: pick it up, and set it down somewhere else.
-                kitten_.pick_up();
-                kitten_.carry(spot);
-                cat_carried_ = true;
-                game.message = cell >= 0 ? "The cat was sitting on that peg." : "Up you come.";
-                set_pointer_capture(true);
-                sound_play("untangle_grab", sound_);
-            } else if (cell >= 0 && game.untangle_frozen(cell)) {
-                frozen_nudge_ = cell;
-                frozen_nudge_t_ = 0;
-                game.message = "That peg is frozen until its threads are clear.";
-            } else if (cell >= 0) {
-                drag_ = cell;
-                drag_position_ = game.state.nodes[cell];
-                untangle_idle_ = 0;
-                set_pointer_capture(true);
-                sound_play("untangle_grab", sound_);
-                if (game.untangle_layers() > 1) {
-                    invalidate_static_scene();
-                    invalidate_animation(untangle_board_damage());
-                }
-            }
-            if (timer_)
-                (*timer_).start();
-        } else if (game.kind == PuzzleKind::pegs) {
-            if (cell >= 0 && cell < 4)
-                selection_ = cell;
-            if (cell >= 4 && cell < 10 && !game.state.over) {
-                guess_[selection_] = cell - 3;
-                selection_ = (selection_ + 1) % 4;
-                sound_play("four_pegs_place", sound_);
-                persist();
-            }
-        } else if (game.kind == PuzzleKind::atom && cell >= 0) {
-            if (cell < 16 && game.mark_atom(cell))
-                changed("atom_probe_mark");
-            else if (cell >= 16 && game.probe(cell - 16))
-                changed("atom_probe_fire");
-        } else if (game.kind == PuzzleKind::solve) {
-            solve_pointer_ = local_position;
-            const bool secondary = e.button == gf::PointerButton::secondary;
-            if (drag_ >= 0 && secondary) {
-                // Right click while carrying a piece turns it about its center.
-                rotation_ = (rotation_ + 1) % 4;
-                solve_recenter();
-                sound_play("puzzle_solve_rotate", sound_);
-            } else if (cell >= 0 && !secondary && !game.state.over) {
-                // Pressing the piece that is already chosen, without dragging, turns it.
-                tray_turn_ = cell == selection_;
-                press_point_ = local_position;
-                solve_select(cell);
-                for (int i = 0; i < game.solve_atoms(); ++i)
-                    if (game.state.grid[i] / 4 == cell + 1) {
-                        game.remove_piece(cell);
-                        break;
-                    }
-                lifted_ = false;
-                solve_recenter();
-                sound_play("puzzle_solve_pickup", sound_);
-                drag_ = cell;
-                set_pointer_capture(true);
-            } else if (in_rect(board_, local_position) && !game.state.over) {
-                const int atom = solve_atom_at(local_position);
-                const int piece = atom < 0 ? -1 : game.state.grid[atom] / 4 - 1;
-                if (piece >= 0 && secondary) {
-                    // Right click returns a placed piece to the tray.
-                    if (game.remove_piece(piece)) {
-                        solve_select(piece);
-                        changed("puzzle_solve_pickup");
-                    }
-                } else if (piece >= 0 && solve_lift(piece)) {
-                    drag_ = piece;
-                    set_pointer_capture(true);
-                    sound_play("puzzle_solve_pickup", sound_);
-                } else if (piece < 0 && !secondary) {
-                    // Clicking empty frame space drops the selected piece there, kept inside the
-                    // frame.
-                    int mx = 0, my = 0;
-                    for (const PieceCell& c : game.piece_cells(selection_, rotation_, flip_)) {
-                        mx = std::max(mx, c.x + 1);
-                        my = std::max(my, c.y + 1);
-                    }
-                    const double unit = solve_unit();
-                    const int px = std::clamp(static_cast<int>(std::lround(
-                                                  (local_position.x - board_.x) / unit - mx * .5)),
-                                              0, std::max(0, game.solve_columns() - mx)),
-                              py = std::clamp(static_cast<int>(std::lround(
-                                                  (local_position.y - board_.y) / unit - my * .5)),
-                                              0, std::max(0, game.solve_rows() - my));
-                    if (game.place_piece(selection_, px, py, rotation_, flip_))
-                        changed("puzzle_solve_place");
-                    else
-                        sound_play("puzzle_solve_no_fit", sound_);
-                }
-            }
-        } else if (game.kind == PuzzleKind::sticks) {
-            if (cell >= 0 &&
-                game.set_stick(cell, e.button == gf::PointerButton::secondary ? 0 : palette_))
-                changed(palette_ == 1 ? "sticks_stones_stone_place" : "sticks_stones_stick_place");
-            if (cell >= 37 && cell < 44)
-                palette_ = cell - 36;
-        }
+    if (game.kind == PuzzleKind::solve && drag_ >= 0) {
+        solve_pointer_ = local_position;
         invalidate_scene();
         e.handled = true;
     }
-    if (e.action == gf::PointerAction::up) {
-        if (!(game.kind == PuzzleKind::solve && drag_ >= 0 &&
-              e.button == gf::PointerButton::secondary))
-            set_pointer_capture(false);
-        if (game.kind == PuzzleKind::solve && drag_ >= 0 &&
-            e.button != gf::PointerButton::secondary) {
-            const int carried = drag_;
-            drag_ = -1;
-            solve_pointer_ = local_position;
-            int x = 0, y = 0;
-            const bool clicked = std::hypot(local_position.x - press_point_.x,
-                                            local_position.y - press_point_.y) < 5;
-            if (!lifted_ && clicked && carried >= 0 && carried < static_cast<int>(cells_.size()) &&
-                in_rect(cells_[static_cast<std::size_t>(carried)], local_position)) {
-                if (tray_turn_) {
-                    rotation_ = (rotation_ + 1) % 4;
-                    sound_play("puzzle_solve_rotate", sound_);
-                }
-                tray_turn_ = false;
-                invalidate_scene();
-            } else if (in_rect(board_, local_position) && solve_snap(x, y) &&
-                       game.place_piece(selection_, x, y, rotation_, flip_))
-                changed("puzzle_solve_place");
-            else {
-                // A piece carried from the frame and dropped nowhere useful goes back where it was.
-                if (lifted_ && in_rect(board_, local_position)) {
-                    sound_play("puzzle_solve_no_fit", sound_);
-                    game.place_piece(selection_, lift_x_, lift_y_, lift_rotation_, lift_flip_);
-                }
-                persist();
+
+    if (game.kind == PuzzleKind::gems && drag_ >= 0)
+        gem_drag(local_position);
+    if (game.kind == PuzzleKind::gems) {
+        if (hover_ != cell) {
+            hover_ = cell;
+            if (reduced_) {
+                request_render();
+                invalidate_animation(board_);
             }
-            lifted_ = false;
-            invalidate_scene();
         }
-        if (game.kind == PuzzleKind::cube) {
-            tracing_ = false;
-            orbit_ = false;
-            persist();
+    }
+    if (game.kind == PuzzleKind::untangle)
+        pointer_seen_ = local_position;
+    if (game.kind == PuzzleKind::untangle && cat_carried_) {
+        const gf::Rect before = kitten_.paint_bounds(board_);
+        kitten_.carry({(local_position.x - board_.x) / board_.width, (local_position.y - board_.y) / board_.height});
+        invalidate_animation(gf::Rect::united(before, kitten_.paint_bounds(board_)));
+        e.handled = true;
+    }
+    if (game.kind == PuzzleKind::untangle && drag_ < 0 && hover_ != cell) {
+        hover_ = cell;
+        invalidate_animation(untangle_board_damage());
+    }
+    if (game.kind == PuzzleKind::untangle && drag_ >= 0) {
+        drag_position_ = {
+            std::clamp((local_position.x - board_.x) / board_.width, .035, .965),
+            std::clamp((local_position.y - board_.y) / board_.height, .035, .965)};
+        // Keep yarn and heads in the same input frame, even before the next timer tick.
+        if (update_untangle_geometry()) {
+            invalidate_static_scene();
         }
-        if (game.kind == PuzzleKind::untangle && cat_carried_) {
-            cat_carried_ = false;
-            kitten_.put_down();
-            game.message = "";
-            invalidate_animation(kitten_.paint_bounds(board_));
-        }
-        if (game.kind == PuzzleKind::untangle && drag_ >= 0) {
-            const std::array<int, 96> marks = game.state.marks;
-            game.move_node(drag_, drag_position_);
-            drag_ = -1;
-            untangle_idle_ = 0;
-            untangle_released(marks);
-            changed("untangle_release");
-        }
-        if (game.kind == PuzzleKind::gems && drag_ >= 0) {
-            const int from = drag_;
-            drag_ = -1;
-            const double reach = std::abs(gem_offset_.x) + std::abs(gem_offset_.y);
-            if (gem_dragging_) {
-                gem_dragging_ = false;
-                const int sx = gem_offset_.x > 0   ? 1
-                               : gem_offset_.x < 0 ? -1
-                                                   : 0,
-                          sy = gem_offset_.y > 0   ? 1
-                               : gem_offset_.y < 0 ? -1
-                                                   : 0;
-                const int col = from % 8 + sx, row = from / 8 + sy;
-                if (reach >= .3 && (sx || sy) && col >= 0 && col < 8 && row >= 0 && row < 8)
-                    gem_swap(from, row * 8 + col, reach);
-                else
-                    gem_spring_ = from; // not far enough: it settles back into its socket
-            } else if (cell >= 0 && cell != from &&
-                       std::abs(from / 8 - cell / 8) + std::abs(from % 8 - cell % 8) == 1)
-                gem_swap(from, cell, 0);
-            else if (cell == from) {
-                gem_pick_ = gem_pick_ == from ? -1 : from;
-                if (gem_pick_ >= 0)
-                    sound_play("gems_hover", sound_);
-                invalidate_scene();
-            }
+        invalidate_animation(untangle_board_damage());
+    }
+    if (game.kind == PuzzleKind::cube) {
+        if (!tracing_) {
+            gf::Rect bounds = client_rectangle();
+            target_yaw_ =
+                std::clamp(.75 + (local_position.x / bounds.width - .5) * .8, .40, 1.10);
+            target_pitch_ =
+                std::clamp(-.56 + (local_position.y / bounds.height - .5) * .55, -.78, -.34);
             if (timer_)
                 (*timer_).start();
         }
-        e.handled = true;
+        if (tracing_ && cell >= 0) {
+            const int pair = game.state.stage - 1;
+            const bool held = pair >= 0 && pair < game.cube_pairs();
+            const std::size_t before = held ? game.state.paths[pair].size() : 0;
+            bool extended = game.cube_extend(cell);
+            // A quick diagonal flick skips a cell; route through the free corner cell.
+            if (!extended && pair >= 0 && pair < game.cube_pairs() &&
+                !game.state.paths[pair].empty()) {
+                const int back = game.state.paths[pair].back();
+                for (int m = 0; m < 96 && !extended; ++m)
+                    if (PuzzleGame::cube_adjacent(back, m) &&
+                        PuzzleGame::cube_adjacent(m, cell)) {
+                        PuzzleGame trial = game;
+                        if (trial.cube_extend(m) && trial.cube_extend(cell)) {
+                            game = trial;
+                            extended = true;
+                        }
+                    }
+            }
+            if (extended)
+                changed(cube_step_sound(game, before));
+            else if (held && cell != hover_ && cube_refused(game, cell))
+                sound_play("nature_cube_blocked", sound_);
+        }
+        if (hover_ != cell)
+            raster_dirty_ = true;
+        hover_ = cell;
+        last_pointer_ = local_position;
+        // Rendering happens once per frame in tick(), however many moves arrive.
+        if (timer_)
+            (*timer_).start();
+    }
+    return;
+}
+
+void PuzzleView::pointer_down(gf::MouseEventArgs& e) {
+    const gf::Point local_position = e.location;
+    if (panel_)
+        return;
+    int cell = hit(local_position);
+    if (attached_window())
+        static_cast<void>((*attached_window()).request_focus(shared_from_this()));
+    if (game.state.over)
+        return;
+    if (game.kind == PuzzleKind::cube) {
+        last_pointer_ = local_position;
+        orbit_ = false;
+        if (e.button != gf::PointerButton::primary)
+            return;
+        if (cell >= 0) {
+            bool started = false;
+            for (int pair = 0; pair < game.cube_pairs(); ++pair)
+                if (!game.state.paths[pair].empty() && game.state.paths[pair].back() == cell &&
+                    !game.cube_pair(cell)) {
+                    game.state.stage = pair + 1;
+                    started = true;
+                }
+            if (!started)
+                started = game.cube_start(cell);
+            if (started) {
+                tracing_ = true;
+                set_pointer_capture(true);
+                target_yaw_ = yaw_;
+                target_pitch_ = pitch_;
+                changed("nature_cube_pick");
+            }
+        }
+        return;
+    }
+    if (animation_duration_ > 0)
+        return;
+    if (game.kind == PuzzleKind::gems && cell >= 0) {
+        gem_idle_ = 0;
+        gem_hint_ = gem_hint_to_ = -1;
+        if (gem_pick_ >= 0 && cell != gem_pick_ &&
+            std::abs(gem_pick_ / 8 - cell / 8) + std::abs(gem_pick_ % 8 - cell % 8) == 1) {
+            gem_swap(gem_pick_, cell, 0);
+            e.handled = true;
+            return;
+        }
+        // Only the primary button drags a gem (the tracker's sessions are primary).
+        if (e.button != gf::PointerButton::primary) {
+            e.handled = true;
+            return;
+        }
+        drag_ = cell;
+        gem_press_ = local_position;
+        gem_dragging_ = false;
+        gem_spring_ = -1;
+        gem_offset_ = {};
+        arm_drag(e, DragSubject::gem, gf::Rect{local_position.x - 1, local_position.y - 1, 2, 2}, 6);
+        if (timer_)
+            (*timer_).start();
+    } else if (game.kind == PuzzleKind::untangle) {
+        const Point2 spot{(local_position.x - board_.x) / board_.width,
+                          (local_position.y - board_.y) / board_.height};
+        if (kitten_.hit(spot) || (cell >= 0 && kitten_.perch() == cell)) {
+            // The cat is in the way: pick it up, and set it down somewhere else.
+            if (e.button != gf::PointerButton::primary) {
+                e.handled = true;
+                return;
+            }
+            kitten_.pick_up();
+            kitten_.carry(spot);
+            cat_carried_ = true;
+            game.message = cell >= 0 ? "The cat was sitting on that peg." : "Up you come.";
+            arm_drag(e, DragSubject::cat, gf::Rect{local_position.x - 1, local_position.y - 1, 2, 2}, 0);
+            sound_play("untangle_grab", sound_);
+        } else if (cell >= 0 && game.untangle_frozen(cell)) {
+            frozen_nudge_ = cell;
+            frozen_nudge_t_ = 0;
+            game.message = "That peg is frozen until its threads are clear.";
+        } else if (cell >= 0 && e.button == gf::PointerButton::primary) {
+            drag_ = cell;
+            drag_position_ = game.state.nodes[cell];
+            untangle_idle_ = 0;
+            arm_drag(e, DragSubject::untangle_peg, gf::Rect{local_position.x - 1, local_position.y - 1, 2, 2}, 0);
+            sound_play("untangle_grab", sound_);
+            if (game.untangle_layers() > 1) {
+                invalidate_static_scene();
+                invalidate_animation(untangle_board_damage());
+            }
+        }
+        if (timer_)
+            (*timer_).start();
+    } else if (game.kind == PuzzleKind::pegs) {
+        if (cell >= 0 && cell < 4)
+            selection_ = cell;
+        if (cell >= 4 && cell < 10 && !game.state.over) {
+            guess_[selection_] = cell - 3;
+            selection_ = (selection_ + 1) % 4;
+            sound_play("four_pegs_place", sound_);
+            persist();
+        }
+    } else if (game.kind == PuzzleKind::atom && cell >= 0) {
+        if (cell < 16 && game.mark_atom(cell))
+            changed("atom_probe_mark");
+        else if (cell >= 16 && game.probe(cell - 16))
+            changed("atom_probe_fire");
+    } else if (game.kind == PuzzleKind::solve) {
+        solve_pointer_ = local_position;
+        const bool secondary = e.button == gf::PointerButton::secondary;
+        if (drag_ >= 0 && secondary) {
+            // Right click while carrying a piece turns it about its center.
+            rotation_ = (rotation_ + 1) % 4;
+            solve_recenter();
+            sound_play("puzzle_solve_rotate", sound_);
+        } else if (cell >= 0 && !secondary && !game.state.over) {
+            // Pressing the piece that is already chosen, without dragging, turns it.
+            tray_turn_ = cell == selection_;
+            press_point_ = local_position;
+            solve_select(cell);
+            for (int i = 0; i < game.solve_atoms(); ++i)
+                if (game.state.grid[i] / 4 == cell + 1) {
+                    game.remove_piece(cell);
+                    break;
+                }
+            lifted_ = false;
+            solve_recenter();
+            sound_play("puzzle_solve_pickup", sound_);
+            drag_ = cell;
+            arm_drag(e, DragSubject::solve_piece, cells_[static_cast<std::size_t>(cell)], 5);
+        } else if (in_rect(board_, local_position) && !game.state.over) {
+            const int atom = solve_atom_at(local_position);
+            const int piece = atom < 0 ? -1 : game.state.grid[atom] / 4 - 1;
+            if (piece >= 0 && secondary) {
+                // Right click returns a placed piece to the tray.
+                if (game.remove_piece(piece)) {
+                    solve_select(piece);
+                    changed("puzzle_solve_pickup");
+                }
+            } else if (piece >= 0 && solve_lift(piece)) {
+                drag_ = piece;
+                arm_drag(e, DragSubject::solve_piece, gf::Rect{local_position.x - 1, local_position.y - 1, 2, 2}, 0);
+                sound_play("puzzle_solve_pickup", sound_);
+            } else if (piece < 0 && !secondary) {
+                // Clicking empty frame space drops the selected piece there, kept inside the
+                // frame.
+                int mx = 0, my = 0;
+                for (const PieceCell& c : game.piece_cells(selection_, rotation_, flip_)) {
+                    mx = std::max(mx, c.x + 1);
+                    my = std::max(my, c.y + 1);
+                }
+                const double unit = solve_unit();
+                const int px = std::clamp(static_cast<int>(std::lround(
+                                              (local_position.x - board_.x) / unit - mx * .5)),
+                                          0, std::max(0, game.solve_columns() - mx)),
+                          py = std::clamp(static_cast<int>(std::lround(
+                                              (local_position.y - board_.y) / unit - my * .5)),
+                                          0, std::max(0, game.solve_rows() - my));
+                if (game.place_piece(selection_, px, py, rotation_, flip_))
+                    changed("puzzle_solve_place");
+                else
+                    sound_play("puzzle_solve_no_fit", sound_);
+            }
+        }
+    } else if (game.kind == PuzzleKind::sticks) {
+        if (cell >= 0 &&
+            game.set_stick(cell, e.button == gf::PointerButton::secondary ? 0 : palette_))
+            changed(palette_ == 1 ? "sticks_stones_stone_place" : "sticks_stones_stick_place");
+        if (cell >= 37 && cell < 44)
+            palette_ = cell - 36;
+    }
+    invalidate_scene();
+    e.handled = true;
+}
+
+void PuzzleView::pointer_up(gf::MouseEventArgs& e) {
+    const gf::Point local_position = e.location;
+    if (panel_)
+        return;
+    int cell = hit(local_position);
+    // A primary release of a drag reaches the session first: dragging, it ends there and
+    // finish_drag drops (end_drag); only armed (short of the threshold), with no session (the
+    // press could not arm one), or a scripted hold ("drag" in scripted_action), the release is
+    // ended here as before.
+    const bool primary = e.button == gf::PointerButton::primary;
+    const bool holding = drag_subject_ != DragSubject::none || drag_ >= 0 || cat_carried_;
+    if (primary && holding) {
+        bool taken = false;
+        if (drag_tracker_.running()) {
+            const gf::PointerEvent released = gf::pointer_event_of(e);
+            taken = drag_tracker_.pointer(released);
+        }
+        if (!taken) {
+            drag_subject_ = DragSubject::none;
+            set_pointer_capture(false);
+            end_drag(true, local_position, cell);
+        }
+    } else if (!(game.kind == PuzzleKind::solve && drag_ >= 0 && !primary)) {
+        set_pointer_capture(false);
+    }
+    if (game.kind == PuzzleKind::cube) {
+        tracing_ = false;
+        orbit_ = false;
+        persist();
+    }
+    e.handled = true;
+}
+
+// Ends the drag of the current kind at `local_position` over `cell`: `commits` drops it (the
+// release), otherwise it is put back (Escape, a lost capture, a cancel). The cat is put down
+// either way.
+void PuzzleView::end_drag(bool commits, gf::Point local_position, int cell) {
+    if (game.kind == PuzzleKind::solve && drag_ >= 0 && !commits) {
+        // Escape, a lost capture or a cancel: a piece lifted from the frame goes back where it
+        // was; one taken from the tray stays in the tray.
+        drag_ = -1;
+        if (lifted_)
+            game.place_piece(selection_, lift_x_, lift_y_, lift_rotation_, lift_flip_);
+        lifted_ = false;
+        persist();
+        invalidate_scene();
+    }
+    if (game.kind == PuzzleKind::solve && drag_ >= 0) {
+        const int carried = drag_;
+        drag_ = -1;
+        solve_pointer_ = local_position;
+        int x = 0, y = 0;
+        const bool clicked = std::hypot(local_position.x - press_point_.x,
+                                        local_position.y - press_point_.y) < 5;
+        if (!lifted_ && clicked && carried >= 0 && carried < static_cast<int>(cells_.size()) &&
+            in_rect(cells_[static_cast<std::size_t>(carried)], local_position)) {
+            // A press and release on the tray piece without moving: the click
+            // that follows may turn it.
+            solve_click_ = carried;
+            invalidate_scene();
+        } else if (in_rect(board_, local_position) && solve_snap(x, y) &&
+                   game.place_piece(selection_, x, y, rotation_, flip_))
+            changed("puzzle_solve_place");
+        else {
+            // A piece carried from the frame and dropped nowhere useful goes back where it was.
+            if (lifted_ && in_rect(board_, local_position)) {
+                sound_play("puzzle_solve_no_fit", sound_);
+                game.place_piece(selection_, lift_x_, lift_y_, lift_rotation_, lift_flip_);
+            }
+            persist();
+        }
+        lifted_ = false;
+        invalidate_scene();
+    }
+    if (game.kind == PuzzleKind::untangle && cat_carried_) {
+        cat_carried_ = false;
+        kitten_.put_down();
+        game.message = "";
+        invalidate_animation(kitten_.paint_bounds(board_));
+    }
+    if (game.kind == PuzzleKind::untangle && drag_ >= 0 && !commits) {
+        // The peg goes back: nothing moved in the game.
+        drag_ = -1;
+        untangle_idle_ = 0;
+        if (update_untangle_geometry())
+            invalidate_static_scene();
+        invalidate_animation(untangle_board_damage());
+    }
+    if (game.kind == PuzzleKind::untangle && drag_ >= 0) {
+        const std::array<int, 96> marks = game.state.marks;
+        game.move_node(drag_, drag_position_);
+        drag_ = -1;
+        untangle_idle_ = 0;
+        untangle_released(marks);
+        changed("untangle_release");
+    }
+    if (game.kind == PuzzleKind::gems && drag_ >= 0 && !commits) {
+        // The gem settles back into its socket.
+        gem_spring_ = drag_;
+        drag_ = -1;
+        gem_dragging_ = false;
+        if (timer_)
+            (*timer_).start();
+    }
+    if (game.kind == PuzzleKind::gems && drag_ >= 0) {
+        const int from = drag_;
+        drag_ = -1;
+        const double reach = std::abs(gem_offset_.x) + std::abs(gem_offset_.y);
+        if (gem_dragging_) {
+            gem_dragging_ = false;
+            const int sx = gem_offset_.x > 0   ? 1
+                           : gem_offset_.x < 0 ? -1
+                                               : 0,
+                      sy = gem_offset_.y > 0   ? 1
+                           : gem_offset_.y < 0 ? -1
+                                               : 0;
+            const int col = from % 8 + sx, row = from / 8 + sy;
+            if (reach >= .3 && (sx || sy) && col >= 0 && col < 8 && row >= 0 && row < 8)
+                gem_swap(from, row * 8 + col, reach);
+            else
+                gem_spring_ = from; // not far enough: it settles back into its socket
+        } else if (cell >= 0 && cell != from &&
+                   std::abs(from / 8 - cell / 8) + std::abs(from % 8 - cell % 8) == 1)
+            gem_swap(from, cell, 0);
+        else if (cell == from)
+            gem_click_ = from;  // the click that follows picks or drops it
+        if (timer_)
+            (*timer_).start();
     }
 }
-void PuzzleView::on_key_bubble(gf::KeyEvent& e) {
-    handle_key(e);
+
+// Arms the session for `subject`, pressed in `source` (local units). A press the tracker
+// refuses keeps the capture by hand; pointer_up then ends the drag as before.
+void PuzzleView::arm_drag(gf::MouseEventArgs& e, DragSubject subject, gf::Rect source, double threshold) {
+    drag_subject_ = subject;
+    gf::DragStart start{};
+    start.key = static_cast<std::uint64_t>(subject);
+    const gf::Point corner = point_to_window(gf::Point{source.x, source.y});
+    start.source.set(gf::Rect{corner.x, corner.y, source.width, source.height});
+    start.threshold = threshold;
+    const gf::PointerEvent press = gf::pointer_event_of(e);
+    const gf::DragStartResult armed = drag_tracker_.press(press, start);
+    // A refused plan has already ended the drag through finish_drag; any other refusal (busy,
+    // detached, bad input) leaves it to the hand-held capture.
+    if (armed != gf::DragStartResult::armed && armed != gf::DragStartResult::started &&
+        armed != gf::DragStartResult::refused)
+        set_pointer_capture(true);
 }
-void PuzzleView::handle_key(gf::KeyEvent& e) {
-    if (e.handled || e.action != gf::KeyAction::down)
+
+// Ends the session without a drop or a restore: the caller has already settled the drag (a
+// gem's swap, a new game).
+void PuzzleView::end_tracked_drag() {
+    drag_subject_ = DragSubject::none;
+    if (drag_tracker_.running())
+        drag_tracker_.cancel(gf::DragEnd::model_changed);
+    set_pointer_capture(false);
+}
+
+// Past the threshold: a free placement with no targets. Every kind picks its own drop (the
+// frame's snap, the neighbouring gem, the peg's new place), so the tracker runs the session only.
+void PuzzleView::plan_drag(gf::DragPlan& plan) {
+    if (drag_subject_ == DragSubject::none || panel_ || game.state.over) {
+        plan.refused = true;
+        return;
+    }
+    plan.kind = gf::DragKind::placement;
+    plan.placement.grid_by_default = false;
+    plan.placement.free_drop = true;
+    plan.container = this;
+}
+
+// The moves themselves are drawn by pointer_move; the frame only asks for one.
+void PuzzleView::preview_drag(const gf::DragTrackerFrame&) {
+    invalidate_scene();
+}
+
+// The session's one end. A subject already settled (end_tracked_drag) does nothing.
+void PuzzleView::finish_drag(const gf::DragTrackerFrame& frame) {
+    if (drag_subject_ == DragSubject::none)
+        return;
+    drag_subject_ = DragSubject::none;
+    const bool commits = gf::drag_end_commits(frame.end);
+    const gf::Point local_position = point_from_window(frame.pointer);
+    const int cell = hit(local_position);
+    end_drag(commits, local_position, cell);
+}
+
+// The keys: the view's own handling runs after the base raised the event, on
+// a key its subscribers left unhandled; keys bubbling from a focused child
+// take the same handling.
+void PuzzleView::on_key_down(gf::KeyEventArgs& e) {
+    gf::Control::on_key_down(e);
+    key_down(e);
+}
+
+void PuzzleView::on_key_bubble(gf::KeyEvent& e) {
+    if (e.action != gf::KeyAction::down)
+        return;
+    gf::KeyEventArgs arguments = gf::key_event_arguments(e);
+    key_down(arguments);
+    e.handled = arguments.handled;
+}
+
+void PuzzleView::key_down(gf::KeyEventArgs& e) {
+    if (e.handled)
         return;
     if (e.physical_key == gf::PhysicalKey::escape) {
         panel(0);
@@ -3635,10 +3844,13 @@ void PuzzleView::handle_key(gf::KeyEvent& e) {
     invalidate_scene();
     e.handled = true;
 }
-void PuzzleView::on_text_input(gf::TextInputEvent& e) {
-    if (panel_ || game.state.over || animation_duration_ > 0 || e.text_utf8.size() != 1)
+
+// Committed text: a peg colour (1 to 6, or a to f) or a stick palette entry.
+void PuzzleView::on_key_press(gf::KeyPressEventArgs& e) {
+    gf::Control::on_key_press(e);
+    if (e.handled || panel_ || game.state.over || animation_duration_ > 0 || e.text.size() != 1)
         return;
-    char c = e.text_utf8[0];
+    char c = e.text[0];
     int value = c >= '1' && c <= '7'   ? c - '0'
                 : c >= 'a' && c <= 'f' ? c - 'a' + 1
                 : c >= 'A' && c <= 'F' ? c - 'A' + 1

@@ -15,7 +15,7 @@
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
-#include "routed_input.hpp"
+#include "gui_forms/events/key_events/key_events.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -31,7 +31,7 @@ struct Options {
     bool dev = false;  // separate save file
 };
 
-class SwitchboxView final : public games::RoutedInput<gf::Control> {
+class SwitchboxView final : public gf::Control {
 public:
     bool editing_name() const { return panel_ == Panel::name; }
     SwitchboxView(gf::StableId id, Options opt);
@@ -39,10 +39,15 @@ public:
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& p, gf::Rect damage) override;
-    void handle_pointer(gf::PointerEvent& e) override;
-    void handle_key(gf::KeyEvent& e) override;
-    void on_key_bubble(gf::KeyEvent& e) override { handle_key(e); }
-    void on_text_input(gf::TextInputEvent& e) override;
+    void on_mouse_down(gf::MouseEventArgs& e) override;
+    void on_mouse_up(gf::MouseEventArgs& e) override;
+    void on_mouse_move(gf::MouseEventArgs& e) override;
+    void on_mouse_leave() override;
+    void on_mouse_click(gf::MouseEventArgs& e) override;
+    void on_key_down(gf::KeyEventArgs& e) override;
+    void on_key_bubble(gf::KeyEvent& e) override;
+    void on_key_press(gf::KeyPressEventArgs& e) override;
+    void on_mouse_capture_changed() override;
     void activate();
     // Cabinet hosting: the collection's master switches gate this game's own
     // music and sound settings; `foreground` is false while another game shows.
@@ -99,6 +104,12 @@ private:
     Panel panel_ = Panel::none;
     std::vector<Button> buttons_;
     std::string pressed_, hover_;
+    void track_pointer(gf::Point local);
+    std::string hit_button() const;
+    void end_hold();
+    void key_down(gf::KeyEventArgs& e);
+    // The painted button a release ended, for the click that follows it.
+    std::string released_;
     double mouse_x_ = 0, mouse_y_ = 0;  // game pixels
     bool mouse_in_ = false;
     int pixel_ = 2;            // points per game pixel

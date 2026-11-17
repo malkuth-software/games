@@ -173,6 +173,19 @@ Write only: not compiled here.
   full `ctest -LE design`; by hand, the pointer shape over each game's buttons and the help book's topic
   disclosure.
 
+## The port with the raisers (`claude/conformance-port-raisers`)
+
+The owner's working copy (2026-11-15, PlaySuite 46d3bc6 against GUI.Forms 371bd48aa) was the raisers
+branch with every drag on GUI.Forms' DragTracker; `claude/conformance-port` sat on the RoutedInput prep.
+This branch merges `claude/conformance-raisers` (46d3bc6) into the port (60e6609), so the #483 build has
+the input the owner tested. The views take the raisers' versions (src/routed_input.hpp and its test go,
+tests/view_input_tests.cpp comes back), with the port's patterns applied to what the raisers carry:
+`cursor` written through `stxlib::Optional<gf::CursorKind>::of` (a computed shape into a local
+`pointer_shape` first), Zen's HUD font, ink and sheet-note alignment as in the port, and
+`DragStart::source` (now `stxlib::Optional<gf::Rect>`) written with `set()` in the six drag views.
+Write only: not compiled here. Tests: view_input, fourpegs_pointer, ui_routing, collection_ui,
+shelf_help, puzzle_frames, every view_contract test, the full `ctest -LE design`.
+
 ## What still waits on GUI.Forms
 
 - **Pins (placeholders):** the workflows (`ref:`), tools/package_common.py `TOOLKIT_REVISION`,

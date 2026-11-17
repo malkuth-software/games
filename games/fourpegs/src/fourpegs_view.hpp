@@ -11,10 +11,11 @@
 #include "game_text.hpp"
 
 #include "gui_forms/basic_controls.hpp"
+#include "gui_forms/drag/drag_tracker/drag_tracker.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
 #include "gui_forms/window.hpp"
-#include "routed_input.hpp"
+#include "gui_forms/events/key_events/key_events.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -30,7 +31,7 @@ struct Options {
     bool hosted = false;  // a host shell supplies New, Help, Top scores and the audio switches
 };
 
-class FourPegsView final : public games::RoutedInput<gf::Control> {
+class FourPegsView final : public gf::Control {
 public:
     bool editing_name() const { return panel_ == Panel::name; }
     FourPegsView(gf::StableId id, Options opt);
@@ -38,10 +39,15 @@ public:
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& p, gf::Rect damage) override;
-    void handle_pointer(gf::PointerEvent& e) override;
-    void handle_key(gf::KeyEvent& e) override;
-    void on_key_bubble(gf::KeyEvent& e) override { handle_key(e); }
-    void on_text_input(gf::TextInputEvent& e) override;
+    void on_mouse_down(gf::MouseEventArgs& e) override;
+    void on_mouse_up(gf::MouseEventArgs& e) override;
+    void on_mouse_move(gf::MouseEventArgs& e) override;
+    void on_mouse_leave() override;
+    void on_mouse_click(gf::MouseEventArgs& e) override;
+    void on_mouse_capture_changed() override;
+    void on_key_down(gf::KeyEventArgs& e) override;
+    void on_key_bubble(gf::KeyEvent& e) override;
+    void on_key_press(gf::KeyPressEventArgs& e) override;
     void activate();
     // Cabinet hosting: the collection's master switches gate this game's own
     // music and sound; `foreground` is false while another game shows.
@@ -136,6 +142,26 @@ private:
     void active_changed(bool active);
     void capture_changed(const gf::PointerCaptureChange& change);
     void cancel_drag();
+    // The peg drag runs on GUI.Forms' DragTracker (cp29 public drag client): the tracker arms
+    // on a press on a palette peg or a filled socket, starts past 4 game pixels, holds the
+    // capture, and ends the session once (a release, Escape, a lost capture, the window's
+    // deactivation). Its plan is a free placement with no targets: the sockets are found by
+    // the console's own 3D pick at the release (Lair::pick_socket), which a rectangle cannot
+    // stand for. The tracker borrows this view and is destroyed with it.
+    gf::DragTracker drag_;
+    void plan_drag(gf::DragPlan& plan);
+    void preview_drag(const gf::DragTrackerFrame& frame);
+    void finish_drag(const gf::DragTrackerFrame& frame);
+    void drop_peg();
+    [[nodiscard]] gf::PointerEvent window_event(const gf::MouseEventArgs& e) const;
+    void track_pointer(gf::Point local);
+    std::string hit_button() const;
+    void board_clicked();
+    void key_down(gf::KeyEventArgs& e);
+    // The painted button a release ended, and whether the release ended a
+    // press on the console that did not drag, for the click that follows it.
+    std::string released_;
+    bool board_click_ = false;
     void tick();
     void publish();
     void new_game();

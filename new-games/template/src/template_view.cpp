@@ -32,9 +32,12 @@ std::string size_label(int side) {
 }  // namespace
 
 TemplateView::TemplateView(gf::StableId id, Options options)
-    : games::RoutedInput<gf::Control>(std::move(id)), options_(options) {
+    : gf::Control(std::move(id)), options_(options) {
     front_ = !options_.hosted;
     focusable = true;
+    // Every release over the view is a click: a quick second press is another click, not a
+    // double click. (The opaque style went in GUI.Forms 0.6, audit A17.)
+    set_style(gf::ControlStyles::standard_double_click, false);
     gf::SurfaceMaterial plain;
     plain.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
     set_authored_surface_material(plain);
@@ -311,20 +314,35 @@ void TemplateView::move_cursor(int rows, int columns) {
 
 // ---------------------------------------------------------------- input
 
-void TemplateView::handle_pointer(gf::PointerEvent& event) {
-    const gf::Point local = point_from_window(event.position);
-    const int under = visual_.help ? -1 : pick_cell(layout_, session_.board.side, local.x, local.y);
-    if (event.action == gf::PointerAction::move || event.action == gf::PointerAction::leave) {
-        const int hover = event.action == gf::PointerAction::leave ? -1 : under;
-        if (hover != visual_.hover) {
-            visual_.hover = hover;
-            const gf::CursorKind pointer_shape = hover >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
-            cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
-            request_frame();
-        }
-        return;
+// The pointer, in GUI.Forms' raisers: hover follows the moves and clears on
+// leave; a primary press acts at once (closes help, starts a new board once
+// solved, or presses the cell).
+int TemplateView::cell_under(gf::Point local) const {
+    return visual_.help ? -1 : pick_cell(layout_, session_.board.side, local.x, local.y);
+}
+
+void TemplateView::show_hover(int hover) {
+    if (hover != visual_.hover) {
+        visual_.hover = hover;
+        const gf::CursorKind pointer_shape = hover >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
+        request_frame();
     }
-    if (event.action == gf::PointerAction::down && event.button == gf::PointerButton::primary) {
+}
+
+void TemplateView::on_mouse_move(gf::MouseEventArgs& event) {
+    show_hover(cell_under(event.location));
+    gf::Control::on_mouse_move(event);
+}
+
+void TemplateView::on_mouse_leave() {
+    show_hover(-1);
+    gf::Control::on_mouse_leave();
+}
+
+void TemplateView::on_mouse_down(gf::MouseEventArgs& event) {
+    if (event.button == gf::PointerButton::primary) {
+        const int under = cell_under(event.location);
         activate();
         if (visual_.help) {
             set_help(false);
@@ -336,10 +354,26 @@ void TemplateView::handle_pointer(gf::PointerEvent& event) {
         }
         event.handled = true;
     }
+    if (is_alive()) gf::Control::on_mouse_down(event);
 }
 
-void TemplateView::handle_key(gf::KeyEvent& event) {
-    if (event.handled || event.action != gf::KeyAction::down) {
+// The keys: the view's own handling runs after the base raised the event, on
+// a key its subscribers left unhandled; keys bubbling from a focused child
+// take the same handling.
+void TemplateView::on_key_down(gf::KeyEventArgs& event) {
+    gf::Control::on_key_down(event);
+    key_down(event);
+}
+
+void TemplateView::on_key_bubble(gf::KeyEvent& event) {
+    if (event.action != gf::KeyAction::down) return;
+    gf::KeyEventArgs arguments = gf::key_event_arguments(event);
+    key_down(arguments);
+    event.handled = arguments.handled;
+}
+
+void TemplateView::key_down(gf::KeyEventArgs& event) {
+    if (event.handled) {
         return;
     }
     using Key = gf::PhysicalKey;
@@ -374,6 +408,7 @@ void TemplateView::handle_key(gf::KeyEvent& event) {
         event.handled = false;
     }
 }
+
 
 // ---------------------------------------------------------------- the capsule
 

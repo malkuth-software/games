@@ -38,9 +38,12 @@ int group_of(int c) {
 }
 }  // namespace
 
-KoiView::KoiView(gf::StableId id, Options opt) : games::RoutedInput<gf::Control>(std::move(id)), opt_(opt) {
+KoiView::KoiView(gf::StableId id, Options opt) : gf::Control(std::move(id)), opt_(opt) {
     cab_front_ = !opt_.hosted;
     focusable = true;
+    // Every release over the view is a click: a quick second press is another click, not a
+    // double click. (The opaque style went in GUI.Forms 0.6, audit A17.)
+    set_style(gf::ControlStyles::standard_double_click, false);
     {
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
@@ -674,58 +677,103 @@ void KoiView::publish() {
 }
 
 // ------------------------------------------------------------------ input
-void KoiView::handle_pointer(gf::PointerEvent& e) {
-    const gf::Point local = point_from_window(e.position);
+// The pointer, in GUI.Forms' raisers. The painted buttons fire on the derived
+// click (a release over the view after a press on the same button), so the
+// window's order rules apply; a press on one of the player's cards plays or
+// chooses it at once. Hover follows the moves and clears on leave.
+void KoiView::track_pointer(gf::Point local) {
     mx_ = local.x;
     my_ = local.y;
-    auto hit = [&]() -> std::string {
-        for (const Button& b : buttons_)
-            if (b.enabled && mx_ >= b.x && mx_ < b.x + b.w && my_ >= b.y && my_ < b.y + b.h) return b.id;
-        return {};
-    };
-    if (e.action != gf::PointerAction::move) request_frame();
-    if (e.action == gf::PointerAction::leave) {
-        if (hover_card_ >= 0 || !hover_btn_.empty()) request_frame();
-        hover_card_ = -1; hover_btn_.clear();
-    }
-    if (e.action == gf::PointerAction::move) {
-        const std::string previous_button = hover_btn_;
-        const int previous_card = hover_card_;
-        hover_btn_ = hit();
-        const int c = panel_ == Panel::none && hover_btn_.empty() ? card_at(mx_, my_) : -1;
-        hover_card_ = c;
-        if (previous_button != hover_btn_ || previous_card != c) request_frame();
-        const bool mine = c >= 0 && s_.turn == 0 && ((s_.phase == koi::Phase::play && std::find(s_.hand[0].begin(), s_.hand[0].end(), c) != s_.hand[0].end()) ||
-                                                      (s_.pending >= 0 && std::find(s_.choices.begin(), s_.choices.end(), c) != s_.choices.end()));
-        const gf::CursorKind pointer_shape = !hover_btn_.empty() || mine ? gf::CursorKind::hand : gf::CursorKind::arrow;
-        cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
-    }
-    if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
+}
+
+std::string KoiView::hit_button() const {
+    for (const Button& b : buttons_)
+        if (b.enabled && mx_ >= b.x && mx_ < b.x + b.w && my_ >= b.y && my_ < b.y + b.h) return b.id;
+    return {};
+}
+
+void KoiView::on_mouse_move(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    const std::string previous_button = hover_btn_;
+    const int previous_card = hover_card_;
+    hover_btn_ = hit_button();
+    const int c = panel_ == Panel::none && hover_btn_.empty() ? card_at(mx_, my_) : -1;
+    hover_card_ = c;
+    if (previous_button != hover_btn_ || previous_card != c) request_frame();
+    const bool mine = c >= 0 && s_.turn == 0 && ((s_.phase == koi::Phase::play && std::find(s_.hand[0].begin(), s_.hand[0].end(), c) != s_.hand[0].end()) ||
+                                                  (s_.pending >= 0 && std::find(s_.choices.begin(), s_.choices.end(), c) != s_.choices.end()));
+    const gf::CursorKind pointer_shape = !hover_btn_.empty() || mine ? gf::CursorKind::hand : gf::CursorKind::arrow;
+    cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
+    gf::Control::on_mouse_move(e);
+}
+
+void KoiView::on_mouse_leave() {
+    request_frame();
+    hover_card_ = -1;
+    hover_btn_.clear();
+    gf::Control::on_mouse_leave();
+}
+
+void KoiView::on_mouse_down(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    request_frame();
+    if (e.button == gf::PointerButton::primary) {
         activate();
-        const std::string h = hit();
-        if (!h.empty()) { pressed_ = h; e.handled = true; return; }
-        if (panel_ != Panel::none) { e.handled = true; return; }
-        const int c = card_at(mx_, my_);
-        if (c >= 0 && s_.turn == 0) {
-            if (s_.phase == koi::Phase::play) {
-                const auto& h0 = s_.hand[0];
-                const auto it = std::find(h0.begin(), h0.end(), c);
-                if (it != h0.end()) player_play(static_cast<int>(it - h0.begin()));
-            } else if (s_.pending >= 0 && std::find(s_.choices.begin(), s_.choices.end(), c) != s_.choices.end()) {
-                player_choose(c);
+        const std::string h = hit_button();
+        if (!h.empty()) {
+            pressed_ = h;
+        } else if (panel_ == Panel::none) {
+            const int c = card_at(mx_, my_);
+            if (c >= 0 && s_.turn == 0) {
+                if (s_.phase == koi::Phase::play) {
+                    const std::vector<int>& h0 = s_.hand[0];
+                    const std::vector<int>::const_iterator it = std::find(h0.begin(), h0.end(), c);
+                    if (it != h0.end()) player_play(static_cast<int>(it - h0.begin()));
+                } else if (s_.pending >= 0 && std::find(s_.choices.begin(), s_.choices.end(), c) != s_.choices.end()) {
+                    player_choose(c);
+                }
             }
         }
         e.handled = true;
-    } else if (e.action == gf::PointerAction::up) {
-        if (!pressed_.empty() && hit() == pressed_) action(pressed_);
-        pressed_.clear();
-        e.handled = true;
     }
+    if (is_alive()) gf::Control::on_mouse_down(e);
 }
 
-void KoiView::handle_key(gf::KeyEvent& e) {
-    if (!e.handled && e.action == gf::KeyAction::down) request_frame();
-    if (e.handled || e.action != gf::KeyAction::down) return;
+void KoiView::on_mouse_up(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    request_frame();
+    released_ = pressed_;
+    pressed_.clear();
+    e.handled = true;
+    gf::Control::on_mouse_up(e);
+}
+
+void KoiView::on_mouse_click(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    const std::string released = released_;
+    released_.clear();
+    if (!released.empty() && hit_button() == released) action(released);
+    if (is_alive()) gf::Control::on_mouse_click(e);
+}
+
+// The keys: the view's own handling runs after the base raised the event, on
+// a key its subscribers left unhandled; keys bubbling from a focused child
+// take the same handling.
+void KoiView::on_key_down(gf::KeyEventArgs& e) {
+    gf::Control::on_key_down(e);
+    key_down(e);
+}
+
+void KoiView::on_key_bubble(gf::KeyEvent& e) {
+    if (e.action != gf::KeyAction::down) return;
+    gf::KeyEventArgs arguments = gf::key_event_arguments(e);
+    key_down(arguments);
+    e.handled = arguments.handled;
+}
+
+void KoiView::key_down(gf::KeyEventArgs& e) {
+    if (e.handled) return;
+    request_frame();
     using K = gf::PhysicalKey;
     const std::uint32_t k = e.physical_key;
     if (panel_ != Panel::none) { if (k == K::escape || k == K::enter || k == K::space) { panel_ = Panel::none; layout_buttons(); } e.handled = true; return; }
@@ -737,6 +785,7 @@ void KoiView::handle_key(gf::KeyEvent& e) {
     if (!opt_.hosted && k == K::m) { action("music"); e.handled = true; return; }
     if (k == K::f1) { panel_ = Panel::rules; layout_buttons(); e.handled = true; return; }
 }
+
 
 void KoiView::action(const std::string& id) {
     if ((id == "rules" || id == "sets") && games::route_help(*this, id))

@@ -14,7 +14,7 @@ The source of truth is the pinned toolkit (`.github/workflows/applications.yml`)
 
 | Control | Header | Use it for |
 |---|---|---|
-| `Control` | `gui_forms/control.hpp` | The base: `arrange`, `on_paint`, `on_pointer`, `on_key`, `on_key_bubble`, `on_attached_to_window`, `on_detaching_from_window`, `invalidate`, `set_paint_plane`, `set_accessible_name`. Anything owner-drawn. |
+| `Control` | `gui_forms/control.hpp` | The base: `arrange`, `on_paint`, the input raisers (`on_mouse_down` and the rest, `on_mouse_click`, `on_key_down`, `on_key_press`), `on_key_bubble`, `on_attached_to_window`, `on_detaching_from_window`, `invalidate`, `set_paint_plane`, `set_accessible_name`. Anything owner-drawn. |
 | `Panel`, `GroupBox`, `ScaledPanel`, `Card` | `container_controls.hpp` | Grouping; a card with an elevation. |
 | `FlowLayoutPanel`, `TableLayoutPanel` | `container_controls.hpp` | Layout containers; `GridPanel` (`grid_panel.hpp`) is the declarative grid. The shell still lays out by hand in `arrange`. |
 | `ScrollableControl` | `controls/scrollable_control/` | A scrolling body: `set_auto_scroll`, `arrange_scroll_viewport`, `scroll_to`, `scroll_by`, `scroll_position`. The help pages and the Settings page are these. |
@@ -144,7 +144,7 @@ parts of its kind through the theme (`paint_skin_part` and `gf::paint_text_part_
 | `CardBackChoice` | `Button` | `card-back`; chosen is `:checked` | face (the ring), focus; the card is content |
 | `HelpGlyph` (`src/help_book.*`) | `Button` | `help-glyph`, with `help-link` or `card-mark` (`set_variant`) | label, underline glyph |
 | `TopicHeading` | `Button` | `topic-heading` | face, label (the +/- as secondary text), focus |
-| `gf::BusinessCard` (GUI.Forms) | `Control` | | GUI.Forms' business card (cp33): on help's page and in the hand; text from `gf::set_program_identity` (src/main.cpp), look from themes/playsuite. |
+| `BusinessCard` (`src/business_card.*`) | `Control` | | Canvas art: Rainstar Software's card, drawn by `shared/cards/held_card.*`. |
 
 A subtree takes its skin by class (`set_skin_class(control, ButtonSkin::ivory)`, which
 replaces games_theme and set_theme_override): `.skin-ivory` and the rest give its labels

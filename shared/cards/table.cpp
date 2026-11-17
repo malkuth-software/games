@@ -103,8 +103,10 @@ gf::ImageId load_image(gf::Window& window, const std::string& name) {
     return result.image;
 }
 } // namespace
-Table::Table(gf::StableId id) : games::RoutedInput<gf::Control>(std::move(id)) {
+Table::Table(gf::StableId id) : gf::Control(std::move(id)) {
     focusable = true;
+    drag_.callbacks.plan = gf::Delegate<gf::DragPlan&>::bind<Table, &Table::plan_drag>(*this);
+    drag_.callbacks.finished = gf::Delegate<const gf::DragTrackerFrame&>::bind<Table, &Table::finish_drag>(*this);
     accessible_name = "Card table. Arrow keys choose piles, Enter selects or places, H hints, "
                         "Space deals, Z undoes, F1 opens help.";
     next_seed_ =
@@ -187,6 +189,7 @@ void Table::on_attached_to_window() {
     request_tick();
 }
 void Table::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
+    drag_.owner_detaching(window);
     try {
         save_due_ = false;
         persist();
@@ -1305,7 +1308,7 @@ void Table::open_panel(int panel) {
     panel_ = panel;
     pointer_down_ = false;
     dragging_ = false;
-    set_pointer_capture(false);
+    release_pointer_drag();
     for (int i = 0; i < 9; ++i)
         (*buttons_[i]).enabled = panel == 0;
     for (int i = 9; i < 22; ++i)
@@ -1400,7 +1403,7 @@ void Table::new_game(Kind kind) {
         selected_index_ = -1;
         dragging_ = false;
         pointer_down_ = false;
-        set_pointer_capture(false);
+        release_pointer_drag();
         layout_cards(false);
         request_tick();
         invalidate(gf::Dirty::paint);
@@ -1415,7 +1418,7 @@ void Table::new_game(Kind kind) {
     pass_cards_.clear();
     dragging_ = false;
     pointer_down_ = false;
-    set_pointer_capture(false);
+    release_pointer_drag();
     layout_cards(true);
     music_play(audio_name(kind), music_);
     sound_play("deal", sound_);
@@ -1469,7 +1472,7 @@ void Table::switch_game(Kind kind) {
         selected_index_ = -1;
         dragging_ = false;
         pointer_down_ = false;
-        set_pointer_capture(false);
+        release_pointer_drag();
         pass_cards_.clear();
         layout_cards(false);
         music_play(audio_name(kind), music_);
@@ -1758,7 +1761,7 @@ void Table::changed(const char* effect) {
     selected_index_ = -1;
     dragging_ = false;
     hover_ = -1;
-    set_pointer_capture(false);
+    release_pointer_drag();
     layout_cards(true);
     if (game.state.over)
         sound_play("win", sound_);
@@ -1852,6 +1855,49 @@ void Table::track_hover(gf::Point point) {
     if (glint_)
         request_tick();
 }
+// Past the threshold: the selected run is lifted. A free placement over the window; the
+// pile is drop_target's at the release.
+void Table::plan_drag(gf::DragPlan& plan) {
+    if (selection_ < 0 || panel_ || cascading_) {
+        plan.refused = true;
+        return;
+    }
+    plan.kind = gf::DragKind::placement;
+    plan.placement.grid_by_default = false;
+    plan.placement.free_drop = true;
+    plan.container = this;
+    dragging_ = true;
+}
+
+// The session's one end. A release (free) is dropped by on_mouse_up, which handed it in.
+// Any other end puts the run back where it lies, still selected, and forgets the press.
+void Table::finish_drag(const gf::DragTrackerFrame& frame) {
+    if (gf::drag_end_commits(frame.end))
+        return;
+    const bool lifted = dragging_;
+    dragging_ = false;
+    pointer_down_ = false;
+    pending_from_ = pending_index_ = pending_to_ = -1;
+    if (hover_ >= 0) {
+        invalidate(enlarged(slots_[hover_], 12));
+        invalidate(enlarged(landing(hover_), 12));
+        hover_ = -1;
+    }
+    if (lifted && !resetting_drag_)
+        layout_cards(true);
+    invalidate(gf::Dirty::paint);
+}
+
+// Ends a running pointer drag without its drop (a panel, a deal, a finished game, Escape)
+// and the capture the press took; the caller lays the cards out.
+void Table::release_pointer_drag() {
+    resetting_drag_ = true;
+    if (drag_.running())
+        drag_.cancel(gf::DragEnd::model_changed);
+    resetting_drag_ = false;
+    set_pointer_capture(false);
+}
+
 int Table::drop_target() const {
     if (selection_ < 0 || selected_index_ < 0 || game.state.kind == Kind::hearts)
         return hit_slot(pointer_);
@@ -1937,74 +1983,126 @@ void Table::select_or_move(int pile, int index) {
     }
     invalidate(gf::Dirty::paint);
 }
-void Table::handle_pointer(gf::PointerEvent& e) {
-    const gf::Point local_position = point_from_window(e.position);
-    if (cascading_ && e.action == gf::PointerAction::down) {
+// The pointer, in GUI.Forms' raisers. A press during a cascade finishes it. A
+// primary press plays a card (Hearts), presses a pile (TriPeaks) or selects
+// what it presses; a selected run arms GUI.Forms' DragTracker, past 4 pt the
+// moves drag it, and the release drops it on the target under it (and
+// suppresses the click), Escape or a lost capture putting it back; or the release
+// completes a click-to-place started by the press. A double click on a card
+// that can go to a foundation sends it there: its second press only notes it,
+// and the derived double click moves it. Hover follows the moves.
+void Table::on_mouse_down(gf::MouseEventArgs& e) {
+    const gf::Point local_position = e.location;
+    if (cascading_) {
         finish_cascade();
         e.handled = true;
+    } else if (!panel_ && e.button == gf::PointerButton::primary) {
+        primary_press(e, local_position);
+        e.handled = true;
+    }
+    if (is_alive())
+        gf::Control::on_mouse_down(e);
+}
+
+void Table::primary_press(gf::MouseEventArgs& e, gf::Point local_position) {
+    if (attached_window())
+        static_cast<void>((*attached_window()).request_focus(shared_from_this()));
+    int id = hit_card(local_position);
+    int pile = hit_slot(local_position);
+    int index = id < 0 ? -1 : sprites_[id].index;
+    double_place_ = false;
+    // The pointer's own choices replace the keys' marker; a drag sets it again.
+    if (hover_ >= 0)
+        invalidate(enlarged(slots_[hover_], 12));
+    hover_ = -1;
+    if (game.state.kind == Kind::hearts) {
+        if (pile == 0 && index >= 0)
+            heart_card(index);
         return;
     }
-    if (panel_)
+    if (game.state.kind == Kind::tripeaks) {
+        tripeaks_press(pile);
         return;
-    if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
-        if (attached_window())
-            static_cast<void>((*attached_window()).request_focus(shared_from_this()));
-        int id = hit_card(local_position);
-        int pile = hit_slot(local_position);
-        int index = id < 0 ? -1 : sprites_[id].index;
-        // The pointer's own choices replace the keys' marker; a drag sets it again.
-        if (hover_ >= 0)
-            invalidate(enlarged(slots_[hover_], 12));
-        hover_ = -1;
-        if (game.state.kind == Kind::hearts) {
-            if (pile == 0 && index >= 0)
-                heart_card(index);
-            e.handled = true;
-            return;
-        }
-        if (game.state.kind == Kind::tripeaks) {
-            tripeaks_press(pile);
-            e.handled = true;
-            return;
-        }
-        if (e.click_count >= 2 && pile >= 0 && index >= 0) {
-            for (int to = 10; to < 14; ++to)
-                if (game.move({pile, index, to})) {
-                    changed("place");
-                    e.handled = true;
-                    return;
-                }
-        }
-        pending_from_ = pending_index_ = pending_to_ = -1;
-        if (pile == 14) {
-            select_or_move(pile, index);
-            e.handled = true;
-            return;
-        }
-        // A click may finish the previous selection, but a drag always starts
-        // with the card under this press. Defer click-to-place until release.
-        if (selection_ >= 0 && pile != selection_ &&
-            game.legal({selection_, selected_index_, pile})) {
-            pending_from_ = selection_;
-            pending_index_ = selected_index_;
-            pending_to_ = pile;
-        }
-        selection_ = selected_index_ = -1;
+    }
+    if (e.clicks >= 2 && pile >= 0 && index >= 0 && foundation_for(pile, index) >= 0) {
+        // the double click that follows this press places the card
+        double_place_ = true;
+        return;
+    }
+    pending_from_ = pending_index_ = pending_to_ = -1;
+    if (pile == 14) {
         select_or_move(pile, index);
-        if (selection_ >= 0 || pending_from_ >= 0) {
-            pointer_down_ = true;
-            dragging_ = false;
-            press_ = pointer_ = local_position;
-            set_pointer_capture(true);
+        return;
+    }
+    // A click may finish the previous selection, but a drag always starts
+    // with the card under this press. Defer click-to-place until release.
+    if (selection_ >= 0 && pile != selection_ &&
+        game.legal({selection_, selected_index_, pile})) {
+        pending_from_ = selection_;
+        pending_index_ = selected_index_;
+        pending_to_ = pile;
+    }
+    selection_ = selected_index_ = -1;
+    select_or_move(pile, index);
+    if (selection_ >= 0 || pending_from_ >= 0) {
+        pointer_down_ = true;
+        dragging_ = false;
+        press_ = pointer_ = local_position;
+        // A selected run arms the tracker, which takes the capture (the primary press
+        // captures in any case); past 4 pt it plans the drag.
+        if (selection_ >= 0) {
+            gf::DragStart start{};
+            start.key = static_cast<std::uint64_t>(selection_);
+            const gf::Point at = point_to_window(local_position);
+            start.source.set(gf::Rect{at.x - 1, at.y - 1, 2, 2});
+            start.threshold = 4.0;
+            const gf::PointerEvent press = gf::pointer_event_of(e);
+            static_cast<void>(drag_.press(press, start));
         }
-        e.handled = true;
-    } else if (e.action == gf::PointerAction::move && !pointer_down_) {
+    }
+}
+
+// The first foundation (piles 10 to 13) the card at (pile, index) may move to,
+// or -1.
+int Table::foundation_for(int pile, int index) const {
+    for (int to = 10; to < 14; ++to)
+        if (game.legal({pile, index, to}))
+            return to;
+    return -1;
+}
+
+void Table::on_mouse_double_click(gf::MouseEventArgs& e) {
+    const bool place = double_place_;
+    double_place_ = false;
+    if (place && !cascading_ && !panel_ && e.button == gf::PointerButton::primary) {
+        const int id = hit_card(e.location);
+        const int pile = hit_slot(e.location);
+        const int index = id < 0 ? -1 : sprites_[id].index;
+        const int to = pile >= 0 && index >= 0 ? foundation_for(pile, index) : -1;
+        if (to >= 0 && game.move({pile, index, to}))
+            changed("place");
+    }
+    if (is_alive())
+        gf::Control::on_mouse_double_click(e);
+}
+
+void Table::on_mouse_move(gf::MouseEventArgs& e) {
+    const gf::Point local_position = e.location;
+    if (!panel_ && !pointer_down_) {
         track_hover(local_position);
-    } else if (e.action == gf::PointerAction::move && pointer_down_) {
+    } else if (!panel_) {
         gf::Point previous = pointer_;
         pointer_ = local_position;
-        if (selection_ >= 0 && std::hypot(pointer_.x - press_.x, pointer_.y - press_.y) > 4)
-            dragging_ = true;
+        // The tracker starts the drag past its threshold (plan_drag sets dragging_).
+        if (drag_.running()) {
+            const gf::PointerEvent event = gf::pointer_event_of(e);
+            static_cast<void>(drag_.pointer(event));
+        }
+        // A cancel inside the tracker's callbacks ended the press.
+        if (!pointer_down_) {
+            gf::Control::on_mouse_move(e);
+            return;
+        }
         // The destination outline lies where the card would land; repaint both places.
         if (hover_ >= 0) {
             invalidate(enlarged(slots_[hover_], 12));
@@ -2031,9 +2129,24 @@ void Table::handle_pointer(gf::PointerEvent& e) {
             }
         }
         e.handled = true;
-    } else if (e.action == gf::PointerAction::up && pointer_down_) {
+    }
+    gf::Control::on_mouse_move(e);
+}
+
+void Table::on_mouse_up(gf::MouseEventArgs& e) {
+    const gf::Point local_position = e.location;
+    if (!panel_ && pointer_down_) {
+        // The release reaches the tracker first: dragging, it ends the session (free) and the
+        // drop below places the run; only armed, it is the press's click.
+        if (drag_.running()) {
+            const gf::PointerEvent event = gf::pointer_event_of(e);
+            static_cast<void>(drag_.pointer(event));
+        }
         pointer_down_ = false;
-        set_pointer_capture(false);
+        if (dragging_) {
+            // a drop is not a click
+            e.suppress_click = true;
+        }
         if (dragging_) {
             pointer_ = local_position;
             const int to = drop_target();
@@ -2063,77 +2176,48 @@ void Table::handle_pointer(gf::PointerEvent& e) {
         }
         e.handled = true;
     }
+    gf::Control::on_mouse_up(e);
 }
-// TriPeaks plays at a click: an open card goes to the waste, the stock turns.
-void Table::tripeaks_press(int pile) {
-    selection_ = selected_index_ = -1;
-    if (pile == 14) {
-        if (game.draw())
-            changed("flip");
-        else
-            invalidate(gf::Dirty::paint);
-        return;
-    }
-    if (game.move({pile, 0, 15})) {
-        changed("place");
-        return;
-    }
-    if (tripeaks_place(pile) >= 0 && !game.state.piles[pile].empty() && game.state.piles[pile][0].up) {
-        game.message = game.liftable(pile, 0) ? "That card is not one higher or lower than the waste."
-                                              : "That card is still covered.";
-        sound_play("invalid", sound_);
-    }
-    invalidate(gf::Dirty::paint);
+
+// The keys: the view's own handling runs after the base raised the event, on
+// a key its subscribers left unhandled (a cascade finishes on any key down);
+// keys bubbling from a focused child take the same handling, and F1 and
+// Escape are taken in the preview phase, before a focused child sees them.
+void Table::on_key_down(gf::KeyEventArgs& e) {
+    gf::Control::on_key_down(e);
+    key_down(e);
 }
-void Table::heart_card(int index) {
-    if (game.state.passing) {
-        std::vector<int>::iterator found = std::find(pass_cards_.begin(), pass_cards_.end(), index);
-        if (found != pass_cards_.end())
-            pass_cards_.erase(found);
-        else if (pass_cards_.size() < 3)
-            pass_cards_.push_back(index);
-        game.message = std::to_string(pass_cards_.size()) + " of 3 cards selected to pass.";
-        layout_cards(true);
-    } else if (game.play(index))
-        changed("place");
-    else
-        invalidate(gf::Dirty::paint);
-}
-void Table::heart_continue() {
-    if (game.state.passing) {
-        if (game.pass(pass_cards_)) {
-            pass_cards_.clear();
-            changed("deal");
-        } else {
-            game.message = "Choose exactly three cards to pass.";
-            invalidate(gf::Dirty::paint);
-        }
-    } else if (game.state.trick_number == 13) {
-        game.next_round();
-        changed("deal");
-    }
-}
+
 void Table::on_key_bubble(gf::KeyEvent& e) {
-    handle_key(e);
+    if (e.action != gf::KeyAction::down)
+        return;
+    gf::KeyEventArgs arguments = gf::key_event_arguments(e);
+    key_down(arguments);
+    e.handled = arguments.handled;
 }
+
 void Table::on_key_preview(gf::KeyEvent& e) {
     if (e.action == gf::KeyAction::down &&
-        (e.physical_key == gf::PhysicalKey::f1 || e.physical_key == gf::PhysicalKey::escape))
-        handle_key(e);
+        (e.physical_key == gf::PhysicalKey::f1 || e.physical_key == gf::PhysicalKey::escape)) {
+        gf::KeyEventArgs arguments = gf::key_event_arguments(e);
+        key_down(arguments);
+        e.handled = arguments.handled;
+    }
 }
-void Table::handle_key(gf::KeyEvent& e) {
-    if (cascading_ && e.action == gf::KeyAction::down) {
+
+void Table::key_down(gf::KeyEventArgs& e) {
+    if (cascading_) {
         finish_cascade();
         e.handled = true;
         return;
     }
-    if (e.handled || e.action != gf::KeyAction::down)
+    if (e.handled)
         return;
     if (e.physical_key == gf::PhysicalKey::escape) {
         open_panel(0);
         selection_ = -1;
         dragging_ = false;
-        set_pointer_capture(false);
+        release_pointer_drag();
         e.handled = true;
         return;
     }
@@ -2213,5 +2297,54 @@ void Table::handle_key(gf::KeyEvent& e) {
     } else
         return;
     e.handled = true;
+}
+// TriPeaks plays at a click: an open card goes to the waste, the stock turns.
+void Table::tripeaks_press(int pile) {
+    selection_ = selected_index_ = -1;
+    if (pile == 14) {
+        if (game.draw())
+            changed("flip");
+        else
+            invalidate(gf::Dirty::paint);
+        return;
+    }
+    if (game.move({pile, 0, 15})) {
+        changed("place");
+        return;
+    }
+    if (tripeaks_place(pile) >= 0 && !game.state.piles[pile].empty() && game.state.piles[pile][0].up) {
+        game.message = game.liftable(pile, 0) ? "That card is not one higher or lower than the waste."
+                                              : "That card is still covered.";
+        sound_play("invalid", sound_);
+    }
+    invalidate(gf::Dirty::paint);
+}
+void Table::heart_card(int index) {
+    if (game.state.passing) {
+        std::vector<int>::iterator found = std::find(pass_cards_.begin(), pass_cards_.end(), index);
+        if (found != pass_cards_.end())
+            pass_cards_.erase(found);
+        else if (pass_cards_.size() < 3)
+            pass_cards_.push_back(index);
+        game.message = std::to_string(pass_cards_.size()) + " of 3 cards selected to pass.";
+        layout_cards(true);
+    } else if (game.play(index))
+        changed("place");
+    else
+        invalidate(gf::Dirty::paint);
+}
+void Table::heart_continue() {
+    if (game.state.passing) {
+        if (game.pass(pass_cards_)) {
+            pass_cards_.clear();
+            changed("deal");
+        } else {
+            game.message = "Choose exactly three cards to pass.";
+            invalidate(gf::Dirty::paint);
+        }
+    } else if (game.state.trick_number == 13) {
+        game.next_round();
+        changed("deal");
+    }
 }
 } // namespace games

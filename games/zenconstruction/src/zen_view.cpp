@@ -89,8 +89,11 @@ const char* const kJiggle[] = {"A good shake!", "Let's see what's underneath."};
 
 }  // namespace
 
-ZenView::ZenView(gf::StableId id, Options options) : games::RoutedInput<gf::Control>(std::move(id)), options_(options) {
+ZenView::ZenView(gf::StableId id, Options options) : gf::Control(std::move(id)), options_(options) {
     focusable = true;
+    // Every release over the view is a click: a quick second press is another click, not a
+    // double click. (The opaque style went in GUI.Forms 0.6, audit A17.)
+    set_style(gf::ControlStyles::standard_double_click, false);
     {
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
@@ -853,52 +856,82 @@ void ZenView::name_cancelled() {
     }
 }
 
-void ZenView::handle_pointer(gf::PointerEvent& e) {
-    const gf::Point local = point_from_window(e.position);
-    mx_ = local.x;
-    my_ = local.y;
-    if (e.action == gf::PointerAction::wheel) {
-        if (panel_ == Panel::none) {
-            camera_.distance = std::clamp(camera_.distance * std::exp(-e.wheel_delta.y * 0.06), 0.7, 4.5);
-            camera_.yaw = camera_.yaw + e.wheel_delta.x * 0.01;
-            camera_dirty_ = true;
-        }
-        e.handled = true;
-        return;
+// The pointer, in GUI.Forms' raisers. Any press with no panel open starts a
+// camera orbit; the moves turn the camera, and once it has moved past 2 pt the
+// release suppresses the click. A primary click that did not orbit (the
+// derived click) sends the crane for the rock under the pointer. The wheel
+// sets the camera's distance and yaw.
+void ZenView::on_mouse_wheel(gf::MouseEventArgs& e) {
+    mx_ = e.location.x;
+    my_ = e.location.y;
+    if (panel_ == Panel::none) {
+        camera_.distance = std::clamp(camera_.distance * std::exp(-e.wheel_delta.y * 0.06), 0.7, 4.5);
+        camera_.yaw = camera_.yaw + e.wheel_delta.x * 0.01;
+        camera_dirty_ = true;
     }
-    if (e.action == gf::PointerAction::move) {
-        if (dragging_ && !orbit_relative_) {
-            const double dx = mx_ - drag_x_;
-            const double dy = my_ - drag_y_;
-            if (std::abs(dx) + std::abs(dy) > 2) {
-                drag_moved_ = true;
-            }
-            orbit_by(dx, dy);
-            drag_x_ = mx_;
-            drag_y_ = my_;
-        } else {
-            update_hover();
+    e.handled = true;
+    gf::Control::on_mouse_wheel(e);
+}
+
+void ZenView::on_mouse_move(gf::MouseEventArgs& e) {
+    mx_ = e.location.x;
+    my_ = e.location.y;
+    if (dragging_ && !orbit_relative_) {
+        const double dx = mx_ - drag_x_;
+        const double dy = my_ - drag_y_;
+        if (std::abs(dx) + std::abs(dy) > 2) {
+            drag_moved_ = true;
         }
-        const gf::CursorKind pointer_shape = hover_ok_ ? gf::CursorKind::hand : gf::CursorKind::arrow;
-        cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
-        return;
+        orbit_by(dx, dy);
+        drag_x_ = mx_;
+        drag_y_ = my_;
+    } else if (!dragging_) {
+        update_hover();
     }
-    if (e.action == gf::PointerAction::down) {
-        if (panel_ != Panel::new_site) {
-            activate();
-        }
-        if (panel_ != Panel::none) {
-            e.handled = true;
-            return;
-        }
+    const gf::CursorKind pointer_shape = hover_ok_ ? gf::CursorKind::hand : gf::CursorKind::arrow;
+    cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
+    gf::Control::on_mouse_move(e);
+}
+
+void ZenView::on_mouse_down(gf::MouseEventArgs& e) {
+    mx_ = e.location.x;
+    my_ = e.location.y;
+    if (panel_ != Panel::new_site) {
+        activate();
+    }
+    if (panel_ == Panel::none) {
         begin_orbit();
-        e.handled = true;
-        return;
     }
-    if (e.action == gf::PointerAction::up) {
-        end_orbit(e.button);
-        e.handled = true;
+    e.handled = true;
+    if (is_alive()) gf::Control::on_mouse_down(e);
+}
+
+void ZenView::on_mouse_up(gf::MouseEventArgs& e) {
+    mx_ = e.location.x;
+    my_ = e.location.y;
+    if (dragging_) {
+        dragging_ = false;
+        // an orbit is not a click
+        if (drag_moved_) {
+            e.suppress_click = true;
+        }
+    } else {
+        // a press under a panel started no orbit: its release is no click on a rock
+        e.suppress_click = true;
     }
+    e.handled = true;
+    want_render_ = true;
+    gf::Control::on_mouse_up(e);
+}
+
+void ZenView::on_mouse_click(gf::MouseEventArgs& e) {
+    mx_ = e.location.x;
+    my_ = e.location.y;
+    // a click (not an orbit) on a rock sends the crane for it
+    if (e.button == gf::PointerButton::primary) {
+        fetch_hovered_rock();
+    }
+    if (is_alive()) gf::Control::on_mouse_click(e);
 }
 
 void ZenView::begin_orbit() {
@@ -915,8 +948,8 @@ void ZenView::begin_orbit() {
     request.raw_motion = false;
     request.until_release = true;
     const gf::RelativePointerGrant grant = request_relative_pointer(request);
-    // Free mode (a window that can only derive deltas from positions) keeps the ordinary moves
-    // as well, which already turn the camera: the samples would turn it twice.
+    // Free mode (a window that can only derive deltas from positions) keeps the ordinary
+    // moves as well, which already turn the camera: the samples would turn it twice.
     orbit_relative_ = grant.accepted() && grant.mode != gf::RelativePointerMode::free;
     if (grant.accepted() && !orbit_relative_) {
         static_cast<void>(release_relative_pointer());
@@ -929,26 +962,23 @@ void ZenView::orbit_by(double dx, double dy) {
     camera_dirty_ = true;
 }
 
-// The release that ends an orbit: a click (not a drag) on a rock sends the crane for it.
-void ZenView::end_orbit(gf::PointerButton button) {
-    if (dragging_) {
-        dragging_ = false;
-        if (!drag_moved_ && button == gf::PointerButton::primary && run_) {
-            update_hover();
-            if (hover_rock_ >= 0) {
-                if ((*run_).fetch(hover_rock_)) {
-                    play("zc_relay", .6f);
-                } else if ((*run_).crane.mode == CraneMode::parked) {
-                    say_one(kCovered, 2);
-                }
-            }
+void ZenView::fetch_hovered_rock() {
+    if (!run_) {
+        return;
+    }
+    update_hover();
+    if (hover_rock_ >= 0) {
+        if ((*run_).fetch(hover_rock_)) {
+            play("zc_relay", .6f);
+        } else if ((*run_).crane.mode == CraneMode::parked) {
+            say_one(kCovered, 2);
         }
     }
-    want_render_ = true;
 }
 
-// A relative-pointer sample while the orbit holds the pointer: motion turns the camera by its
-// delta, the release ends the orbit (and may be the click on a rock), the wheel zooms as the
+// A relative-pointer sample while the orbit holds the pointer (confined: no raiser runs and
+// no click is derived). Motion turns the camera by its delta; the release ends the orbit,
+// and a primary release that did not move is the click on a rock; the wheel zooms as the
 // ordinary wheel does. The position is in this view's coordinates.
 void ZenView::relative_sample(gf::RelativePointerEventArgs& sample) {
     if (!orbit_relative_) {
@@ -967,7 +997,13 @@ void ZenView::relative_sample(gf::RelativePointerEventArgs& sample) {
         }
         break;
     case gf::RelativePointerSampleKind::button_up:
-        end_orbit(sample.button);
+        if (dragging_) {
+            dragging_ = false;
+            if (!drag_moved_ && sample.button == gf::PointerButton::primary) {
+                fetch_hovered_rock();
+            }
+        }
+        want_render_ = true;
         break;
     case gf::RelativePointerSampleKind::wheel:
         if (panel_ == Panel::none) {
@@ -994,16 +1030,37 @@ void ZenView::relative_ended(const gf::RelativePointerEnded& ended) {
     dragging_ = false;
 }
 
-void ZenView::handle_key(gf::KeyEvent& e) {
+// The keys: the view's own handling runs after the base raised the event, on
+// a key its subscribers left unhandled; keys bubbling from a focused child
+// take the same handling. The camera's continuous keys come from the window's
+// held keys, not here; a key up is only marked handled.
+void ZenView::on_key_down(gf::KeyEventArgs& e) {
+    gf::Control::on_key_down(e);
+    key_down(e);
+}
+
+void ZenView::on_key_up(gf::KeyEventArgs& e) {
+    gf::Control::on_key_up(e);
+    if (!e.released_by_deactivation) {
+        e.handled = true;
+    }
+}
+
+void ZenView::on_key_bubble(gf::KeyEvent& e) {
+    if (e.action != gf::KeyAction::down) {
+        e.handled = true;
+        return;
+    }
+    gf::KeyEventArgs arguments = gf::key_event_arguments(e);
+    key_down(arguments);
+    e.handled = arguments.handled;
+}
+
+void ZenView::key_down(gf::KeyEventArgs& e) {
     if (e.handled) {
         return;
     }
     const std::uint32_t k = e.physical_key;
-    const bool down = e.action == gf::KeyAction::down;
-    if (!down) {
-        e.handled = true;
-        return;
-    }
     if (panel_ == Panel::new_site) {
         if (k == kKeyEnter) {
             action("start");
@@ -1039,6 +1096,7 @@ void ZenView::handle_key(gf::KeyEvent& e) {
     }
     e.handled = true;
 }
+
 
 namespace {
 bool script_before(const std::pair<double, std::string>& a, const std::pair<double, std::string>& b) {
