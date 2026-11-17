@@ -324,7 +324,7 @@ int main() {
             // app-loaded Barlow Condensed with GAMES_GUI_FORMS_APP_FONTS, the bundled control
             // face without it), laid out after the back button.
             const std::shared_ptr<CommandCapsule> composite = std::static_pointer_cast<CommandCapsule>(capsule);
-            assert((*composite).type_name() == "command-capsule");
+            assert((*composite).type_name() == "command_capsule"); // the registered (snake case) name
             assert(!(*composite).part_bounds("pill").empty());
             const std::shared_ptr<gf::Label> title = std::dynamic_pointer_cast<gf::Label>((*composite).child("title"));
             assert(title && (*title).text.read() == (*composite).read_title() && !(*title).text.read().empty());
