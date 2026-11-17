@@ -259,6 +259,51 @@ def audio_verification(manifest: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def ogg_crc(page: bytes) -> int:
+    """The Ogg page checksum: CRC-32, polynomial 0x04C11DB7, not reflected, initial and final value 0."""
+    crc = 0
+    for byte in page:
+        crc ^= byte << 24
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x04C11DB7) & 0xFFFFFFFF if crc & 0x80000000 else (crc << 1) & 0xFFFFFFFF
+    return crc
+
+
+def set_vorbis_end(path: Path, frames: int) -> None:
+    """Writes `frames` as the stream's last granule position, so a decoder ends the loop on its exact
+    last sample. libvorbis through some ffmpeg versions ends the stream on its last block instead (up to a
+    block past the input), which would lengthen every loop. The page before the last must end at or before
+    `frames`, and the last page must end at or after it; anything else is refused."""
+    data = bytearray(path.read_bytes())
+    offsets = []
+    at = 0
+    while at < len(data):
+        if data[at:at + 4] != b"OggS" or at + 27 > len(data):
+            raise ValueError("Not an Ogg stream: " + path.name)
+        segments = data[at + 26]
+        header = 27 + segments
+        if at + header > len(data):
+            raise ValueError("Truncated Ogg page: " + path.name)
+        body = sum(data[at + 27:at + header])
+        offsets.append(at)
+        at += header + body
+    if at != len(data) or len(offsets) < 2:
+        raise ValueError("Truncated Ogg stream: " + path.name)
+    last = offsets[-1]
+    if data[last + 5] & 0x04 == 0:
+        raise ValueError("Ogg stream has no end page: " + path.name)
+    ended = struct.unpack_from("<q", data, last + 6)[0]
+    before = struct.unpack_from("<q", data, offsets[-2] + 6)[0]
+    if ended == frames:
+        return
+    if not before <= frames < ended:
+        raise ValueError("Vorbis end does not bound the producer loop: " + path.name)
+    struct.pack_into("<q", data, last + 6, frames)
+    struct.pack_into("<I", data, last + 22, 0)
+    struct.pack_into("<I", data, last + 22, ogg_crc(bytes(data[last:])))
+    path.write_bytes(bytes(data))
+
+
 def prepare_audio(ffmpeg: str, source: Path, destination: Path, frames: int, codec: str, start: int = 0) -> dict:
     temporary = destination.with_suffix(".f32")
     subprocess.run([ffmpeg, "-v", "error", "-nostdin", "-y", "-i", str(source),
@@ -291,6 +336,7 @@ def prepare_audio(ffmpeg: str, source: Path, destination: Path, frames: int, cod
         subprocess.run([ffmpeg, "-v", "error", "-nostdin", "-y", "-i", str(pcm_path),
                         "-c:a", "libvorbis", "-q:a", "6", str(destination)], check=True)
         pcm_path.unlink()
+        set_vorbis_end(destination, frames)
     record = {"source": source.name, "file": destination.name, "frames": frames,
               "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
               "sha256": hashlib.sha256(destination.read_bytes()).hexdigest()}
