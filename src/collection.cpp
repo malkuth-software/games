@@ -189,6 +189,8 @@ void Collection::tick() {
     const double dt = std::clamp(std::chrono::duration<double>(now - last_tick_).count(), 0.0, .25);
     last_tick_ = now;
     audio_poll();
+    // The card put itself away (a click or Escape on it): help holds the keyboard again.
+    restore_help_scope();
     if (gf::Window* window = attached_window())
         set_polygon_scale((*window).scale());
     if (gf::Window* window = attached_window(); window && sprites_.update(*window)) {
@@ -617,9 +619,16 @@ void Collection::show_card() {
     gf::Window* window = attached_window();
     if (window == nullptr || card_open() || !help_open())
         return;
+    // Help's scope contains focus inside the book; the card's layer lies outside it, so the
+    // scope ends while the card is out (restore_help_scope begins it again).
+    if (help_focus_)
+        static_cast<void>((*window).end_focus_scope(help_focus_));
+    help_focus_ = {};
     // The card opens its website itself, through the host's open-URL capability.
-    if (!gf::show_business_card(*window))
+    if (!gf::show_business_card(*window)) {
+        restore_help_scope();
         return;
+    }
     wake();
 }
 void Collection::close_card() {
@@ -627,7 +636,14 @@ void Collection::close_card() {
     if (window == nullptr || !card_open())
         return;
     gf::hide_business_card(*window);
+    restore_help_scope();
     invalidate(gf::Dirty::paint);
+}
+void Collection::restore_help_scope() {
+    gf::Window* window = attached_window();
+    if (window == nullptr || help_focus_ || !help_open() || card_open())
+        return;
+    help_focus_ = (*window).begin_focus_scope(help_);
 }
 void Collection::write_remark(void* context, std::string& remark) {
     Collection& shell = *static_cast<Collection*>(context);

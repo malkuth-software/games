@@ -465,12 +465,21 @@ int main() {
             assert(page && (*page).heading_band_bottom().present());
         }
         assert(gf::business_card_remark_source().context == collection.get());
+        // The card's layer lies outside the help book, so help's contained scope gives way to
+        // the card's own while it is out, and comes back when it goes.
+        (*collection).show_card();
+        assert((*collection).card_open() && gf::business_card_shown(window));
+        assert(window.focus_scope_depth() == 1 &&
+               window.active_focus_scope_root() != child(*collection, "collection.help-book"));
+        (*collection).close_card();
+        assert(!(*collection).card_open() && (*collection).help_open() && window.focus_scope_depth() == 1);
+        assert(window.active_focus_scope_root() == child(*collection, "collection.help-book"));
         (*collection).show_card();
         assert((*collection).card_open() && gf::business_card_shown(window));
         const std::shared_ptr<gf::BusinessCard> hand = gf::shown_business_card(window);
         assert(hand && (*hand).presentation() == gf::BusinessCardPresentation::hand);
         (*collection).close_help();
-        assert(!(*collection).card_open());
+        assert(!(*collection).card_open() && window.focus_scope_depth() == 0);
         assert((*std::static_pointer_cast<fp::FourPegsView>(fourpegs)).host_panel().empty());
         assert((*button(*capsule, "capsule.back")).perform_click());
         assert((*shelf).visible.read() && !(*fourpegs).visible.read());

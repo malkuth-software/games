@@ -52,7 +52,9 @@ class Collection final : public gf::Control, public HelpHost {
         return help_ && (*help_).visible.read();
     }
     // The business card in the hand: GUI.Forms' (cp33), opened from help over the whole window
-    // in the window's own modal layer.
+    // in the window's own modal layer. That layer's overlay belongs to the window's root, outside
+    // the help book, so help's contained focus scope is ended while the card is out (a nested
+    // scope must lie inside the one containing it) and begun again when the card goes back.
     void show_card();
     void close_card();
     [[nodiscard]] bool card_open() const;
@@ -101,6 +103,9 @@ class Collection final : public gf::Control, public HelpHost {
     void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
     void tick();
     void wake();
+    // Help open, the card put away (by close_card, or by the card itself) and help's focus scope
+    // ended for it: begins that scope again.
+    void restore_help_scope();
     void ensure_view(Entry entry);
     void visibility();
     void preferences();
