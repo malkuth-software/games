@@ -118,6 +118,12 @@ endif()
 target_link_libraries(puzzle_frame_tests PRIVATE game_ui)
 add_test(NAME puzzle_frames COMMAND puzzle_frame_tests)
 set_tests_properties(puzzle_frames PROPERTIES ENVIRONMENT "GAMES_ASSET_DIR=${GAMES_RUNTIME_ASSET_DIR}")
+# The Solitaire deal stepped frame by frame through the window's schedule (wakes, damage,
+# where each card is drawn) against the deal's own sequence.
+add_executable(solitaire_deal_tests tests/solitaire_deal_tests.cpp)
+target_link_libraries(solitaire_deal_tests PRIVATE game_ui)
+add_test(NAME solitaire_deal COMMAND solitaire_deal_tests)
+set_tests_properties(solitaire_deal PROPERTIES TIMEOUT 60 ENVIRONMENT "GAMES_ASSET_DIR=${GAMES_RUNTIME_ASSET_DIR}")
 if("fourpegs" IN_LIST GAMES_MODULE_IDS)
 add_executable(fourpegs_pointer_tests tests/fourpegs_pointer_tests.cpp)
 target_link_libraries(fourpegs_pointer_tests PRIVATE vendor_game_ui)
