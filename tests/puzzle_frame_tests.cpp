@@ -46,6 +46,9 @@ void check(games::PuzzleKind kind) {
             "Unchanged layout must not rerasterize the board");
     flush(window, painter);
     if (kind == games::PuzzleKind::gems) {
+        // A resting board changes only at the ambient clock's steps (fifteen a second): let one
+        // pass in real time so the tick has breathing or sparkle to draw.
+        std::this_thread::sleep_for(std::chrono::milliseconds(80));
         static_cast<void>(
             window.poll_frame_schedule(gf::FrameClock::now() + std::chrono::milliseconds(30)));
         const gf::Rect damage = window.take_damage().bounds();
@@ -213,6 +216,9 @@ void check_scene_retention(games::PuzzleKind kind) {
     PaintSink painter;
     flush(window, painter);
     window.reset_activity_metrics();
+    // Gems changes only at the ambient clock's steps (fifteen a second): let one pass in real time.
+    if (kind == games::PuzzleKind::gems)
+        std::this_thread::sleep_for(std::chrono::milliseconds(80));
     static_cast<void>(
         window.poll_frame_schedule(gf::FrameClock::now() + std::chrono::milliseconds(30)));
     const gf::Rect damage = window.take_damage().bounds();
