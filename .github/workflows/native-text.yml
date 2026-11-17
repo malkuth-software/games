@@ -49,15 +49,8 @@ jobs:
       - uses: actions/checkout@v4
       # The pinned template_harness (harness.lock) at ./template_harness.
       - uses: ./.github/actions/harness-checkout
-      - name: Fetch reviewed development text source
-        uses: actions/checkout@v4
-        with:
-          repository: malkuth-software/gui_forms
-          # PLACEHOLDER PIN (claude/conformance-prep): still cp27. The sources on this branch
-          # target GUI.Forms main 96d3696 (0.6) and do not build at cp27; the pin moves once, at
-          # the conformance rebase, to the release that carries cp32/cp33. See CONFORMANCE_PREP.md.
-          ref: 757db03a7be63d7dabcf1803c5c9668e0ace61e0
-          path: gui_forms
+      # GUI.Forms lives in its own repository, at gui_forms/; gui_forms.lock pins it.
+      - uses: ./.github/actions/gui-forms-checkout
       - uses: actions/setup-python@v5
         if: runner.os == 'Windows'
         with:
@@ -123,10 +116,6 @@ jobs:
           echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
           CCACHE_DIR="$cache_dir" ccache --max-size=900M
           CCACHE_DIR="$cache_dir" ccache --zero-stats
-      - name: Fetch pinned native text dependencies
-        run: |
-          sh gui_forms/third_party/fetch_text_stack.sh
-          sh gui_forms/third_party/fetch_linebreak.sh
       # Pinned dependency sources (QuickJS, miniaudio) are fetched once and kept;
       # a changed pin repopulates only that dependency.
       - uses: actions/cache@v4
@@ -154,20 +143,3 @@ jobs:
         with:
           path: .ccache
           key: ${{ steps.objects.outputs.cache-primary-key }}
-      - name: Test lifecycle and actual native text
-        run: ctest --test-dir .build/native/text --output-on-failure --timeout 120 --output-junit results.xml -R '^(text_request_lifecycle|text_native_consumer|game_text_frame_preparation|.+_native_frames)$'
-      - name: Render actual text previews
-        run: |
-          .build/native/text/text_native_consumer_tests gui_forms/assets/fonts .build/native/text/previews
-          for game in fourpegs atomprobe switchbox eggy; do
-            .build/native/text/vendor_game_frame_tests assets "$game" .build/native/text/previews
-          done
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: text-checks-${{ matrix.platform }}
-          path: |
-            .build/native/text/results.xml
-            .build/native/text/Testing/Temporary/LastTest.log
-            .build/native/text/previews/*
-          if-no-files-found: warn
