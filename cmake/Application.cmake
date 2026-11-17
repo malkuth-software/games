@@ -124,6 +124,23 @@ add_executable(solitaire_deal_tests tests/solitaire_deal_tests.cpp)
 target_link_libraries(solitaire_deal_tests PRIVATE game_ui)
 add_test(NAME solitaire_deal COMMAND solitaire_deal_tests)
 set_tests_properties(solitaire_deal PROPERTIES TIMEOUT 60 ENVIRONMENT "GAMES_ASSET_DIR=${GAMES_RUNTIME_ASSET_DIR}")
+# The same deal in PlaySuite's real AppKit window at backing scale 2: every presented draw's
+# time, cost and damage from the host's draw trace, judged for gaps and per-card flights
+# (exit 77 at another scale; PLAYSUITE_DEAL_CAPTURE_DIR saves frames of a second deal).
+if(APPLE)
+add_executable(solitaire_deal_native_probe MACOSX_BUNDLE tests/solitaire_deal_native_probe.mm)
+target_link_libraries(solitaire_deal_native_probe PRIVATE game_ui "-framework AppKit")
+gui_forms_add_form(solitaire_deal_native_probe forms/playsuite.form CLASS PlaySuiteWindow NAMESPACE games DERIVED
+                   TYPES "${GAMES_FORM_TYPES}")
+gui_forms_add_theme(solitaire_deal_native_probe themes/playsuite FUNCTION playsuite_theme NAMESPACE games
+                    FORMS forms/playsuite.form)
+add_custom_command(TARGET solitaire_deal_native_probe POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${GUIForms_FONT_DIR}"
+            "$<TARGET_BUNDLE_DIR:solitaire_deal_native_probe>/Contents/Resources/fonts")
+add_test(NAME solitaire_deal_native COMMAND $<TARGET_FILE:solitaire_deal_native_probe>)
+set_tests_properties(solitaire_deal_native PROPERTIES RUN_SERIAL TRUE TIMEOUT 60 SKIP_RETURN_CODE 77
+                     LABELS native ENVIRONMENT "GAMES_ASSET_DIR=${GAMES_RUNTIME_ASSET_DIR}")
+endif()
 if("fourpegs" IN_LIST GAMES_MODULE_IDS)
 add_executable(fourpegs_pointer_tests tests/fourpegs_pointer_tests.cpp)
 target_link_libraries(fourpegs_pointer_tests PRIVATE vendor_game_ui)
