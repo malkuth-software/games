@@ -66,6 +66,7 @@ class PuzzleView final : public gf::Control, public CommandSource {
     int gem_click_ = -1;
     friend class PuzzleScenePart;
     friend struct PuzzleFramebufferTest;
+    friend struct PuzzleGemDamageTest;
     std::array<std::shared_ptr<gf::Control>, 3> scene_parts_;
     void refresh_scene();
     void invalidate_static_scene();
@@ -83,7 +84,9 @@ class PuzzleView final : public gf::Control, public CommandSource {
     // Makes the gem layer an image for a frame the painter draws.
     void upload_gem_layer();
     std::vector<std::uint32_t> gem_pixels_;  // premultiplied BGRA, gem_scale_ x the board
-    render::r3d::Buffers gem_depth_;
+    // Draws the gems (and the pictures below) through GUI.Forms' raster engine; UI thread.
+    GemCanvas gem_canvas_;
+    GemCanvas gem_picture_canvas_;  // the pictures' own, so one can be made mid-drawing
     int gem_scale_ = 1;
     // A resting board copies each gem from its picture instead of drawing it again: one
     // picture for each kind of gem at each of eight sizes of its breath, drawn without its
@@ -101,7 +104,6 @@ class PuzzleView final : public gf::Control, public CommandSource {
     std::vector<GemPicture> gem_pictures_;
     double gem_picture_radius_ = 0;
     render::Order gem_picture_order_ = render::Order::bgra;
-    render::r3d::Buffers gem_picture_depth_;
     // `radius` is the step's, `base` the gems' unbreathing radius (a new one forgets them all).
     const GemPicture& gem_picture(int value, int step, double radius, double base);
     // Laid over the layer inside `clip` (layer pixels).
@@ -110,8 +112,12 @@ class PuzzleView final : public gf::Control, public CommandSource {
     // (its gem, breath, sparkle and place, in quarter layer pixels) and the layer pixels it
     // covered. gem_changed_ holds the device pixels the last render changed; a frame with
     // none is not drawn at all.
+    // A gem that moves every frame (the hovered gem turning, the picked gem pulsing) is
+    // drawn whole each frame inside its own area only; the highlights under the pointer and
+    // the picked gem (gem_overlay_shown_: hover, pick) are drawn again where they changed.
     std::array<std::uint64_t, 64> gem_shown_{};
     std::array<render::Rect, 64> gem_covered_{};
+    std::array<int, 2> gem_overlay_shown_{-1, -1};
     bool gem_partial_ = false;      // the last render drew only what changed
     bool gem_layer_whole_ = false;  // the layer holds every gem as gem_shown_ says
     std::vector<render::Rect> gem_changed_;
@@ -241,6 +247,12 @@ class PuzzleView final : public gf::Control, public CommandSource {
     void untangle_step();
     void untangle_released(const std::array<int, 96>& marks_before);
     std::vector<GemEffect> effects_;
+    // What the running effects covered in the last frame (points): a frame repaints where they
+    // were and where they are, not the whole view (shake and the callout still take it all).
+    std::vector<gf::Rect> effect_areas_shown_;
+    [[nodiscard]] std::vector<gf::Rect> effect_areas() const;
+    // A changed area of the gem layer (device pixels) in points.
+    [[nodiscard]] gf::Rect gem_change_rect(render::Rect device_area) const;
     std::chrono::steady_clock::time_point fx_clock_{};
     std::uint32_t fx_seed_ = 0x9E3779B9u;
     double shake_ = 0, callout_life_ = 0;

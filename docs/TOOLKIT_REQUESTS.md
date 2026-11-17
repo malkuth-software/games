@@ -412,3 +412,34 @@ All five now come from GUI.Forms' card, through its API and the theme:
    to the host's open-URL capability. src/open_link.* is removed.
 `shared/cards/held_card.*` (PlaySuite's turned card) is removed: it had no caller, and
 GUI.Forms' turn was seen in the dogfood build.
+
+## Gems on GUI.Forms' raster engine (found moving the gems off r3d, 2026-11-17)
+
+The gems are drawn with GUI.Drawing (`gui_drawing::GraphicsRecorder` run into a borrowed
+`Bitmap` by `gui_drawing::execute_recorder`; `shared/puzzles/gem_art.*`). What the public
+engine does not yet offer, and how the gems manage meanwhile:
+
+1. **Triangles shaded from their corners' colours.** A facet is shaded across from three
+   corner colours (r3d's Smooth shader). `PathGradientBrush` takes surround colours, but
+   its snapshot keeps only the first and the CPU executor draws it as a radial gradient
+   from the centre, so a per-corner triangle cannot be drawn. The gems shade each facet
+   with a `LinearGradientBrush` along the direction its colour grows fastest, exact for
+   the cut's one-hue facets and matching at the corners elsewhere (a clamped channel, the
+   hypercube's two-colour table). Proposed: `GraphicsRecorder::fill_triangles(std::span<const
+   PointF> points, std::span<const Color> colors)` (three points and colours a triangle,
+   colours interpolated across each), drawn by the executor as vertex-coloured triangles,
+   with the same interpolation rule the gradients use; or `PathGradientBrush` honouring
+   its surround colours.
+2. **A public depth-tested mesh draw.** `stx_raster3d` (the visibility-buffer renderer behind
+   `Plot3DScene`) is private to the plots package, so the gems order their shapes by depth
+   themselves (painter's order by a fixed depth per shape). Needed only for scenes whose
+   shapes interpenetrate; the gems do not.
+3. **Optional: gradient interpolation in stored sRGB.** GUI.Drawing gradients interpolate in
+   linear light (GUI.Forms, 2026-11-16), so a facet's middle tones are a little lighter than
+   r3d's, which interpolated the stored values. A per-brush choice would let a port match
+   its old look exactly; the gems accept the engine's rule.
+4. **Recording without allocation.** Each recorded command copies its points and brush
+   (vectors), so a frame of 64 gems allocates a few thousand small blocks. A recorder that
+   reuses command storage across `reset()` for the same shapes would remove it.
+5. **`execute_recorder` is provisional** (numbered 0.8 as a placeholder, outside the sealed
+   drawing ABI): its names and status values may still change.

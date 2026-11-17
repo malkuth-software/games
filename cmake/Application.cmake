@@ -34,7 +34,7 @@ endif()
 target_link_libraries(vendor_game_ui ${module_link_scope} ${GAMES_MODULE_LIBRARIES}
     game_audio_adapters game_text_frames game_felt game_table_art game_wood GUIForms::Application)
 target_compile_definitions(vendor_game_ui INTERFACE _USE_MATH_DEFINES)
-add_library(game_ui ${GAMES_MODULE_SOURCES} "${GAMES_CATALOG_DIR}/game_registry.cpp" shared/cards/table.cpp shared/cards/dealer.cpp src/presentation.cpp shared/puzzles/puzzle_view.cpp src/collection.cpp
+add_library(game_ui ${GAMES_MODULE_SOURCES} "${GAMES_CATALOG_DIR}/game_registry.cpp" shared/cards/table.cpp shared/cards/dealer.cpp src/presentation.cpp shared/puzzles/puzzle_view.cpp shared/puzzles/gem_art.cpp src/collection.cpp
     games/sudoku/src/sudoku_view.cpp src/suite.cpp src/text_sprites.cpp src/shelf.cpp src/capsule.cpp src/capsule_title_face.cpp shared/puzzles/kitten.cpp
     src/help_book.cpp src/help_content.cpp src/card_remarks.cpp src/settings_sheet.cpp
     src/suite_model.cpp src/paper_sheet.cpp)
@@ -117,6 +117,10 @@ set_tests_properties(puzzle_native_framebuffers PROPERTIES TIMEOUT 120 ENVIRONME
 endif()
 target_link_libraries(puzzle_frame_tests PRIVATE game_ui)
 add_test(NAME puzzle_frames COMMAND puzzle_frame_tests)
+# The gems drawn through GUI.Forms' raster engine (shared/puzzles/gem_art.cpp).
+add_executable(gem_art_tests tests/gem_art_tests.cpp)
+target_link_libraries(gem_art_tests PRIVATE game_ui)
+add_test(NAME gem_art COMMAND gem_art_tests)
 set_tests_properties(puzzle_frames PROPERTIES ENVIRONMENT "GAMES_ASSET_DIR=${GAMES_RUNTIME_ASSET_DIR}")
 # The Solitaire deal stepped frame by frame through the window's schedule (wakes, damage,
 # where each card is drawn) against the deal's own sequence.

@@ -241,6 +241,84 @@ void check_scene_retention(games::PuzzleKind kind) {
             "Closing Help restores independently retained animation");
 }
 } // namespace
+namespace games {
+// Gems repaint only what changed: hovering one gem damages only that gem's square (with motion
+// reduced nothing else moves, so the damage is exact), the hovered gem turning keeps the
+// resting board's partial drawing, and the timer settles to the slow rate when nothing but
+// breathing moves, and stops when nothing moves at all.
+struct PuzzleGemDamageTest {
+    static bool covers(gf::Rect area, gf::Point point) {
+        return point.x >= area.x && point.y >= area.y && point.x < area.x + area.width &&
+               point.y < area.y + area.height;
+    }
+    static void run() {
+        std::shared_ptr<PuzzleView> made = gf::make_control<PuzzleView>(gf::StableId("gems-damage"), PuzzleKind::gems);
+        PuzzleView& view = *made;
+        view.game.deal(42);
+        gf::Window window(made, {1060, 680});
+        window.perform_layout();
+        view.activate();
+        PaintSink painter;
+        flush(window, painter);
+        view.intro_ = false;
+        view.reduced_ = true;
+        view.render();  // the whole resting layer, once
+        flush(window, painter);
+        const gf::Rect board = view.board();
+        const double cell = board.width / 8;
+        const int square = 27;
+        const gf::Rect square_rect{board.x + (square % 8) * cell, board.y + (square / 8) * cell, cell, cell};
+        // The square and a few points around it (a layer pixel beyond it, rounded outward).
+        const double margin = cell * .1 + 4;
+        const gf::Rect allowed{square_rect.x - margin, square_rect.y - margin, square_rect.width + margin * 2,
+                               square_rect.height + margin * 2};
+        gem_pointer(window, view, gf::PointerAction::move, square);
+        require(view.hover_ == square, "The pointer hovers the gem under it");
+        const gf::Rect hovered = window.take_damage().bounds();
+        require(!hovered.empty(), "Hovering a gem shows its highlight");
+        require(gf::Rect::intersection(hovered, allowed) == hovered, "Hovering one gem damages only that gem's square");
+        flush(window, painter);
+        gf::PointerEvent away;
+        away.action = gf::PointerAction::move;
+        away.position = view.point_to_window({board.x - 20, board.y + 10});
+        static_cast<void>(window.dispatch_pointer(away));
+        require(view.hover_ < 0, "The pointer off the board hovers nothing");
+        const gf::Rect left = window.take_damage().bounds();
+        require(!left.empty() && gf::Rect::intersection(left, allowed) == left,
+                "Leaving a gem damages only the square it leaves");
+        // Nothing moves with motion reduced: a tick stops the timer.
+        view.tick();
+        require(!(*view.timer_).enabled(), "A still board stops its timer");
+        // With motion the stones breathe: an idle board ticks at the slow rate.
+        view.reduced_ = false;
+        view.request_render();
+        view.tick();
+        require((*view.timer_).enabled() && (*view.timer_).interval() >= std::chrono::milliseconds(66),
+                "An idle board settles to the slow rate");
+        // A hovered gem turns every frame, drawn again inside its own area only.
+        view.hover_ = square;
+        view.tick();
+        require((*view.timer_).interval() == std::chrono::milliseconds(16), "A turning gem ticks every frame");
+        view.render();
+        require(view.gem_partial_, "A hovered gem keeps the resting board's partial drawing");
+        const gf::Point center{square_rect.x + cell * .5, square_rect.y + cell * .5};
+        bool turning_drawn = false;
+        for (const render::Rect& changed : view.gem_changed_) {
+            const gf::Rect area = view.gem_change_rect(changed);
+            require(area.width < board.width * .5 || area.height < board.height * .5,
+                    "No change of a hovered resting board spans the board");
+            turning_drawn = turning_drawn || covers(area, center);
+        }
+        require(turning_drawn, "The turning gem is drawn again every frame");
+        view.hover_ = -1;
+        view.tick();
+        require((*view.timer_).enabled() && (*view.timer_).interval() >= std::chrono::milliseconds(66),
+                "Leaving the gem settles the timer to the slow rate again");
+        flush(window, painter);
+        std::cout << "Gems: hover damages one square, partial drawing while a gem turns, timer settles\n";
+    }
+};
+} // namespace games
 int main() {
     try {
         const std::filesystem::path scratch = games_test::scratch_directory("puzzle-frames-");
@@ -259,6 +337,7 @@ int main() {
         check_gems_input(true);
         check_scene_retention(games::PuzzleKind::gems);
         check_scene_retention(games::PuzzleKind::untangle);
+        games::PuzzleGemDamageTest::run();
         check_untangle_edge_drag();
         preferences.reduced = true;
         require(games::save_cabinet(games::cabinet_path(), preferences),

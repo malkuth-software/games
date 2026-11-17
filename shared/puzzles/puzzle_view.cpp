@@ -580,7 +580,6 @@ void PuzzleView::fit_raster() {
             raster_.width = w;
             raster_.height = h;
             gem_pixels_.assign(static_cast<std::size_t>(w) * static_cast<std::size_t>(h), 0);
-            gem_depth_.resize(w, h, false);
             gem_layer_whole_ = false;
         }
         return;
@@ -604,6 +603,12 @@ gf::Rect PuzzleView::gem_rect() const {
     const render::Rect box = gem_box();
     return {box.x0 / device, box.y0 / device, (box.x1 - box.x0) / device,
             (box.y1 - box.y0) / device};
+}
+gf::Rect PuzzleView::gem_change_rect(render::Rect device_area) const {
+    const double device = attached_window() ? (*attached_window()).scale() : 1.0;
+    const gf::Rect area{device_area.x0 / device, device_area.y0 / device, (device_area.x1 - device_area.x0) / device,
+                        (device_area.y1 - device_area.y0) / device};
+    return area;
 }
 void PuzzleView::upload_gem_layer() {
     if (!gem_image_stale_ && frame_image_.value)
@@ -701,11 +706,12 @@ const PuzzleView::GemPicture& PuzzleView::gem_picture(int value, int step, doubl
     made.key = key;
     made.side = static_cast<int>(std::ceil(radius * 2.7)) + 6;
     made.pixels.assign(static_cast<std::size_t>(made.side) * static_cast<std::size_t>(made.side), 0U);
-    gem_picture_depth_.resize(made.side, made.side, false);
-    gem_picture_depth_.clear({0, 0, made.side, made.side});
-    render::r3d::Pass pass{render::Target{made.pixels.data(), made.side, made.side, made.side, gem_order_},
-                           &gem_picture_depth_, render::Rect{0, 0, made.side, made.side}};
-    draw_gem(pass, made.side * .5, made.side * .5, radius, value, 0, 0, 0.F);
+    gem_picture_canvas_.begin(render::Target{made.pixels.data(), made.side, made.side, made.side, gem_order_},
+                              render::Rect{0, 0, made.side, made.side});
+    gem_picture_canvas_.gem(GemPlacement{.x = made.side * .5, .y = made.side * .5, .radius = radius, .value = value});
+    // A refused drawing leaves the picture clear: that gem is missing from resting boards until
+    // the gems change size and the pictures are made again.
+    static_cast<void>(gem_picture_canvas_.finish());
     made.rows.assign(static_cast<std::size_t>(made.side) + 1, 0);
     for (int row = 0; row < made.side; ++row) {
         made.rows[static_cast<std::size_t>(row)] = static_cast<int>(made.runs.size());
@@ -780,9 +786,8 @@ void PuzzleView::render() {
         if (order != gem_order_)
             gem_layer_whole_ = false;
         gem_order_ = order;
-        render::r3d::Pass layer{render::Target{gem_pixels_.data(), raster_.width, raster_.width,
-                                              raster_.height, gem_order_},
-                                &gem_depth_, render::Rect{0, 0, raster_.width, raster_.height}};
+        const render::Target layer{gem_pixels_.data(), raster_.width, raster_.width, raster_.height, gem_order_};
+        const render::Rect whole{0, 0, raster_.width, raster_.height};
         // The board's corner inside the layer, which starts on a whole device pixel.
         const double device = attached_window() ? (*attached_window()).scale() : 1.0;
         const render::Rect box = gem_box();
@@ -841,12 +846,15 @@ void PuzzleView::render() {
         if (intro_ && intro_t > 1.4)
             intro_ = false;
         // A resting board: every gem a copy of its picture at one of eight breaths, its
-        // sparkle over it. Only the gems that look different from the last render are drawn
-        // again, with whatever overlaps where they were and are.
-        if (!moving && intro_t >= 1.4 && lifted < 0 && partner < 0 && gem_pick_ < 0 && hover_ < 0) {
+        // sparkle over it, but for the hovered gem turning and the picked gem pulsing, which
+        // are drawn whole. Only the gems that look different from the last render are drawn
+        // again, with whatever overlaps where they were and are; a gem that moves every frame
+        // is drawn again inside its own area only.
+        if (!moving && intro_t >= 1.4 && lifted < 0 && partner < 0) {
             struct Resting {
                 int value = 0, step = 0;
-                double x = 0, y = 0, size = 0, glisten = 0;
+                double x = 0, y = 0, size = 0, glisten = 0, angle = 0;
+                bool live = false;  // drawn whole every frame (turning or pulsing)
                 std::uint64_t key = 0;
                 render::Rect box{};
             };
@@ -882,58 +890,113 @@ void PuzzleView::render() {
                           (static_cast<std::uint64_t>(reach + 1) & 0xFFFU) << 12 |
                           (static_cast<std::uint64_t>(quarter_x) & 0xFFFFU) << 24 |
                           (static_cast<std::uint64_t>(quarter_y) & 0xFFFFU) << 40;
+                // The hovered gem turns (when motion is allowed) and the picked gem pulses, as
+                // the whole drawing below turns and pulses them.
+                gem.live = (hover_ == i && !reduced_) || i == gem_pick_;
+                if (gem.live) {
+                    gem.angle = reduced_ ? 0 : time * 2.1;
+                    gem.size = reduced_ ? base : base * (1 + .022 * breath);
+                    if (i == gem_pick_)
+                        gem.size *= 1.08 + .04 * std::sin(time * 7);
+                    gem.glisten = glisten;
+                }
                 const int side = static_cast<int>(std::ceil(gem.size * 2.7)) + 6;
                 const int left = static_cast<int>(std::lround(gem.x - side * .5)),
                           top = static_cast<int>(std::lround(gem.y - side * .5));
                 gem.box = render::Rect{left - 1, top - 1, left + side + 1, top + side + 1};
             }
-            const render::Rect whole{0, 0, raster_.width, raster_.height};
+            // A square of the board in layer pixels, a pixel beyond its edges.
+            struct SquareBox {
+                double origin_x, origin_y, cell;
+                render::Rect operator()(int i) const {
+                    return render::Rect{static_cast<int>(std::floor(origin_x + (i % 8) * cell)) - 1,
+                                        static_cast<int>(std::floor(origin_y + (i / 8) * cell)) - 1,
+                                        static_cast<int>(std::ceil(origin_x + (i % 8 + 1) * cell)) + 1,
+                                        static_cast<int>(std::ceil(origin_y + (i / 8 + 1) * cell)) + 1};
+                }
+            };
+            const SquareBox square_box{origin_x, origin_y, cell};
+            const std::array<int, 2> overlay{hover_ >= 0 && hover_ < 64 ? hover_ : -1, gem_pick_};
             std::vector<render::Rect> regions;
             if (!gem_layer_whole_)
                 regions.push_back(whole);
-            else
-                for (int i = 0; i < 64; ++i)
-                    if (gems[static_cast<std::size_t>(i)].key != gem_shown_[static_cast<std::size_t>(i)])
-                        regions.push_back(gem_covered_[static_cast<std::size_t>(i)]
-                                              .united(gems[static_cast<std::size_t>(i)].box)
-                                              .intersected(whole));
+            else {
+                for (int i = 0; i < 64; ++i) {
+                    const Resting& gem = gems[static_cast<std::size_t>(i)];
+                    if (gem.live || gem.key != gem_shown_[static_cast<std::size_t>(i)])
+                        regions.push_back(
+                            gem_covered_[static_cast<std::size_t>(i)].united(gem.box).intersected(whole));
+                }
+                // The highlights compose_gems lays under the gems: the hovered square, and the
+                // picked square and its four neighbours. Where they come or go, those squares
+                // are presented again; the picked square's ring pulses every frame.
+                if (overlay[1] >= 0)
+                    regions.push_back(square_box(overlay[1]).intersected(whole));
+                if (overlay != gem_overlay_shown_)
+                    for (int k = 0; k < 2; ++k) {
+                        const std::array<int, 2> squares{overlay[static_cast<std::size_t>(k)],
+                                                         gem_overlay_shown_[static_cast<std::size_t>(k)]};
+                        for (const int square : squares) {
+                            if (square < 0 || square >= 64)
+                                continue;
+                            regions.push_back(square_box(square).intersected(whole));
+                            if (k == 0)
+                                continue;
+                            for (const int d : {-8, 8, -1, 1}) {
+                                const int n = square + d;
+                                if (n < 0 || n >= 64 || ((d == 1 || d == -1) && n / 8 != square / 8))
+                                    continue;
+                                regions.push_back(square_box(n).intersected(whole));
+                            }
+                        }
+                    }
+            }
             for (const render::Rect& region : regions) {
                 if (region.empty())
                     continue;
                 for (int y = region.y0; y < region.y1; ++y)
                     std::fill_n(gem_pixels_.data() + static_cast<std::size_t>(y) * raster_.width + region.x0,
                                 region.x1 - region.x0, 0U);
-                gem_depth_.clear(region);
-                render::r3d::Pass clipped{render::Target{gem_pixels_.data(), raster_.width, raster_.width,
-                                                         raster_.height, gem_order_},
-                                          &gem_depth_, region};
+                // The copies go straight into the layer; the canvas draws the sparkles and the
+                // moving gems over them when it finishes.
+                gem_canvas_.begin(layer, region);
                 for (const Resting& gem : gems) {
                     if (!gem.value || gem.box.intersected(region).empty())
                         continue;
+                    if (gem.live) {
+                        gem_canvas_.gem(GemPlacement{.x = gem.x, .y = gem.y, .radius = gem.size, .value = gem.value,
+                                                     .angle = gem.angle, .glisten = gem.glisten});
+                        continue;
+                    }
                     copy_gem(gem_picture(gem.value, gem.step, gem.size, base), gem.x, gem.y, region);
-                    draw_gem_sparkle(clipped, gem.x, gem.y, gem.size, gem.glisten, 0.F);
+                    gem_canvas_.sparkle(GemSparkle{.x = gem.x, .y = gem.y, .radius = gem.size, .glisten = gem.glisten});
                 }
+                // A refused drawing leaves the copies without their sparkles or the moving gem
+                // (until it is drawn again): nothing else to undo.
+                static_cast<void>(gem_canvas_.finish());
             }
             gem_changed_.clear();
             for (const render::Rect& region : regions) {
                 if (region.empty())
                     continue;
-                const render::Rect device_box = gem_box();
-                gem_changed_.push_back({device_box.x0 + region.x0 / gem_scale_, device_box.y0 + region.y0 / gem_scale_,
-                                        device_box.x0 + (region.x1 + gem_scale_ - 1) / gem_scale_,
-                                        device_box.y0 + (region.y1 + gem_scale_ - 1) / gem_scale_});
+                gem_changed_.push_back({box.x0 + region.x0 / gem_scale_, box.y0 + region.y0 / gem_scale_,
+                                        box.x0 + (region.x1 + gem_scale_ - 1) / gem_scale_,
+                                        box.y0 + (region.y1 + gem_scale_ - 1) / gem_scale_});
             }
             for (int i = 0; i < 64; ++i) {
                 gem_shown_[static_cast<std::size_t>(i)] = gems[static_cast<std::size_t>(i)].key;
                 gem_covered_[static_cast<std::size_t>(i)] = gems[static_cast<std::size_t>(i)].box;
             }
+            gem_overlay_shown_ = overlay;
             gem_layer_whole_ = true;
             gem_partial_ = true;
         } else {
             gem_partial_ = false;
             gem_layer_whole_ = false;  // a resting board after this is drawn whole once
             std::fill(gem_pixels_.begin(), gem_pixels_.end(), 0U);
-            gem_depth_.clear({0, 0, raster_.width, raster_.height});
+            // Copies go straight into the layer as they come; the canvas draws everything else
+            // over them when it finishes, farthest first, the lifted gem above all.
+            gem_canvas_.begin(layer, whole);
             for (int pass = 0; pass < 2; ++pass)
                 for (int i = 0; i < 64; ++i) {
                     // The lifted gem draws last, above everything it passes over.
@@ -1009,14 +1072,18 @@ void PuzzleView::render() {
                         const double breath = reduced_ ? 0 : std::sin(time * 2.3 + i * 1.7);
                         const int step = reduced_ ? 8 : static_cast<int>(std::lround((breath + 1) * 3.5));
                         const double size = reduced_ ? base : base * (1 + .022 * (step / 3.5 - 1));
-                        copy_gem(gem_picture(value, step, size, base), x + origin_x, y + origin_y,
-                                 {0, 0, raster_.width, raster_.height});
-                        draw_gem_sparkle(layer, x + origin_x, y + origin_y, size, glisten, 0.F);
+                        copy_gem(gem_picture(value, step, size, base), x + origin_x, y + origin_y, whole);
+                        gem_canvas_.sparkle(
+                            GemSparkle{.x = x + origin_x, .y = y + origin_y, .radius = size, .glisten = glisten});
                         continue;
                     }
-                    draw_gem(layer, x + origin_x, y + origin_y, radius, value, spin, glisten,
-                             i == lifted ? -20.F : 0.F);
+                    gem_canvas_.gem(GemPlacement{.x = x + origin_x, .y = y + origin_y, .radius = radius,
+                                                 .value = value, .angle = spin, .glisten = glisten,
+                                                 .lifted = i == lifted});
                 }
+            // A refused drawing leaves the layer with the copies and whatever was drawn before
+            // the refusal; the next frame draws it whole again.
+            static_cast<void>(gem_canvas_.finish());
         }
     } else
         return;
@@ -1033,6 +1100,36 @@ void PuzzleView::render() {
                                       : std::span<const std::byte>(raster_.pixels);
     gf::Window& window = *attached_window();
     gf::Control& consumer = scene_parts_[1] ? *scene_parts_[1] : *this;
+    // A resting board patches only the areas of the layer that changed, each damaging its own
+    // area (none changed: no patch and no damage). A refused patch falls back to the whole.
+    const gf::Size layer_size{static_cast<double>(raster_.width), static_cast<double>(raster_.height)};
+    if (game.kind == PuzzleKind::gems && gem_partial_ && image_.value && image_size_ == layer_size) {
+        const render::Rect box = gem_box();
+        const render::Rect layer_bounds{0, 0, raster_.width, raster_.height};
+        bool patched_all = true;
+        for (const render::Rect& changed : gem_changed_) {
+            const render::Rect area = render::Rect{(changed.x0 - box.x0) * gem_scale_, (changed.y0 - box.y0) * gem_scale_,
+                                                   (changed.x1 - box.x0) * gem_scale_, (changed.y1 - box.y0) * gem_scale_}
+                                          .intersected(layer_bounds);
+            if (area.empty())
+                continue;
+            const std::size_t first = static_cast<std::size_t>(area.y0) * static_cast<std::size_t>(raster_.width) +
+                                      static_cast<std::size_t>(area.x0);
+            const std::span<const std::uint32_t> from(gem_pixels_.data() + first, gem_pixels_.size() - first);
+            const gf::ImageLoadResult patched = window.patch_bgra32_premultiplied(
+                image_, static_cast<std::uint32_t>(area.x0), static_cast<std::uint32_t>(area.y0),
+                static_cast<std::uint32_t>(area.x1 - area.x0), static_cast<std::uint32_t>(area.y1 - area.y0),
+                static_cast<std::uint64_t>(raster_.width) * 4U, std::as_bytes(from), consumer,
+                gem_change_rect(changed));
+            if (!patched) {
+                patched_all = false;
+                break;
+            }
+            image_ = patched.image;
+        }
+        if (patched_all)
+            return;
+    }
     gf::ImageLoadResult result =
         !image_.value ? window.load_bgra32_premultiplied(raster_.width, raster_.height,
                                                          raster_.width * 4, bytes)
@@ -1140,6 +1237,61 @@ void PuzzleView::step_effects() {
     std::erase_if(effects_, ExpiredEffect{});
     shake_ = std::max(0.0, shake_ - dt * 2.6);
     callout_life_ = std::max(0.0, callout_life_ - dt);
+}
+// Each effect's bounds as paint_gems draws it (unshaken), with room for anti-aliased edges.
+std::vector<gf::Rect> PuzzleView::effect_areas() const {
+    std::vector<gf::Rect> areas;
+    areas.reserve(effects_.size());
+    const double cell = board_.width / 8;
+    const double margin = 3;
+    for (const GemEffect& e : effects_) {
+        const double k = std::clamp(e.age / e.life, 0.0, 1.0), fade = 1 - k;
+        const gf::Point q{board_.x + e.x * cell, board_.y + e.y * cell};
+        double reach = 0;  // half the side of a square about q, for the round effects
+        switch (e.kind) {
+        case GemEffect::shard:
+            reach = e.size * cell * (1 - k * .5);
+            break;
+        case GemEffect::ring:
+            reach = cell * (.25 + e.size * k) + 3;
+            break;
+        case GemEffect::shock:
+            reach = cell * (.3 + e.size * k) + cell * .12 * fade + 1;
+            break;
+        case GemEffect::beam_row:
+        case GemEffect::beam_column: {
+            const double half = cell * (.12 + .3 * fade);
+            const gf::Rect beam = e.kind == GemEffect::beam_row
+                                      ? gf::Rect{board_.x, q.y - half, board_.width, half * 2}
+                                      : gf::Rect{q.x - half, board_.y, half * 2, board_.height};
+            areas.push_back({beam.x - margin, beam.y - margin, beam.width + margin * 2, beam.height + margin * 2});
+            continue;
+        }
+        case GemEffect::points: {
+            // The label is at most a few digits in a face of at most 26 points, centred on q
+            // across and drawn from q down (its shadow 2 points lower).
+            const double size = std::clamp(cell * .42, 14.0, 26.0);
+            areas.push_back({q.x - size * 2.5, q.y - size * 1.5, size * 5, size * 3.5});
+            continue;
+        }
+        case GemEffect::bolt: {
+            // From q to its far end, each joint jittered by up to .225 cells, 4 points wide.
+            const gf::Point end{q.x + e.vx * cell, q.y + e.vy * cell};
+            const double jitter = cell * .25 + 2;
+            const double x0 = std::min(q.x, end.x) - jitter, y0 = std::min(q.y, end.y) - jitter;
+            const double x1 = std::max(q.x, end.x) + jitter, y1 = std::max(q.y, end.y) + jitter;
+            areas.push_back({x0 - margin, y0 - margin, x1 - x0 + margin * 2, y1 - y0 + margin * 2});
+            continue;
+        }
+        default:
+            // Not an effect paint_gems draws: the whole board, to be safe.
+            areas.push_back(board_);
+            continue;
+        }
+        reach += margin;
+        areas.push_back({q.x - reach, q.y - reach, reach * 2, reach * 2});
+    }
+    return areas;
 }
 void PuzzleView::paint_gems(gf::Painter& p, int part) {
     const gf::Rect b = client_rectangle();
@@ -3158,7 +3310,7 @@ void PuzzleView::tick() {
     const bool was_celebrating =
         game.kind == PuzzleKind::untangle && game.state.won && animation_duration_ > 0;
     const bool was_shaking = shake_ > 0;
-    const bool had_outer_effects = !effects_.empty() || shake_ > 0 || callout_life_ > 0;
+    const bool had_whole_view_effects = shake_ > 0 || callout_life_ > 0;
     if (game.kind == PuzzleKind::gems) {
         step_effects();
         if (gem_spring_ >= 0) {
@@ -3238,16 +3390,36 @@ void PuzzleView::tick() {
     }
     if (game.kind != PuzzleKind::cube || raster_dirty_)
         render();
-    // Celebrations draw beyond the board, so the whole view repaints while they run.
+    // A shake moves everything and the callout is drawn across the view, so the whole view
+    // repaints while they run. Effects repaint where they were and where they are now.
     if (game.kind == PuzzleKind::gems) {
         if (was_shaking || shake_ > 0)
             invalidate_static_scene();
-        const bool outer = had_outer_effects || !effects_.empty() || shake_ > 0 || callout_life_ > 0;
-        // A resting board shows only the gems that changed (none: no frame).
-        if (gem_partial_ && !outer)
+        const bool whole_view = had_whole_view_effects || shake_ > 0 || callout_life_ > 0;
+        std::vector<gf::Rect> effects_now = effect_areas();
+        const bool effects_shown = !effects_now.empty() || !effect_areas_shown_.empty();
+        if (whole_view) {
+            invalidate_animation(client_rectangle());
+        } else if (gem_partial_ && !effects_shown) {
+            // A resting board shows only the gems that changed (none: no frame).
             present_gem_changes();
-        else
-            invalidate_animation(outer ? client_rectangle() : board_);
+        } else if (effects_shown) {
+            // The gems that changed (or the whole board while they move), and the effects.
+            std::vector<gf::Rect> areas;
+            areas.reserve(gem_changed_.size() + effects_now.size() + effect_areas_shown_.size() + 1);
+            if (gem_partial_)
+                for (const render::Rect& changed : gem_changed_)
+                    areas.push_back(gem_change_rect(changed));
+            else
+                areas.push_back(board_);
+            gem_changed_.clear();
+            areas.insert(areas.end(), effect_areas_shown_.begin(), effect_areas_shown_.end());
+            areas.insert(areas.end(), effects_now.begin(), effects_now.end());
+            invalidate_animation_areas(areas);
+        } else {
+            invalidate_animation(board_);
+        }
+        effect_areas_shown_ = std::move(effects_now);
     } else if (game.kind != PuzzleKind::untangle) {
         if (animation_duration_ > 0)
             invalidate_scene();
@@ -3259,7 +3431,7 @@ void PuzzleView::tick() {
         // Eggy is drawn), five with the window behind another.
         const bool breathing_only = animation_duration_ <= 0 && effects_.empty() && !intro_ &&
                                     gem_spring_ < 0 && gem_pick_ < 0 && drag_ < 0 && shake_ <= 0 &&
-                                    callout_life_ <= 0 && hover_ < 0;
+                                    callout_life_ <= 0 && (hover_ < 0 || reduced_);
         const gf::Window* window = attached_window();
         const bool front = window == nullptr || (*window).active();
         (*timer_).set_interval(std::chrono::milliseconds(breathing_only ? (front ? 66 : 200) : 16));
@@ -3366,9 +3538,14 @@ void PuzzleView::pointer_move(gf::MouseEventArgs& e) {
     if (game.kind == PuzzleKind::gems) {
         if (hover_ != cell) {
             hover_ = cell;
+            // With motion reduced nothing turns and no timer runs: the squares that changed
+            // are drawn now. Otherwise the next tick draws the hovered gem turning.
             if (reduced_) {
-                request_render();
-                invalidate_animation(board_);
+                render();
+                if (gem_partial_)
+                    present_gem_changes();
+                else
+                    invalidate_animation(board_);
             }
         }
     }
