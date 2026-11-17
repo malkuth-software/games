@@ -126,6 +126,20 @@ class Table final : public gf::Control, public CommandSource {
     void print_stale();
     void keep_print(Printed& printed, const Sprite& sprite, std::span<const std::byte> pixels);
     void forget_pictures(gf::SurfaceRoot& window);
+    // Flight pictures: each face, and the chosen back, printed once at the cards' device size
+    // for cards in the air that have no picture of their own (a deal turns most cards over).
+    // Drawn at that size or larger as a card rises, they ask the window for no minified
+    // artwork: GUI.Forms resamples every image drawn below 1x through stx_conv at each new
+    // device size, and the 360 x 504 artwork drawn at a card's changing size in the air cost
+    // 70 to 280 ms a frame (solitaire_deal_native, 2026-11-17). Current while flight_generation_
+    // is printer_.generation() (and, for the back, flight_back_design_ is back_).
+    std::array<gf::ImageId, 52> flight_faces_{};
+    gf::ImageId flight_back_{};
+    int flight_generation_ = -1, flight_back_design_ = -1;
+    // Prints the flight pictures the moving cards need that are not current.
+    void prepare_flight_pictures();
+    // The flight picture of `card` showing its face (`up`) or the back; none while not printed.
+    [[nodiscard]] gf::ImageId flight_picture(const Card& card, bool up) const;
     std::array<Sprite, 104> sprites_{};
     std::array<gf::Rect, pile_count> slots_{};
     std::vector<int> pass_cards_;
