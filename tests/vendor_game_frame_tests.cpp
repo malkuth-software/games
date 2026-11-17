@@ -324,11 +324,11 @@ int main(const int argc, char** const argv) {
         help = {};
         if (game == "koikoi") {
             const gf::FrameTime deadline = gf::FrameClock::now() + std::chrono::seconds(8);
-            while (window.next_wake() && gf::FrameClock::now() < deadline) {
+            while (window.next_wake().present() && gf::FrameClock::now() < deadline) {
                 static_cast<void>(window.poll_frame_schedule(gf::FrameClock::now()));
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
             }
-            require(!window.next_wake(), "Settled Koi-Koi stops its timer entirely");
+            require(window.next_wake().absent(), "Settled Koi-Koi stops its timer entirely");
             const std::uint64_t settled = (*surface).snapshot().published_generation;
             static_cast<void>(
                 window.poll_frame_schedule(gf::FrameClock::now() + std::chrono::seconds(1)));

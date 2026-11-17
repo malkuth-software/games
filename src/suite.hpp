@@ -1,6 +1,7 @@
 #pragma once
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/theme/part_painting/part_painting.hpp"
+#include <stxlib/optional.hpp>
 #include "game_entries.hpp"
 #include <array>
 #include <cstdint>
@@ -108,7 +109,7 @@ gf::Rect outset(gf::Rect r, double amount);
 // its border inside `bounds`, so a caller that stroked a path centred on a rect passes
 // that rect grown by half the stroke.
 // The part key a skinned part is painted under, so `::part(<name>)` rules reach it.
-[[nodiscard]] std::optional<gf::PartKey> skin_part_key(gf::PartRole role);
+[[nodiscard]] stxlib::Optional<gf::PartKey> skin_part_key(gf::PartRole role);
 void paint_skin_part(gf::Painter& p, const gf::Control& control, gf::PartRole role, gf::Rect bounds,
                      gf::AnatomyStateSet states, std::optional<double> radius,
                      gf::ControlVisualRole family = gf::ControlVisualRole::button);

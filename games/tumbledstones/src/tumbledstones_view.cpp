@@ -654,7 +654,8 @@ void TumbledStonesView::handle_pointer(gf::PointerEvent& event) {
     if (panel_ != Panel::none) {
         const int button = panel_button(x, y);
         if (event.action == gf::PointerAction::move) {
-            cursor = button != 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+            const gf::CursorKind pointer_shape = button != 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+            cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
         } else if (event.action == gf::PointerAction::down && event.button == gf::PointerButton::primary) {
             activate();
             pressed_button_ = button;
@@ -693,7 +694,8 @@ void TumbledStonesView::handle_pointer(gf::PointerEvent& event) {
             // The keys carry on from the stone under the pointer.
             if (hover >= 0)
                 cursor_ = hover;
-            cursor = hover >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+            const gf::CursorKind pointer_shape = hover >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+            cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
             render_dirty_ = true;
         }
         // Moving off the stone in hand sets it down.

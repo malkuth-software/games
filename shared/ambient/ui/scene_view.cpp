@@ -599,7 +599,8 @@ void SceneView::handle_pointer(gf::PointerEvent& event) {
             request_frame();
             event.handled = true;
         } else if (!dragging_) {
-            cursor = live && (*scenery_).grabbable(x, y) ? gf::CursorKind::hand : gf::CursorKind::arrow;
+            const gf::CursorKind pointer_shape = live && (*scenery_).grabbable(x, y) ? gf::CursorKind::hand : gf::CursorKind::arrow;
+            cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
         }
     } else if (event.action == gf::PointerAction::down && event.button == gf::PointerButton::primary) {
         activate();
@@ -618,7 +619,7 @@ void SceneView::handle_pointer(gf::PointerEvent& event) {
         request_frame();
         event.handled = true;
     } else if (event.action == gf::PointerAction::leave && !dragging_) {
-        cursor = gf::CursorKind::arrow;
+        cursor = stxlib::Optional<gf::CursorKind>::of(gf::CursorKind::arrow);
     }
     finish(work);
 }

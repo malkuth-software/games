@@ -879,7 +879,8 @@ void ZenView::handle_pointer(gf::PointerEvent& e) {
         } else {
             update_hover();
         }
-        cursor = hover_ok_ ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        const gf::CursorKind pointer_shape = hover_ok_ ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
         return;
     }
     if (e.action == gf::PointerAction::down) {
@@ -1208,7 +1209,7 @@ const char* const kHelp[] = {
 // Property writes compare first: an equal font, text, visibility or enabled state
 // marks nothing, so laying out never asks for another layout.
 void font(gf::Label& label, double size, int weight = 400, bool italic = false) {
-    label.font = gf::FontSpec{gf::FontRole::content, size, static_cast<std::uint16_t>(weight), italic};
+    label.font = stxlib::Optional<gf::FontSpec>::of(gf::FontSpec{gf::FontRole::content, size, static_cast<std::uint16_t>(weight), italic});
 }
 void set_words(gf::Label& label, const std::string& words) {
     label.text = words;
@@ -1237,7 +1238,7 @@ std::shared_ptr<games::SuiteButton> ZenView::make_button(const std::string& id, 
 std::shared_ptr<gf::Label> ZenView::make_label(const std::string& id, double size, int weight, bool italic, gf::Color colour, bool wrap) {
     std::shared_ptr<gf::Label> l = gf::make_control<Words>(games::stable_id("zc." + id));
     font(*l, size, weight, italic);
-    (*l).fore_color = colour;
+    (*l).fore_color = stxlib::Optional<gf::Color>::of(colour);
     (*l).use_mnemonic = false;
     if (wrap) {
         (*l).text_wrapping = gf::TextWrapping::word;
@@ -1266,7 +1267,7 @@ void ZenView::initialize_control_tree() {
     hud_.hint = gf::make_control<Words>(gf::StableId("zc.hint"));
     (*hud_.hint).text_wrapping = gf::TextWrapping::word;
     (*hud_.hint).use_mnemonic = false;
-    (*hud_.hint).fore_color = gf::Color::rgba(255, 255, 255, 235);
+    (*hud_.hint).fore_color = stxlib::Optional<gf::Color>::of(gf::Color::rgba(255, 255, 255, 235));
     (*hud_.hint).set_paint_plane(gf::PaintPlane::overlay);
     (*hud_.hint).visible = false;
     add_child(hud_.hint);
@@ -1391,7 +1392,7 @@ void ZenView::update_hud() {
     if (std::abs(fade - say_fade_) > 0.004 || (fade == 0) != (say_fade_ == 0)) {
         say_fade_ = fade;
         (*hud_.say).set_fade(fade);
-        (*hud_.say_text).fore_color = ink(kInk, fade);
+        (*hud_.say_text).fore_color = stxlib::Optional<gf::Color>::of(ink(kInk, fade));
     }
     if (steering && !open) {
         (*hud_.slings).set_tension((*run_).world().hold_state().tension);
@@ -1427,7 +1428,7 @@ void ZenView::update_hud() {
     show(*hud_.hint, working && !hint.empty());
     set_words(*hud_.hint, hint);
     {
-        (*hud_.hint).font = gf::FontSpec{gf::FontRole::content, small ? 10.5 : 11.5, 400, false};
+        (*hud_.hint).font = stxlib::Optional<gf::FontSpec>::of(gf::FontSpec{gf::FontRole::content, small ? 10.5 : 11.5, 400, false});
     }
     show(*hud_.slings, working && steering);
     show(*hud_.music, working && !options_.hosted);
@@ -1473,7 +1474,7 @@ void ZenView::update_hud() {
     }
     font(*hud_.sheet_title, panel_ == Panel::sites ? 19 : 20, 700, true);
     {
-        const gf::HorizontalAlignment a = panel_ == Panel::sites ? gf::HorizontalAlignment::center : gf::HorizontalAlignment::near;
+        const gf::HorizontalAlignment a = panel_ == Panel::sites ? gf::HorizontalAlignment::center : gf::HorizontalAlignment::start;
         if ((*hud_.sheet_note).alignment.read() != a) {
             (*hud_.sheet_note).alignment = a;
         }

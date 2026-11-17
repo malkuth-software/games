@@ -135,7 +135,7 @@ void AtomProbeView::cancel_press() {
     mouse_in_ = false;
     st_.hover_port = st_.hover_cell = st_.partner = -1;
     st_.lever_hover = false;
-    cursor = gf::CursorKind::arrow;
+    cursor = stxlib::Optional<gf::CursorKind>::of(gf::CursorKind::arrow);
 }
 void AtomProbeView::active_changed(bool active) {
     if (!active) { cancel_press(); }
@@ -566,7 +566,8 @@ void AtomProbeView::handle_pointer(gf::PointerEvent& e) {
         if (st_.hover_port >= 0 && st_.hover_port != last_hover_port_) play("ap_hover", .25f, .9f + .2f * static_cast<float>(st_.hover_port % 8) / 8);
         last_hover_port_ = st_.hover_port;
         const bool over = over_ui || st_.hover_port >= 0 || st_.hover_cell >= 0 || st_.lever_hover;
-        cursor = over ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        const gf::CursorKind pointer_shape = over ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
     }
     if (e.action == gf::PointerAction::down) {
         activate();

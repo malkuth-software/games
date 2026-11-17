@@ -193,7 +193,7 @@ void ThievesView::set_cabinet(bool foreground, bool music, bool sound, bool redu
         if (timer_) (*timer_).stop();
         queue_.clear(); pressed_.clear(); hover_.clear(); mouse_in_ = false; hover_cell_ = -1;
         show_.state().hover_cell = -1; show_.state().path.clear();
-        cursor = gf::CursorKind::arrow;
+        cursor = stxlib::Optional<gf::CursorKind>::of(gf::CursorKind::arrow);
         if (hint_) (*hint_).cancellation.request_stop();
         if (gen_) (*gen_).cancellation.request_stop();
         if (field_) (*field_).cancel = true;
@@ -853,7 +853,8 @@ void ThievesView::handle_pointer(gf::PointerEvent& e) {
         hover_ = hit_button();
         hover_cell_ = mouse_in_ && hover_.empty() && panel_ == Panel::none && mouse_x_ < pw_ - hud_w_ ? garden_.pick_cell(mouse_x_, mouse_y_) : -1;
         if (hover_cell_ >= 0 && !board_.level().floor(hover_cell_)) hover_cell_ = -1;
-        cursor = !hover_.empty() || hover_cell_ >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        const gf::CursorKind pointer_shape = !hover_.empty() || hover_cell_ >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
     }
     if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
         activate();

@@ -525,7 +525,8 @@ void SheepView::handle_pointer(gf::PointerEvent& e) {
         hover_ = hit();
         st_.hover = hover_.empty() && on_board ? pas_.pick(mouse_x_, mouse_y_) : -1;
         st_.hover_ok = st_.hover >= 0 && m_.can_place(st_.hover);
-        cursor = !hover_.empty() || st_.hover_ok ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        const gf::CursorKind pointer_shape = !hover_.empty() || st_.hover_ok ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
     }
     if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
         activate();

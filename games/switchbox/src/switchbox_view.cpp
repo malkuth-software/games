@@ -478,7 +478,8 @@ void SwitchboxView::handle_pointer(gf::PointerEvent& e) {
         if (hold_sw_ >= 0 && stage_.pick_socket(mouse_x_, mouse_y_) != hold_sw_ && stage_.pick_switch(mouse_x_, mouse_y_, st_) != hold_sw_) hold_sw_ = -1;
         const bool over = !hover_.empty() || stage_.pick_switch(mouse_x_, mouse_y_, st_) >= 0 || stage_.pick_socket(mouse_x_, mouse_y_) >= 0 ||
                           (!actor_.hidden() && stage_.pick_head(mouse_x_, mouse_y_, st_.girl));
-        cursor = over ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        const gf::CursorKind pointer_shape = over ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
     }
     if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
         activate();

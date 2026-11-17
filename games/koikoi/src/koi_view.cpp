@@ -697,7 +697,8 @@ void KoiView::handle_pointer(gf::PointerEvent& e) {
         if (previous_button != hover_btn_ || previous_card != c) request_frame();
         const bool mine = c >= 0 && s_.turn == 0 && ((s_.phase == koi::Phase::play && std::find(s_.hand[0].begin(), s_.hand[0].end(), c) != s_.hand[0].end()) ||
                                                       (s_.pending >= 0 && std::find(s_.choices.begin(), s_.choices.end(), c) != s_.choices.end()));
-        cursor = !hover_btn_.empty() || mine ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        const gf::CursorKind pointer_shape = !hover_btn_.empty() || mine ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
     }
     if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
         activate();

@@ -143,6 +143,36 @@ is now a GUI.Forms composite:
   stock icons the theme replaces by name. Product work, not a gap.
 - Pocket Library's shell copy (its src/capsule.cpp) is unchanged; it can follow once this is built.
 
+## The #483 port (`claude/conformance-port`)
+
+Branch `claude/conformance-port`, on `claude/conformance-prep` 3be3dbe, against GUI.Forms #483
+(checkpoint/2026-11-15-cp32, 4858cb741 or later; read at 48a8560a6). It fixes the 59 errors of the
+integrator's build against the #483 SDK and sweeps the same patterns through the rest of the product,
+including the sources that build did not reach (Tumbled Stones, the new-game template, playsuite_theme).
+Write only: not compiled here.
+
+- **D15 V1, `stxlib::Optional`:** writes into optional properties name the value
+  (`stxlib::Optional<T>::of(...)`): `cursor` in the 17 views (the shape computed into a local
+  `pointer_shape` first), Label `font` and `fore_color` (help book, settings sheet, capsule title, Zen's HUD),
+  the topic headings' `expanded_state`. `PartPaint::measured_text` and `corner_radius` take `set()`;
+  `games::skin_part_key` returns `stxlib::Optional<gf::PartKey>` (its only use is `PartPaint::key`);
+  `paint_skin_part` keeps its `std::optional<double>` radius and sets the part's only when given;
+  `ButtonContentInk::authored` is `::none()`. Reads: `next_wake()`, `child_index_from_top()`,
+  `heading_band_bottom()`, `Window::paint()` and a label's own font read through `present()`, `absent()`
+  and `value()` (into a local first) in new-games/kit/view_contract_test.hpp and the collection_ui,
+  puzzle_frame, vendor_game_frame and playsuite_theme tests. Product-internal `std::optional` stays.
+- **Renames:** `HorizontalAlignment::far`/`near` to `end`/`start` (settings readouts, Zen's sheet note);
+  `FontContext::interface` to `factory_bundle` (collection_ui). No form, control or theme file names an
+  alignment; nothing uses SplitSeamState, the Ribbon's sizes, DateTimeDropDownAlignment or
+  `stxlib::Status`/`Result`.
+- **Text engine:** `GUI_FORMS_ENABLE_HARFBUZZ_TEXT` (no longer an option) dropped from CMakeLists.txt and
+  tests/portable_text. `find_package` never named HarfBuzz or FreeType components.
+- **Not changed:** the workflows still pass `GUI_FORMS_SKIA_PREBUILT`/`GUI_FORMS_SKIA_OUT` and run
+  `fetch_skia_cpu.sh` for the in-tree build; they move with the pins at the rebase.
+- tests: collection_ui, puzzle_frames, vendor_game_frames, playsuite_theme, every view_contract test, the
+  full `ctest -LE design`; by hand, the pointer shape over each game's buttons and the help book's topic
+  disclosure.
+
 ## What still waits on GUI.Forms
 
 - **Pins (placeholders):** the workflows (`ref:`), tools/package_common.py `TOOLKIT_REVISION`,
@@ -161,7 +191,8 @@ is now a GUI.Forms composite:
   `on_pointer_preview` / `on_pointer_bubble`, about 30 sites move (one `on_key_bubble` in each of the 18 game
   and shared views; the card table's bubble and preview; src/collection, src/help_book (now also
   `on_pointer_bubble` for the card's wheel), src/settings_sheet and src/shelf).
-- **STXlib boundary types:** none consumed yet. When GUI.Forms' public signatures move to STXlib's span,
+- **STXlib boundary types:** `stxlib::Optional` consumed since the #483 port (above). The later D15 stages
+  (text views, owned strings, vectors, shared pointers) will need another, smaller port. When GUI.Forms' public signatures move to STXlib's span,
   string or result types, the `std::span` / `std::string` arguments at PlaySuite's call sites follow
   (LiveSurface leases, `load_bgra32_premultiplied`, `draw_text_utf8`, the text masks, the release regions).
 - **Harness:** template_harness main must first take `claude/csm-ccache-pch-main` (owner prerequisite); then

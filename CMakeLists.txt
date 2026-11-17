@@ -95,7 +95,6 @@ elseif(GAMES_BUILD_APPLICATION)
   set(GUI_FORMS_BUILD_TEXT_MASKS ON CACHE BOOL "" FORCE)
   # forms/playsuite.form is compiled at build time.
   set(GUI_FORMS_BUILD_FORM_COMPILER ON CACHE BOOL "" FORCE)
-  set(GUI_FORMS_ENABLE_HARFBUZZ_TEXT ON CACHE BOOL "" FORCE)
   # Every host draws with GUI.Forms' CPU Skia (built from the pinned stx); the Win32
   # host requires it since stage SK3.
   set(GUI_FORMS_ENABLE_SKIA ON CACHE BOOL "" FORCE)

@@ -133,11 +133,11 @@ inline std::uint64_t contract_generation(const std::shared_ptr<gf::LiveSurface>&
 // hold one slow wake for a timed event (a character's remark after a long pause); it
 // may not keep ticking.
 inline bool contract_quiet(const gf::Window& window) {
-    const std::optional<gf::FrameTime> wake = window.next_wake();
-    if (!wake) {
+    const stxlib::Optional<gf::FrameTime> wake = window.next_wake();
+    if (wake.absent()) {
         return true;
     }
-    const bool far = *wake - gf::FrameClock::now() >= std::chrono::milliseconds(900);
+    const bool far = *wake.value() - gf::FrameClock::now() >= std::chrono::milliseconds(900);
     return far;
 }
 

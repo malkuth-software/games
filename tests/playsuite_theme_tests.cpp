@@ -91,7 +91,7 @@ int main() {
         for (const gf::CompiledThemeRules::FieldProvenance& field : provenance.materials)
             authored += field.authored ? 1U : 0U;
         assert(authored > 0);
-        assert(games::skin_part_key(gf::PartRole::face).has_value());
+        assert(games::skin_part_key(gf::PartRole::face).present());
     }
     {
         // A gloss button's classes follow its tone and radius.

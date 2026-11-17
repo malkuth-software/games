@@ -540,7 +540,8 @@ void MazeView::handle_pointer(gf::PointerEvent& e) {
     if (e.action == gf::PointerAction::move) {
         if (hover_ != hit) request_frame();
         hover_ = hit;
-        cursor = !hover_.empty() ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        const gf::CursorKind pointer_shape = !hover_.empty() ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
     }
     if (e.action == gf::PointerAction::down || e.action == gf::PointerAction::up) request_frame();
     if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {

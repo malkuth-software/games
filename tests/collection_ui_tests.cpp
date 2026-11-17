@@ -329,9 +329,9 @@ int main() {
             const std::shared_ptr<gf::Label> title = std::dynamic_pointer_cast<gf::Label>((*composite).child("title"));
             assert(title && (*title).text.read() == (*composite).read_title() && !(*title).text.read().empty());
             // The label's own font (unset would mean inherited): the capsule sets it.
-            const std::optional<gf::FontSpec> own_font = (*title).font.read();
-            assert(own_font.has_value());
-            const gf::FontSpec font = *own_font;
+            const stxlib::Optional<gf::FontSpec> own_font = (*title).font.read();
+            assert(own_font.present());
+            const gf::FontSpec font = *own_font.value();
             assert(font.weight == 700 && font.role == gf::FontRole::control);
 #if defined(GAMES_GUI_FORMS_APP_FONTS)
             // The family is the app-loaded Barlow Condensed, live, and the composite's context
@@ -339,16 +339,16 @@ int main() {
             assert(font.family != gf::FontFamilyId{} && font.family == gf::app_font_family_named("Barlow Condensed"));
             assert(gf::app_font_family_state(font.family) == gf::AppFontState::live);
             assert(gf::admit_font(font, gf::FontContext::composite).family == font.family);
-            assert(gf::admit_font(font, gf::FontContext::interface).family == gf::FontFamilyId{});
+            assert(gf::admit_font(font, gf::FontContext::factory_bundle).family == gf::FontFamilyId{});
 #endif
             assert((*title).visible.read() && (*title).arranged_bounds().x > (*button(*capsule, "capsule.back")).arranged_bounds().x);
         }
         {
             // A real click, through the window's hit test (not an accessibility press), reaches a
             // capsule button over the game: the games lie below the capsule in z-order.
-            const std::optional<std::size_t> capsule_place = (*collection).child_index_from_top((*capsule).runtime_id());
-            const std::optional<std::size_t> game_place = (*collection).child_index_from_top((*eggy).runtime_id());
-            assert(capsule_place.has_value() && game_place.has_value() && *capsule_place < *game_place);
+            const stxlib::Optional<std::size_t> capsule_place = (*collection).child_index_from_top((*capsule).runtime_id());
+            const stxlib::Optional<std::size_t> game_place = (*collection).child_index_from_top((*eggy).runtime_id());
+            assert(capsule_place.present() && game_place.present() && *capsule_place.value() < *game_place.value());
             const std::shared_ptr<SuiteButton> more = std::static_pointer_cast<SuiteButton>(button(*capsule, "capsule.more"));
             const gf::Rect more_bounds = (*more).arranged_bounds();
             const gf::Point middle{more_bounds.width * .5, more_bounds.height * .5};
@@ -462,7 +462,7 @@ int main() {
             const std::shared_ptr<gf::Control> book = child(*collection, "collection.help-book");
             const std::shared_ptr<gf::BusinessCard> page =
                 std::dynamic_pointer_cast<gf::BusinessCard>(child(*book, "help.business-card"));
-            assert(page && (*page).heading_band_bottom().has_value());
+            assert(page && (*page).heading_band_bottom().present());
         }
         assert(gf::business_card_remark_source().context == collection.get());
         (*collection).show_card();

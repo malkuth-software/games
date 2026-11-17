@@ -878,7 +878,8 @@ void CubeView::handle_pointer(gf::PointerEvent& event) {
             hover_ = cell;
             const bool live = cell >= 0 && (session_.puzzle.pair_of[static_cast<std::size_t>(cell)] >= 0 ||
                                             owner(session_.play, cell) >= 0);
-            cursor = live || tracing_ ? gf::CursorKind::hand : gf::CursorKind::arrow;
+            const gf::CursorKind pointer_shape = live || tracing_ ? gf::CursorKind::hand : gf::CursorKind::arrow;
+            cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
             request_frame();
         }
         return;

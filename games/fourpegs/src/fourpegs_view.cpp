@@ -469,7 +469,8 @@ void FourPegsView::handle_pointer(gf::PointerEvent& e) {
         }
         if (dragging_) { V3 w; if (lair_.console_point(mouse_x_, mouse_y_, w)) cs.drag_at = w; }
         const bool over = !hover_.empty() || cs.hover_palette >= 0 || cs.hover_socket >= 0 || lair_.pick_check(mouse_x_, mouse_y_);
-        cursor = dragging_ ? gf::CursorKind::hand : over ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        const gf::CursorKind pointer_shape = dragging_ ? gf::CursorKind::hand : over ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
     }
     if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
         activate();

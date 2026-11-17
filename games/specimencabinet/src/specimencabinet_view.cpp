@@ -579,7 +579,8 @@ void SpecimenCabinetView::handle_pointer(gf::PointerEvent& event) {
     if (panel_ != Panel::none) {
         const int button = panel_button(x, y);
         if (event.action == gf::PointerAction::move) {
-            cursor = button >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+            const gf::CursorKind pointer_shape = button >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+            cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
         } else if (event.action == gf::PointerAction::down && event.button == gf::PointerButton::primary) {
             activate();
             pressed_button_ = button;
@@ -612,10 +613,11 @@ void SpecimenCabinetView::handle_pointer(gf::PointerEvent& event) {
             target_ = pick_cell(layout_, held_x_, held_y_);
             keyboard_ = false;
             render_dirty_ = true;
-            cursor = gf::CursorKind::hand;
+            cursor = stxlib::Optional<gf::CursorKind>::of(gf::CursorKind::hand);
         } else if (event.action == gf::PointerAction::move) {
             const int under = stone_under(layout_, session_, x, y, waiting_);
-            cursor = under >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+            const gf::CursorKind pointer_shape = under >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+            cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
         }
         if (render_dirty_)
             request_frame();

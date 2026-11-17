@@ -149,13 +149,13 @@ void check_hearts_deadline() {
     flush(window, painter);
     require((*table).game.state.piles[10].size() == 1 && (*table).game.invariant(),
             "First computer card is played normally");
-    const std::optional<gf::FrameTime> wake = window.next_wake();
-    require(wake && *wake > first_play + std::chrono::milliseconds(400),
+    const stxlib::Optional<gf::FrameTime> wake = window.next_wake();
+    require(wake.present() && *wake.value() > first_play + std::chrono::milliseconds(400),
             "Resting Hearts waits for its play deadline instead of polling at 125 Hz");
     (*table).activate();
     flush(window, painter);
-    const std::optional<gf::FrameTime> resumed = window.next_wake();
-    require(resumed && *resumed < gf::FrameClock::now() + std::chrono::milliseconds(30),
+    const stxlib::Optional<gf::FrameTime> resumed = window.next_wake();
+    require(resumed.present() && *resumed.value() < gf::FrameClock::now() + std::chrono::milliseconds(30),
             "Fresh activity wakes a table waiting for the computer");
 }
 void check_untangle_edge_drag() {
@@ -221,7 +221,7 @@ void check_scene_retention(games::PuzzleKind kind) {
     if (kind == games::PuzzleKind::untangle)
         require(damage.width * damage.height < board.width * board.height * .3,
                 "Cat-only animation must not invalidate the cushion or the whole board");
-    require(window.paint(painter, damage).has_value(), "Retained scene paints its damaged area");
+    require(window.paint(painter, damage).present(), "Retained scene paints its damaged area");
     const gf::MetricsSnapshot metrics = window.metrics().snapshot();
     require(metrics.display_chunks_rebuilt == 1,
             "Ordinary animation rebuilds only its own chunk, not scenery or text");

@@ -318,7 +318,8 @@ void TemplateView::handle_pointer(gf::PointerEvent& event) {
         const int hover = event.action == gf::PointerAction::leave ? -1 : under;
         if (hover != visual_.hover) {
             visual_.hover = hover;
-            cursor = hover >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+            const gf::CursorKind pointer_shape = hover >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+            cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
             request_frame();
         }
         return;

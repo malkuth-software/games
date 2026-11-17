@@ -723,7 +723,8 @@ void TableView::handle_pointer(gf::PointerEvent& e) {
     if (e.action == gf::PointerAction::move) {
         hover_ = hit();
         hover_bird_ = hover_.empty() && panel_ == Panel::none && !in_popup() && mouse_y_ > top_h_ ? aviary_.pick_bird(mouse_x_, mouse_y_, st_) : -1;
-        cursor = phase_ == Phase::aim && hover_.empty() ? gf::CursorKind::crosshair : !hover_.empty() || hover_bird_ >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        const gf::CursorKind pointer_shape = phase_ == Phase::aim && hover_.empty() ? gf::CursorKind::crosshair : !hover_.empty() || hover_bird_ >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
     }
     if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::secondary) {
         activate();

@@ -651,7 +651,8 @@ void DiceView::handle_pointer(gf::PointerEvent& e) {
     if (e.action == gf::PointerAction::move) {
         hover_ = hit();
         hover_seat_ = hover_.empty() && panel_ == Panel::none && phase_ != Phase::wagers && mouse_y_ < ph_ - panel_h_ ? cab_.pick(mouse_x_, mouse_y_, st_) : -1;
-        cursor = !hover_.empty() ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        const gf::CursorKind pointer_shape = !hover_.empty() ? gf::CursorKind::hand : gf::CursorKind::arrow;
+        cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
     }
     if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
         activate();
