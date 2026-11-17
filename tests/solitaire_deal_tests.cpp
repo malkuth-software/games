@@ -4,8 +4,8 @@
 // every frame, its time from the command, the next wake the window asks for, whether it had
 // damage, and where every card was drawn. The deal's intended sequence is the table's own
 // (shared/cards/table.cpp, layout_cards and tick): Solitaire's 28 tableau cards leave the top
-// middle of the table one after another, card k (row i, column p: k = 7 i + p) after k x 14 ms,
-// each flying 440 ms; the stock's two visible cards follow theirs (index x 14 ms). The test
+// middle of the table one after another, row i of column p after (7 i + p) x 14 ms, each flying
+// 440 ms (the last lands at 1112 ms); the stock's two visible cards follow theirs (index x 14 ms). The test
 // checks the seams that sequence depends on: Timer and the UI-timer scheduler (a wake at least
 // every 20 ms while cards move), next_wake (absent or far once the deal has landed), damage and
 // paint (a damaged frame for every tick, the moving cards drawn where they fly), and that the
@@ -107,15 +107,18 @@ double settled_card_height(const std::vector<gf::Rect>& images) {
 }
 
 // The deal's intended landings at `seconds` after it started: the cards whose delay and flight
-// are over.
+// are over. Tableau column p (0 to 6) holds rows 0 to p; the card in row i leaves after
+// (7 i + p) x 14 ms (table.cpp, layout_cards: i * columns + pile), so the last, row 6 of column
+// 6, leaves at 672 ms and lands at 1112 ms. The stock's two visible cards (indexes 22 and 23)
+// lie in one rectangle and are drawn as one place, there from when the first lands.
 int intended_landed(double seconds) {
     int landed = 0;
-    for (int k = 0; k < 28; ++k)
-        if (k * .014 + .44 <= seconds)
-            ++landed;
-    for (int index = 22; index < 24; ++index)
-        if (index * .014 + .44 <= seconds)
-            ++landed;
+    for (int column = 0; column < 7; ++column)
+        for (int row = 0; row <= column; ++row)
+            if ((row * 7 + column) * .014 + .44 <= seconds)
+                ++landed;
+    if (22 * .014 + .44 <= seconds)
+        ++landed;
     return landed;
 }
 
@@ -191,7 +194,7 @@ int main() {
             frames[index].cards = card_centres(drawn[index], height);
 
         const std::vector<gf::Point>& landed_places = frames.back().cards;
-        require(landed_places.size() >= 28, "The settled deal shows the tableau and the stock");
+        require(landed_places.size() == 29, "The settled deal shows 28 tableau places and the stock");
         // A card waiting for its turn lies at the deal's start, its top at 86 in the middle.
         const double dealt_from_x = size.width * .5;
         int in_flight_frames = 0;
@@ -220,7 +223,7 @@ int main() {
                         "flying %2d\n",
                         frame.seconds * 1000, frame.paint_seconds * 1000, frame.wake_in * 1000, frame.damaged ? 1 : 0,
                         frame.cards.size(), landed, intended, in_flight);
-            const bool dealing = frame.seconds < .85;
+            const bool dealing = frame.seconds < 1.09;  // the last card lands at 1112 ms
             if (dealing) {
                 if (in_flight > 0)
                     ++in_flight_frames;
