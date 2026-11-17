@@ -17,6 +17,13 @@ set(GUI_FORMS_BUILD_PREPARED_TEXT OFF CACHE BOOL "" FORCE)
 set(GUI_FORMS_BUILD_TEXT_MASKS ON CACHE BOOL "" FORCE)
 set(GUI_FORMS_BUILD_GALLERY OFF CACHE BOOL "" FORCE)
 set(GUI_FORMS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+# The vendor frames include GUI.Forms' Audio.cmake (below), which needs the stx
+# package's Vorbis decoder: the embedded GUI.Forms builds that package with
+# audio on (its default is off, and the package then has no stx_vorbis).
+if(GAMES_TEST_VENDOR_FRAMES)
+    set(GUI_FORMS_BUILD_AUDIO ON CACHE BOOL "" FORCE)
+    set(GUI_FORMS_AUDIO_VORBIS_BACKEND "stx" CACHE STRING "" FORCE)
+endif()
 add_subdirectory("${GAMES_TEXT_SOURCE_DIR}" toolkit EXCLUDE_FROM_ALL)
 get_filename_component(games_root "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
