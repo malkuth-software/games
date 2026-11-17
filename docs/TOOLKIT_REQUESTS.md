@@ -443,3 +443,14 @@ engine does not yet offer, and how the gems manage meanwhile:
    reuses command storage across `reset()` for the same shapes would remove it.
 5. **`execute_recorder` is provisional** (numbered 0.8 as a placeholder, outside the sealed
    drawing ABI): its names and status values may still change.
+6. **A write lease that preserves only what changed.** `LiveSurface::try_acquire_write(true)`
+   copies the whole published buffer into the slot it hands out, every frame, whatever the
+   frame changes. A Gems frame that redraws one turning gem (about 1% of the view) still
+   copies the whole surface (11 MB for 1060 x 680 points at scale 2), sixty times a second
+   while the pointer rests on a gem; it was the largest single cost in the 2026-11-17 M4
+   sample. Proposed: the surface keeps each slot's generation and the damage published since,
+   and the preserving acquire copies only the union of damage the slot has not seen.
+7. **Several damage rectangles per publish.** `LiveSurfaceWriteLease::publish(Rect)` takes one
+   rectangle, so a frame whose changes are scattered (breathing and sparkling gems across the
+   board) publishes their bounds, nearly the whole board, and the host copies all of it.
+   Proposed: `publish(std::span<const Rect>)`, carried through to the presenter's clip.

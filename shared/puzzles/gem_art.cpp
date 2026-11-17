@@ -230,17 +230,37 @@ void GemCanvas::begin(const render::Target& layer, render::Rect clip) {
 }
 
 void GemCanvas::gem(const GemPlacement& placement) {
-    if (gems_.size() >= maximum_gems || !std::isfinite(placement.angle) ||
+    gem(placement, clip_);
+}
+
+void GemCanvas::gem(const GemPlacement& placement, render::Rect clip) {
+    const render::Rect within = clip.intersected(clip_);
+    if (gems_.size() >= maximum_gems || within.empty() || !std::isfinite(placement.angle) ||
         !finite_placement(placement.x, placement.y, placement.radius, placement.glisten))
         return;
-    gems_.push_back(placement);
+    gems_.push_back(QueuedGem{placement, within});
 }
 
 void GemCanvas::sparkle(const GemSparkle& placement) {
-    if (sparkles_.size() >= maximum_sparkles ||
+    sparkle(placement, clip_);
+}
+
+void GemCanvas::sparkle(const GemSparkle& placement, render::Rect clip) {
+    const render::Rect within = clip.intersected(clip_);
+    if (sparkles_.size() >= maximum_sparkles || within.empty() ||
         !finite_placement(placement.x, placement.y, placement.radius, placement.glisten))
         return;
-    sparkles_.push_back(placement);
+    sparkles_.push_back(QueuedSparkle{placement, within});
+}
+
+void GemCanvas::use_clip(render::Rect clip) {
+    const bool same = clip.x0 == clip_in_force_.x0 && clip.y0 == clip_in_force_.y0 && clip.x1 == clip_in_force_.x1 &&
+                      clip.y1 == clip_in_force_.y1;
+    if (same)
+        return;
+    clip_in_force_ = clip;
+    recorder_.set_clip(gd::RectF{static_cast<double>(clip.x0), static_cast<double>(clip.y0),
+                                 static_cast<double>(clip.x1 - clip.x0), static_cast<double>(clip.y1 - clip.y0)});
 }
 
 std::size_t GemCanvas::last_command_count() const {
@@ -365,24 +385,30 @@ GemDrawStatus GemCanvas::finish() {
             smoothing_ = gd::SmoothingMode::anti_alias;
             recorder_.set_quality(smoothing_, gd::InterpolationMode::default_mode, gd::PixelOffsetMode::default_mode,
                                   gd::CompositingMode::source_over, gd::CompositingQuality::default_mode);
-            recorder_.set_clip(gd::RectF{static_cast<double>(clip_.x0), static_cast<double>(clip_.y0),
-                                         static_cast<double>(clip_.x1 - clip_.x0),
-                                         static_cast<double>(clip_.y1 - clip_.y0)});
+            clip_in_force_ = render::Rect{};
+            use_clip(clip_);
             const std::array<Depth, 7> depths{Depth::shadow, Depth::girdle,
                                               Depth::stone,  Depth::glint, Depth::sparkle, Depth::mark, Depth::fuse};
             for (const Depth depth : depths) {
-                for (const GemPlacement& gem : gems_)
-                    if (!gem.lifted)
-                        record_gem(gem, depth);
+                for (const QueuedGem& gem : gems_)
+                    if (!gem.placement.lifted) {
+                        use_clip(gem.clip);
+                        record_gem(gem.placement, depth);
+                    }
                 if (depth == Depth::sparkle)
-                    for (const GemSparkle& sparkle : sparkles_)
-                        record_sparkle(sparkle.x, sparkle.y, sparkle.radius, sparkle.glisten);
+                    for (const QueuedSparkle& sparkle : sparkles_) {
+                        use_clip(sparkle.clip);
+                        record_sparkle(sparkle.placement.x, sparkle.placement.y, sparkle.placement.radius,
+                                       sparkle.placement.glisten);
+                    }
             }
             // A lifted gem lies above everything, whole.
-            for (const GemPlacement& gem : gems_)
-                if (gem.lifted)
+            for (const QueuedGem& gem : gems_)
+                if (gem.placement.lifted) {
+                    use_clip(gem.clip);
                     for (const Depth depth : depths)
-                        record_gem(gem, depth);
+                        record_gem(gem.placement, depth);
+                }
             last_command_count_ = recorder_.commands().size();
             const std::size_t row_bytes = static_cast<std::size_t>(layer_.stride) * 4U;
             const std::unique_ptr<gd::Bitmap> target =

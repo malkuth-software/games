@@ -310,6 +310,28 @@ struct PuzzleGemDamageTest {
             turning_drawn = turning_drawn || covers(area, center);
         }
         require(turning_drawn, "The turning gem is drawn again every frame");
+        // Between two steps of the ambient clock (breathing, sparkle) a frame of the turning gem
+        // copies and presents only its square: render twice within one step and look at the
+        // second frame's changes.
+        bool within_one_step = false;
+        for (int attempt = 0; attempt < 8 && !within_one_step; ++attempt) {
+            const double before = PuzzleView::ambient_time(
+                std::chrono::duration<double>(gf::FrameClock::now() - view.clock_start_).count());
+            view.render();
+            view.render();
+            const double after = PuzzleView::ambient_time(
+                std::chrono::duration<double>(gf::FrameClock::now() - view.clock_start_).count());
+            if (before != after)
+                continue;
+            within_one_step = true;
+            require(view.gem_partial_ && !view.gem_changed_.empty(), "The turning gem's frame draws it");
+            for (const render::Rect& changed : view.gem_changed_) {
+                const gf::Rect area = view.gem_change_rect(changed);
+                require(gf::Rect::intersection(area, allowed) == area,
+                        "A turning gem's frame copies only its square");
+            }
+        }
+        require(within_one_step, "Two renders fit within one ambient step");
         view.hover_ = -1;
         view.tick();
         require((*view.timer_).enabled() && (*view.timer_).interval() >= std::chrono::milliseconds(66),

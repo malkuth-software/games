@@ -56,8 +56,9 @@ enum class GemDrawStatus : std::uint8_t {
 // GUI.Drawing requires. The recorder keeps its command storage between drawings.
 class GemCanvas final {
   public:
-    static constexpr std::size_t maximum_gems = 128;
-    static constexpr std::size_t maximum_sparkles = 128;
+    // A gem queued once for each separate area it is redrawn in counts once for each.
+    static constexpr std::size_t maximum_gems = 512;
+    static constexpr std::size_t maximum_sparkles = 512;
 
     GemCanvas();
 
@@ -65,10 +66,14 @@ class GemCanvas final {
     // a row), drawing only inside `clip` (layer pixels). Forgets anything queued and not
     // drawn. The layer's pixels must stay alive and unmoved until finish() returns.
     void begin(const render::Target& layer, render::Rect clip);
-    // Queues a gem or a sparkle. Ignored past the maximum count, or when a coordinate, the
-    // radius, the angle or the glisten is not finite or the radius is not positive.
+    // Queues a gem or a sparkle, drawn inside the drawing's clip, or inside `clip` (layer
+    // pixels) within it: one drawing can then redraw several separate areas of the layer, each
+    // shape kept to its own. Ignored past the maximum count, or when a coordinate, the radius,
+    // the angle or the glisten is not finite or the radius is not positive.
     void gem(const GemPlacement& placement);
+    void gem(const GemPlacement& placement, render::Rect clip);
     void sparkle(const GemSparkle& placement);
+    void sparkle(const GemSparkle& placement, render::Rect clip);
     // Records the queued shapes farthest first and runs them into the layer, then forgets
     // them. What a refusal leaves is GemDrawStatus::refused's.
     [[nodiscard]] GemDrawStatus finish();
@@ -81,12 +86,23 @@ class GemCanvas final {
     void record_gem(const GemPlacement& gem, Depth depth);
     void record_sparkle(double x, double y, double radius, double glisten);
     void use_smoothing(gui_drawing::SmoothingMode mode);
+    // Records a clip change when `clip` (already within the drawing's) is not the one in force.
+    void use_clip(render::Rect clip);
 
+    struct QueuedGem {
+        GemPlacement placement;
+        render::Rect clip;  // within the drawing's clip, not empty
+    };
+    struct QueuedSparkle {
+        GemSparkle placement;
+        render::Rect clip;  // within the drawing's clip, not empty
+    };
     gui_drawing::GraphicsRecorder recorder_;
-    std::vector<GemPlacement> gems_;    // reserved to maximum_gems, in queued order
-    std::vector<GemSparkle> sparkles_;  // reserved to maximum_sparkles, in queued order
+    std::vector<QueuedGem> gems_;          // reserved to maximum_gems, in queued order
+    std::vector<QueuedSparkle> sparkles_;  // reserved to maximum_sparkles, in queued order
     render::Target layer_{};
     render::Rect clip_{};
+    render::Rect clip_in_force_{};
     gui_drawing::SmoothingMode smoothing_ = gui_drawing::SmoothingMode::anti_alias;
     std::size_t last_command_count_ = 0;
 };

@@ -118,6 +118,9 @@ class PuzzleView final : public gf::Control, public CommandSource {
     std::array<std::uint64_t, 64> gem_shown_{};
     std::array<render::Rect, 64> gem_covered_{};
     std::array<int, 2> gem_overlay_shown_{-1, -1};
+    // `time` (seconds since the clock started) at the ambient rate: breathing, sparkle and the
+    // hint move in its steps.
+    [[nodiscard]] static double ambient_time(double time);
     bool gem_partial_ = false;      // the last render drew only what changed
     bool gem_layer_whole_ = false;  // the layer holds every gem as gem_shown_ says
     std::vector<render::Rect> gem_changed_;

@@ -368,6 +368,34 @@ void PuzzleView::present_gem_changes() {
     if (!direct_)
         (*scene_parts_[0]).invalidate(damage);
 }
+// Joins rectangles that share pixels until none do (touching edges share none). Empty ones go.
+static void merge_overlapping(std::vector<render::Rect>& rects) {
+    std::vector<render::Rect> merged;
+    merged.reserve(rects.size());
+    for (render::Rect r : rects) {
+        if (r.empty())
+            continue;
+        bool joined = true;
+        while (joined) {
+            joined = false;
+            for (std::size_t k = 0; k < merged.size(); ++k)
+                if (!r.intersected(merged[k]).empty()) {
+                    r = r.united(merged[k]);
+                    merged.erase(merged.begin() + static_cast<std::ptrdiff_t>(k));
+                    joined = true;
+                    break;
+                }
+        }
+        merged.push_back(r);
+    }
+    rects.swap(merged);
+}
+double PuzzleView::ambient_time(double time) {
+    // Fifteen steps a second, the rate a resting board is drawn at while it is watched.
+    const double step = 1.0 / 15.0;
+    const double stepped = std::floor(time / step) * step;
+    return stepped;
+}
 static const gf::Color ink = gf::Color::rgba(231, 238, 247), muted = gf::Color::rgba(154, 177, 198),
                        accent = gf::Color::rgba(119, 216, 229);
 static gf::Color peg_color(int n) {
@@ -860,6 +888,10 @@ void PuzzleView::render() {
             };
             std::array<Resting, 64> gems{};
             const double base = cell * .38;
+            // Breathing, sparkle and the hint's nudge move at the ambient rate whatever the frame
+            // rate: frames between its steps (a gem turning under the pointer) change nothing
+            // else. The turning and the picked gem's pulse follow `time`.
+            const double ambient = ambient_time(time);
             for (int i = 0; i < 64; ++i) {
                 Resting& gem = gems[static_cast<std::size_t>(i)];
                 gem.value = (*grid)[i];
@@ -871,11 +903,11 @@ void PuzzleView::render() {
                     // After a long pause, one pair that would match nudges toward each other.
                     const int other = i == gem_hint_ ? gem_hint_to_ : gem_hint_;
                     const double nudge =
-                        std::fmod(time, 1.6) < .7 ? std::max(0.0, std::sin(time * 9)) * .09 : 0;
+                        std::fmod(ambient, 1.6) < .7 ? std::max(0.0, std::sin(ambient * 9)) * .09 : 0;
                     gem.x += (other % 8 - i % 8) * cell * nudge;
                     gem.y += (other / 8 - i / 8) * cell * nudge;
                 }
-                const double breath = reduced_ ? 0 : std::sin(time * 2.3 + i * 1.7);
+                const double breath = reduced_ ? 0 : std::sin(ambient * 2.3 + i * 1.7);
                 gem.step = reduced_ ? 8 : static_cast<int>(std::lround((breath + 1) * 3.5));
                 gem.size = reduced_ ? base : base * (1 + .022 * (gem.step / 3.5 - 1));
                 // Its place and its sparkle's reach to a quarter of a layer pixel: what the key
@@ -883,7 +915,7 @@ void PuzzleView::render() {
                 const long long quarter_x = std::lround(gem.x * 4), quarter_y = std::lround(gem.y * 4);
                 gem.x = quarter_x / 4.0;
                 gem.y = quarter_y / 4.0;
-                const double glisten = reduced_ ? 0 : .5 + .5 * std::sin(time * 1.25 + i * 2.7);
+                const double glisten = reduced_ ? 0 : .5 + .5 * std::sin(ambient * 1.25 + i * 2.7);
                 const long long reach = glisten > .7 ? std::lround(gem.size * (glisten - .7) * 6.8) : -1;
                 gem.glisten = reach < 0 ? 0 : .7 + std::max(reach / 4.0, 1e-6) / (gem.size * 1.7);
                 gem.key = static_cast<std::uint64_t>(gem.value) | static_cast<std::uint64_t>(gem.step) << 8 |
@@ -951,30 +983,32 @@ void PuzzleView::render() {
                         }
                     }
             }
-            for (const render::Rect& region : regions) {
-                if (region.empty())
-                    continue;
+            // Overlapping areas become one, so each layer pixel is cleared and drawn once; the
+            // copies go straight into the layer, area by area, and one drawing then lays every
+            // sparkle and moving gem over them, each kept to its own area.
+            merge_overlapping(regions);
+            for (const render::Rect& region : regions)
                 for (int y = region.y0; y < region.y1; ++y)
                     std::fill_n(gem_pixels_.data() + static_cast<std::size_t>(y) * raster_.width + region.x0,
                                 region.x1 - region.x0, 0U);
-                // The copies go straight into the layer; the canvas draws the sparkles and the
-                // moving gems over them when it finishes.
-                gem_canvas_.begin(layer, region);
+            gem_canvas_.begin(layer, whole);
+            for (const render::Rect& region : regions)
                 for (const Resting& gem : gems) {
                     if (!gem.value || gem.box.intersected(region).empty())
                         continue;
                     if (gem.live) {
                         gem_canvas_.gem(GemPlacement{.x = gem.x, .y = gem.y, .radius = gem.size, .value = gem.value,
-                                                     .angle = gem.angle, .glisten = gem.glisten});
+                                                     .angle = gem.angle, .glisten = gem.glisten},
+                                        region);
                         continue;
                     }
                     copy_gem(gem_picture(gem.value, gem.step, gem.size, base), gem.x, gem.y, region);
-                    gem_canvas_.sparkle(GemSparkle{.x = gem.x, .y = gem.y, .radius = gem.size, .glisten = gem.glisten});
+                    gem_canvas_.sparkle(GemSparkle{.x = gem.x, .y = gem.y, .radius = gem.size, .glisten = gem.glisten},
+                                        region);
                 }
-                // A refused drawing leaves the copies without their sparkles or the moving gem
-                // (until it is drawn again): nothing else to undo.
-                static_cast<void>(gem_canvas_.finish());
-            }
+            // A refused drawing leaves the copies without their sparkles or the moving gem (until
+            // they are drawn again): nothing else to undo.
+            static_cast<void>(gem_canvas_.finish());
             gem_changed_.clear();
             for (const render::Rect& region : regions) {
                 if (region.empty())
