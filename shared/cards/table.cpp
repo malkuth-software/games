@@ -394,12 +394,92 @@ void Table::forget_pictures(gf::SurfaceRoot& window) {
     if (glinted_.image.value)
         static_cast<void>(window.remove_image(glinted_.image));
     glinted_ = {};
-    for (gf::ImageId* image : {&rest_shadow_, &lifted_shadow_}) {
+    for (gf::ImageId* image : {&rest_shadow_, &lifted_shadow_, &flight_back_}) {
         if ((*image).value)
             static_cast<void>(window.remove_image(*image));
         *image = {};
     }
+    for (gf::ImageId& image : flight_faces_) {
+        if (image.value)
+            static_cast<void>(window.remove_image(image));
+        image = {};
+    }
+    flight_generation_ = flight_back_design_ = -1;
     printer_.forget();
+}
+gf::ImageId Table::flight_picture(const Card& card, bool up) const {
+    if (flight_generation_ != printer_.generation())
+        return {};
+    if (!up)
+        return flight_back_design_ == back_ ? flight_back_ : gf::ImageId{};
+    const int face = std::clamp(card.suit * 13 + card.rank - 1, 0, 51);
+    return flight_faces_[static_cast<std::size_t>(face)];
+}
+void Table::prepare_flight_pictures() {
+    gf::Window* window = attached_window();
+    if (!window || !printer_.ready())
+        return;
+    if (flight_generation_ != printer_.generation()) {
+        // New paper: every flight picture is printed again (on its old image, same size or not).
+        flight_generation_ = printer_.generation();
+        flight_back_design_ = -1;
+        for (gf::ImageId& image : flight_faces_)
+            if (image.value) {
+                static_cast<void>((*window).remove_image(image));
+                image = {};
+            }
+        if (flight_back_.value) {
+            static_cast<void>((*window).remove_image(flight_back_));
+            flight_back_ = {};
+        }
+    }
+    // What the moving cards show in the air and has no flight picture: faces by index, -1 the
+    // back; a card turning over shows both.
+    std::array<bool, 52> face_wanted{};
+    bool back_wanted = false;
+    for (const Sprite& s : sprites_) {
+        if (!s.visible || !s.moving)
+            continue;
+        const bool shows_face = s.card.up || s.prior_up;
+        const bool shows_back = !s.card.up || !s.prior_up;
+        const std::size_t face = static_cast<std::size_t>(std::clamp(s.card.suit * 13 + s.card.rank - 1, 0, 51));
+        if (shows_face && !flight_faces_[face].value)
+            face_wanted[face] = true;
+        if (shows_back && flight_back_design_ != back_)
+            back_wanted = true;
+    }
+    std::vector<PressSheet> sheets;
+    std::vector<int> faces;  // each sheet's face, -1 for the back
+    for (std::size_t face = 0; face < face_wanted.size(); ++face)
+        if (face_wanted[face]) {
+            PressSheet sheet;
+            sheet.face = static_cast<int>(face);
+            sheet.seed = static_cast<std::uint32_t>(face) * 2654435761U;
+            sheets.push_back(sheet);
+            faces.push_back(static_cast<int>(face));
+        }
+    if (back_wanted) {
+        PressSheet sheet;
+        sheet.design = back_;
+        sheets.push_back(sheet);
+        faces.push_back(-1);
+    }
+    if (sheets.empty())
+        return;
+    const std::vector<std::vector<std::byte>> pictures = printer_.print(sheets);
+    const CardPaper& paper = printer_.paper();
+    const std::uint32_t w = static_cast<std::uint32_t>(paper.width), h = static_cast<std::uint32_t>(paper.height);
+    for (std::size_t i = 0; i < sheets.size(); ++i) {
+        if (pictures[i].empty())
+            continue;  // drawn the old way
+        gf::ImageId& image = faces[i] < 0 ? flight_back_ : flight_faces_[static_cast<std::size_t>(faces[i])];
+        if (image.value)
+            static_cast<void>((*window).remove_image(image));
+        const gf::ImageLoadResult result = (*window).load_bgra32_premultiplied(w, h, w * 4, pictures[i]);
+        image = result ? result.image : gf::ImageId{};
+        if (faces[i] < 0 && image.value)
+            flight_back_design_ = back_;
+    }
 }
 void Table::layout_cards(bool animate) {
     gf::Rect bounds = client_rectangle();
@@ -597,6 +677,9 @@ void Table::layout_cards(bool animate) {
     (*buttons_[18]).enabled = !game.state.over;
     dealing_ = false;
     animating_ = animate && !reduced_;
+    // Printed before the clock starts (a deal's few faces and the back: a few milliseconds).
+    if (animating_)
+        prepare_flight_pictures();
     animation_start_ = gf::FrameClock::now();
     // at rest too: what moved is printed again where it lies
     request_tick();
@@ -930,7 +1013,9 @@ void Table::draw_card(gf::Painter& p, const Sprite& s, bool selected) {
     const double shadow_scale = r.width / 360.0, shadow_height = full_width / 360.0;
     const double height = lifted ? 1 : rise;
     const double drop = r.width * .07 * height, grow = 1 + .06 * height;
-    p.draw_image(shadow_,
+    // The shadow at the cards' device size (the same proportions as the artwork's), so a card
+    // in the air draws it at 1x or larger.
+    p.draw_image(rest_shadow_.value ? rest_shadow_ : shadow_,
                  {r.x - 40 * shadow_scale * grow + drop * .6,
                   r.y - 40 * shadow_height * grow + drop, 440 * shadow_scale * grow,
                   584 * shadow_height * grow});
@@ -940,9 +1025,13 @@ void Table::draw_card(gf::Painter& p, const Sprite& s, bool selected) {
     }
     if (hovered)
         p.draw_box_shadow(r, 7, {0, 0}, 14, 3, gf::Color::rgba(255, 244, 196, 215));
+    const gf::ImageId flight = pictured ? gf::ImageId{} : flight_picture(s.card, face_up);
     if (pictured) {
         // In the air: its picture, drawn to the card's place (a draft, printed again on landing).
         p.draw_image(printed.image, r);
+    } else if (flight.value) {
+        // In the air without a picture of its own: its flight picture (prepare_flight_pictures).
+        p.draw_image(flight, r);
     } else {
         // Not printed yet: the artwork, the paper and the room's light, layer by layer.
         const std::size_t which = static_cast<std::size_t>(s.card.suit * 13 + s.card.rank - 1);
