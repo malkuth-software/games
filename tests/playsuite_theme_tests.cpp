@@ -70,7 +70,7 @@ int main() {
         const gf::CompiledThemeRules& rules = (*theme).engine().rules();
         assert(rules.rule_count() > rules.built_in_rule_count());
         gf::PresentationOverrides light{};
-        light.colour_scheme = gf::ColourScheme::light;
+        light.colour_scheme = stxlib::Optional<gf::ColourScheme>::of(gf::ColourScheme::light);
         window.set_presentation_overrides(light);
         assert((*theme).supports(gf::ColourScheme::light));
         assert(!window.theme_fallback().has_value());
