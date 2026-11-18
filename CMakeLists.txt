@@ -8,6 +8,11 @@ if(NOT GAMES_RELEASE_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
   message(FATAL_ERROR "GAMES_RELEASE_VERSION must be a numeric major.minor.patch")
 endif()
 project(Games VERSION ${GAMES_RELEASE_VERSION} LANGUAGES C CXX)
+# The macOS programs and probes compile Objective-C++ at this level
+# (cmake/Application.cmake, games/*/src/*.mm); GUI.Forms enables it only in its own directory.
+if(APPLE)
+  enable_language(OBJCXX)
+endif()
 # Every program in one folder on Windows (GUI.Forms is one module and ships no DLL; any
 # other DLL a build makes is found beside the programs).
 if(WIN32)
