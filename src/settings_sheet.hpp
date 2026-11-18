@@ -1,7 +1,7 @@
 #pragma once
-#include "gui_forms/controls/button_base/check_box/check_box.hpp"
-#include "gui_forms/controls/range_control/track_bar/track_bar.hpp"
-#include "gui_forms/controls/scrollable_control/scrollable_control.hpp"
+#include "gui_forms/controls/check_box.hpp"
+#include "gui_forms/controls/track_bar.hpp"
+#include "gui_forms/controls/scrollable_control.hpp"
 #include "help_book.hpp"
 #include "suite.hpp"
 #include "suite_model.hpp"
@@ -35,11 +35,12 @@ class SettingCheck final : public gf::CheckBox {
 class CardBackChoice final : public gf::Button {
   public:
     CardBackChoice(gf::StableId id, std::string name, int back);
-    void set_image(gf::ImageId image);
+    void set_image(gf::ImageId picture);
     void set_chosen(bool chosen);
     [[nodiscard]] int back() const {
         return back_;
     }
+    [[nodiscard]] gf::AnatomyStateSet anatomy_states() const override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
 
   private:
@@ -136,6 +137,6 @@ class SettingsSheet final : public gf::Control {
     void clicked_close();
     void on_attached_to_window() override;
     void load_backs();
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
 };
 } // namespace games

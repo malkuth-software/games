@@ -1,3 +1,4 @@
+#include "held_keys.hpp"
 #include "help_route.hpp"
 #include "eggy_view.hpp"
 
@@ -52,17 +53,19 @@ const char* biome_lines(Biome b) {
 }
 }  // namespace
 
-EggyView::EggyView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt) {
-    set_focusable(true);
-    set_style(gf::ControlStyles::opaque, true);
+EggyView::EggyView(gf::StableId id, Options opt) : gf::Control(std::move(id)), opt_(opt) {
+    focusable = true;
+    // Every release over the view is a click: a quick second press is another click, not a
+    // double click. (The opaque style went in GUI.Forms 0.6, audit A17.)
+    set_style(gf::ControlStyles::standard_double_click, false);
     {   // we cover every pixel ourselves: no themed background fill underneath
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
         set_authored_surface_material(none);
     }
-    set_accessible_name("Eggy and the Very, Very Tall Mountain. Arrow keys or W A S D steer Eggy uphill, Space hops, "
+    accessible_name = "Eggy and the Very, Very Tall Mountain. Arrow keys or W A S D steer Eggy uphill, Space hops, "
                         "click or hold the mouse on the ground to guide him. When you stop, Eggy climbs on by himself. "
-                        "F1 help, T top scores, M music, N sound, plus and minus zoom.");
+                        "F1 help, T top scores, M music, N sound, plus and minus zoom.";
     lines_.load(asset_dir() + "/lines");
     const auto path = save_path(opt_.dev);
     const bool loaded = load_save(path, save_);
@@ -96,7 +99,7 @@ EggyView::EggyView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(
 void EggyView::on_attached_to_window() {
     audio_start(asset_dir());
     subs_.push_back(visible_changed().subscribe(*this, gf::Delegate<bool>::bind<EggyView, &EggyView::cabinet_visibility>(*this)));
-    cabinet_visibility(visible());
+    cabinet_visibility(visible.read());
     timer_ = std::make_unique<gf::Timer>(*attached_window(), std::chrono::milliseconds(66));
     subs_.push_back((*timer_).tick().subscribe(*this, gf::Delegate<>::bind<EggyView, &EggyView::tick>(*this)));
     activation_ = (*attached_window()).active_changed().subscribe(
@@ -105,7 +108,7 @@ void EggyView::on_attached_to_window() {
     (*timer_).start();
 }
 
-void EggyView::on_detaching_from_window(gf::Window&) noexcept {
+void EggyView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
     try { persist(); } catch (...) {}
     if (timer_) (*timer_).stop();
     timer_.reset();
@@ -124,7 +127,6 @@ void EggyView::register_surface() {
 void EggyView::cabinet_visibility(bool shown) {
     audio_cabinet(shown, cabinet_music_, cabinet_sound_);
     if (!shown) {
-        for (auto& key : keys_) key = false;
         mouse_down_ = hop_edge_ = false;
         set_pointer_capture(false);
         persist();
@@ -134,7 +136,7 @@ void EggyView::cabinet_visibility(bool shown) {
 // Back in front (after alt-tab, say): resume the watching pace at once rather than
 // on the background timer's next tick, up to a second away.
 void EggyView::window_activation(bool active) {
-    if (!active || !timer_ || !visible()) return;
+    if (!active || !timer_ || !visible.read()) return;
     (*timer_).stop();
     (*timer_).set_interval(std::chrono::milliseconds(50));
     (*timer_).start();
@@ -142,10 +144,10 @@ void EggyView::window_activation(bool active) {
 void EggyView::set_cabinet_preferences(bool music, bool sound, bool reduced) {
     cabinet_music_=music; cabinet_sound_=sound; cabinet_reduced_=reduced;
     scene_.reduced_motion=save_.settings.reduced_motion || reduced;
-    audio_cabinet(visible(),music,sound);
+    audio_cabinet(visible.read(),music,sound);
 }
 void EggyView::activate() {
-    cabinet_visibility(visible());
+    cabinet_visibility(visible.read());
     if (attached_window()) static_cast<void>((*attached_window()).request_focus(shared_from_this()));
 }
 
@@ -367,7 +369,7 @@ void EggyView::tick() {
     ++ticks_;
     t_ += dt;
     Sim& s = *sim_;
-    if (!visible()) {
+    if (!visible.read()) {
         s.in=Input{};
         if(panel_ != Panel::title && panel_ != Panel::finale)
             for(double left=dt;left>1e-6;left-=.25)s.step(std::min(left,.25));
@@ -379,10 +381,12 @@ void EggyView::tick() {
     // input
     const bool playing = panel_ == Panel::none;
     s.in = Input{};
-    if (intro_ >= 0 && (keys_[0] || keys_[1] || keys_[2] || keys_[3] || hop_edge_ || mouse_down_)) { skip_intro(); hop_edge_ = false; mouse_down_ = false; }
+    const WalkKeys walk = playing ? held_walk_keys() : WalkKeys{};
+    const bool walking = walk.up || walk.down || walk.left || walk.right;
+    if (intro_ >= 0 && (walking || hop_edge_ || mouse_down_)) { skip_intro(); hop_edge_ = false; mouse_down_ = false; }
     if (playing && intro_ < 0) {
-        s.in.iv = (keys_[0] ? 1 : 0) - (keys_[1] ? 1 : 0);
-        s.in.iu = (keys_[3] ? 1 : 0) - (keys_[2] ? 1 : 0);
+        s.in.iv = (walk.up ? 1 : 0) - (walk.down ? 1 : 0);
+        s.in.iu = (walk.right ? 1 : 0) - (walk.left ? 1 : 0);
         s.in.hop = hop_edge_;
         if (mouse_down_) {
             double u, v;
@@ -469,7 +473,7 @@ void EggyView::tick() {
         if (acc > 5) { std::fprintf(stderr, "ticks/s %.1f pace %lld ms hidden %d front %d\n", frames / acc, static_cast<long long>(pace.count()), hidden, front); frames = 0; acc = 0; }
     }
     // render (only once the window has given us a size)
-    const bool shown = visible();
+    const bool shown = visible.read();
     if (!shown) audio_music("", false);  // another tab is showing: stay quiet, keep climbing
     if (hidden || !shown || scene_.r.rgb.empty() || frame_.px.empty()) return;
     static const bool no_render = std::getenv("EGGY_NO_RENDER"), no_publish = std::getenv("EGGY_NO_PUBLISH");
@@ -754,54 +758,111 @@ void EggyView::action(const std::string& id) {
     if (panel_ == Panel::away && id == "close") open(Panel::none);
 }
 
-void EggyView::on_pointer(gf::PointerEvent& e) {
-    const gf::Point local = point_from_window(e.position);
+// The pointer, in GUI.Forms' raisers. The painted buttons fire on the derived
+// click (a release over the view after a press on the same button), so the
+// window's order rules apply. A press in play holds the mouse (the walk reads
+// mouse_down_ each tick) under capture until the release or a capture loss;
+// the wheel zooms.
+void EggyView::track_pointer(gf::Point local) {
     mouse_x_ = local.x / save_.settings.pixel;
     mouse_y_ = local.y / save_.settings.pixel;
-    auto hit = [&]() -> std::string {
-        for (const Button& b : buttons_)
-            if (mouse_x_ >= b.x && mouse_x_ < b.x + b.w && mouse_y_ >= b.y && mouse_y_ < b.y + b.h) return b.id;
-        return {};
-    };
-    if (e.action == gf::PointerAction::wheel) {
-        scene_.zoom = std::clamp(scene_.zoom + (e.wheel_delta.y > 0 ? .05 : -.05), .6, 1.6);
-        e.handled = true;
-        return;
-    }
-    if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
-        activate();
-        const std::string h = hit();
-        if (!h.empty()) { pressed_ = h; e.handled = true; return; }
-        if (panel_ == Panel::title) { action("start"); e.handled = true; return; }
-        if (panel_ == Panel::none) { mouse_down_ = true; set_pointer_capture(true); }
-        e.handled = true;
-    } else if (e.action == gf::PointerAction::up) {
-        if (!pressed_.empty() && hit() == pressed_) action(pressed_);
-        pressed_.clear();
-        if (mouse_down_) set_pointer_capture(false);
-        mouse_down_ = false;
-        e.handled = true;
-    }
 }
 
-void EggyView::on_key(gf::KeyEvent& e) {
+std::string EggyView::hit_button() const {
+    for (const Button& b : buttons_)
+        if (mouse_x_ >= b.x && mouse_x_ < b.x + b.w && mouse_y_ >= b.y && mouse_y_ < b.y + b.h) return b.id;
+    return {};
+}
+
+void EggyView::on_mouse_move(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    gf::Control::on_mouse_move(e);
+}
+
+void EggyView::on_mouse_wheel(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    scene_.zoom = std::clamp(scene_.zoom + (e.wheel_delta.y > 0 ? .05 : -.05), .6, 1.6);
+    e.handled = true;
+    gf::Control::on_mouse_wheel(e);
+}
+
+void EggyView::on_mouse_down(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    if (e.button == gf::PointerButton::primary) {
+        activate();
+        const std::string h = hit_button();
+        if (!h.empty()) {
+            pressed_ = h;
+        } else if (panel_ == Panel::title) {
+            action("start");
+        } else if (panel_ == Panel::none) {
+            mouse_down_ = true;
+            set_pointer_capture(true);
+        }
+        e.handled = true;
+    }
+    if (is_alive()) gf::Control::on_mouse_down(e);
+}
+
+void EggyView::on_mouse_up(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    released_ = pressed_;
+    pressed_.clear();
+    if (mouse_down_) set_pointer_capture(false);
+    mouse_down_ = false;
+    e.handled = true;
+    gf::Control::on_mouse_up(e);
+}
+
+void EggyView::on_mouse_click(gf::MouseEventArgs& e) {
+    track_pointer(e.location);
+    const std::string released = released_;
+    released_.clear();
+    if (!released.empty() && hit_button() == released) action(released);
+    if (is_alive()) gf::Control::on_mouse_click(e);
+}
+
+// A capture lost before the release (a modal, the window deactivating) ends
+// the hold, as the release would.
+void EggyView::on_mouse_capture_changed() {
+    mouse_down_ = false;
+    gf::Control::on_mouse_capture_changed();
+}
+
+// The keys: the view's own handling runs after the base raised the event, on
+// a key its subscribers left unhandled; keys bubbling from a focused child
+// take the same handling. A key up the window raises because it lost
+// activation is skipped.
+void EggyView::on_key_down(gf::KeyEventArgs& e) {
+    gf::Control::on_key_down(e);
+    key_input(e, true);
+}
+
+void EggyView::on_key_up(gf::KeyEventArgs& e) {
+    gf::Control::on_key_up(e);
+    if (!e.released_by_deactivation) key_input(e, false);
+}
+
+void EggyView::on_key_bubble(gf::KeyEvent& e) {
+    gf::KeyEventArgs arguments = gf::key_event_arguments(e);
+    key_input(arguments, e.action == gf::KeyAction::down);
+    e.handled = arguments.handled;
+}
+
+void EggyView::key_input(gf::KeyEventArgs& e, bool down) {
     if (e.handled) return;
     using K = gf::PhysicalKey;
-    const bool down = e.action == gf::KeyAction::down;
     const std::uint32_t k = e.physical_key;
-    int idx = -1;
-    if (k == K::up || k == K::w) idx = 0;
-    else if (k == K::down || k == K::s) idx = 1;
-    else if (k == K::left || k == K::a) idx = 2;
-    else if (k == K::right || k == K::d) idx = 3;
+    const bool walk_key = k == K::up || k == K::w || k == K::down || k == K::s || k == K::left || k == K::a
+                          || k == K::right || k == K::d;
     if (panel_ == Panel::finale && !score_saved_) {
         if (down && k == K::backspace && !name_entry_.empty()) { name_entry_.pop_back(); audio_sfx("eggy_ui_key", .4f, .8f, sound_on()); }
         if (down && k == K::enter) action("save_name");
         e.handled = true;
         return;
     }
-    if (idx >= 0) {
-        keys_[idx] = down && panel_ == Panel::none;
+    if (walk_key) {
+        // the walk reads the window's held keys each tick (held_walk_keys)
         e.handled = true;
         return;
     }
@@ -818,9 +879,11 @@ void EggyView::on_key(gf::KeyEvent& e) {
     if (k == K::enter && panel_ != Panel::none && panel_ != Panel::confirm) { action(panel_ == Panel::finale ? "save_name" : "close"); e.handled = true; }
 }
 
-void EggyView::on_text_input(gf::TextInputEvent& e) {
-    if (panel_ != Panel::finale || score_saved_) return;
-    for (char c : e.text_utf8) {
+// Committed text, for the name entry.
+void EggyView::on_key_press(gf::KeyPressEventArgs& e) {
+    gf::Control::on_key_press(e);
+    if (e.handled || panel_ != Panel::finale || score_saved_) return;
+    for (char c : e.text) {
         if (name_entry_.size() >= 12) break;
         if (std::isalnum(static_cast<unsigned char>(c)) || c == ' ' || c == '-' || c == '.') {
             name_entry_ += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
@@ -829,6 +892,20 @@ void EggyView::on_text_input(gf::TextInputEvent& e) {
     }
     e.handled = true;
 }
+
+// The arrows and WASD held now (games::key_held: down in the window while the focus is
+// in this view); the window releases them all when it loses activation.
+EggyView::WalkKeys EggyView::held_walk_keys() const {
+    using K = gf::PhysicalKey;
+    WalkKeys result;
+    result.up = games::key_held(*this, K::up) || games::key_held(*this, K::w);
+    result.down = games::key_held(*this, K::down) || games::key_held(*this, K::s);
+    result.left = games::key_held(*this, K::left) || games::key_held(*this, K::a);
+    result.right = games::key_held(*this, K::right) || games::key_held(*this, K::d);
+    return result;
+}
+
+
 
 // ------------------------------------------------------------------ drawing
 // Shapes are drawn into the small game-pixel framebuffer; text is queued and

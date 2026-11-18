@@ -3,8 +3,10 @@
 #include "dealer.hpp"
 #include "game.hpp"
 #include "gui_forms/basic_controls.hpp"
-#include "gui_forms/controls/panel/text_box/text_box.hpp"
+#include "gui_forms/drag/drag_tracker/drag_tracker.hpp"
+#include "gui_forms/controls/text_box.hpp"
 #include "gui_forms/timer.hpp"
+#include "gui_forms/events/key_events/key_events.hpp"
 #include "storage.hpp"
 #include "suite.hpp"
 #include "suite_settings.hpp"
@@ -29,10 +31,13 @@ class Table final : public gf::Control, public CommandSource {
     void initialize_control_tree();
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& event) override;
-    void on_key(gf::KeyEvent& event) override;
-    void on_key_preview(gf::KeyEvent& event) override;
+    void on_mouse_down(gf::MouseEventArgs& event) override;
+    void on_mouse_up(gf::MouseEventArgs& event) override;
+    void on_mouse_move(gf::MouseEventArgs& event) override;
+    void on_mouse_double_click(gf::MouseEventArgs& event) override;
+    void on_key_down(gf::KeyEventArgs& event) override;
     void on_key_bubble(gf::KeyEvent& event) override;
+    void on_key_preview(gf::KeyEvent& event) override;
     Game game;
     void activate();
     void reload_preferences();
@@ -50,6 +55,23 @@ class Table final : public gf::Control, public CommandSource {
     }
 
   private:
+    // The card drag runs on GUI.Forms' DragTracker: a press on a selected run arms it, past
+    // 4 pt it starts (plan_drag), and it ends once. Its plan is a free placement with no
+    // targets: the pile is chosen at the release by the held card's overlap with each legal
+    // landing (drop_target), the table's own rule, which the tracker's nearest-centre magnet
+    // would change. The release's drop stays in on_mouse_up; finish_drag puts the run back
+    // for every other end (Escape, a lost capture, the window's deactivation, a cancel).
+    gf::DragTracker drag_{*this};
+    bool resetting_drag_ = false;  // release_pointer_drag is cancelling: the caller lays out
+    void plan_drag(gf::DragPlan& plan);
+    void finish_drag(const gf::DragTrackerFrame& frame);
+    void release_pointer_drag();
+    void primary_press(gf::MouseEventArgs& event, gf::Point local_position);
+    [[nodiscard]] int foundation_for(int pile, int index) const;
+    void key_down(gf::KeyEventArgs& event);
+    // The second press of a double click on a card that can go to a
+    // foundation: the double click that follows it places the card.
+    bool double_place_ = false;
     Cabinet cabinet_;
     std::shared_ptr<gf::TextBox> score_name_;
     bool pending_score() const;
@@ -103,7 +125,21 @@ class Table final : public gf::Control, public CommandSource {
     // every core lending a hand: a move's few cards in a few milliseconds, a deck in tens.
     void print_stale();
     void keep_print(Printed& printed, const Sprite& sprite, std::span<const std::byte> pixels);
-    void forget_pictures(gf::Window& window);
+    void forget_pictures(gf::SurfaceRoot& window);
+    // Flight pictures: each face, and the chosen back, printed once at the cards' device size
+    // for cards in the air that have no picture of their own (a deal turns most cards over).
+    // Drawn at that size or larger as a card rises, they ask the window for no minified
+    // artwork: GUI.Forms resamples every image drawn below 1x through stx_conv at each new
+    // device size, and the 360 x 504 artwork drawn at a card's changing size in the air cost
+    // 70 to 280 ms a frame (solitaire_deal_native, 2026-11-17). Current while flight_generation_
+    // is printer_.generation() (and, for the back, flight_back_design_ is back_).
+    std::array<gf::ImageId, 52> flight_faces_{};
+    gf::ImageId flight_back_{};
+    int flight_generation_ = -1, flight_back_design_ = -1;
+    // Prints the flight pictures the moving cards need that are not current.
+    void prepare_flight_pictures();
+    // The flight picture of `card` showing its face (`up`) or the back; none while not printed.
+    [[nodiscard]] gf::ImageId flight_picture(const Card& card, bool up) const;
     std::array<Sprite, 104> sprites_{};
     std::array<gf::Rect, pile_count> slots_{};
     std::vector<int> pass_cards_;
@@ -134,7 +170,7 @@ class Table final : public gf::Control, public CommandSource {
     [[nodiscard]] std::uint32_t deal_seed(Kind kind, int option);
     [[nodiscard]] std::string level_name() const;
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
     void action(gf::ButtonBase& button);
     void tick();
     void layout_cards(bool animate);

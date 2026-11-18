@@ -17,17 +17,10 @@ void require(bool condition, const char* message) {
     if (!condition)
         throw std::runtime_error(message);
 }
-std::uint32_t bgra(std::uint32_t pixel, gf::FramebufferChannelOrder order) {
-    return 0xff000000U |
-           (order == gf::FramebufferChannelOrder::rgba
-                ? ((pixel & 0xffU) << 16) | (pixel & 0xff00U) | ((pixel >> 16) & 0xffU)
-                : pixel);
-}
-// A surface pixel read back as BGRA, whichever order the surface was written in.
-std::uint32_t surface_bgra(std::uint32_t pixel, gf::LiveSurfacePixelFormat format) {
-    return format == gf::LiveSurfacePixelFormat::rgba32_premultiplied_srgb
-               ? (pixel & 0xff00ff00U) | ((pixel & 0xffU) << 16) | ((pixel >> 16) & 0xffU)
-               : pixel;
+// Every framebuffer and live surface holds BGRA8 since GUI.Forms 0.5: a pixel is
+// compared as it is, opaque.
+std::uint32_t bgra(std::uint32_t pixel) {
+    return 0xff000000U | pixel;
 }
 } // namespace
 struct PuzzleFramebufferTest {
@@ -37,9 +30,7 @@ struct PuzzleFramebufferTest {
         const int width = static_cast<int>(frame.width());
         const int height = static_cast<int>(frame.height());
         std::vector<std::byte> expected = view.static_pixels_;
-        const render::Order order = frame.channel_order() == gf::FramebufferChannelOrder::rgba
-                                        ? render::Order::rgba
-                                        : render::Order::bgra;
+        const render::Order order = render::Order::bgra;
         const render::Target reference{reinterpret_cast<std::uint32_t*>(expected.data()),
                                        static_cast<int>(frame.row_bytes() / 4), width, height,
                                        order};
@@ -88,12 +79,12 @@ struct PuzzleFramebufferTest {
             const std::uint32_t* observed = reinterpret_cast<const std::uint32_t*>(
                 actual.pixels().data() + y * actual.row_bytes());
             for (std::uint32_t x = 0; x < actual.width(); ++x)
-                if (surface_bgra(observed[x], actual.pixel_format()) != bgra(expected[x], (*reference).channel_order())) {
-                    const std::uint32_t wanted = bgra(expected[x], (*reference).channel_order());
-                    bool rounding = (*reference).channel_order() == gf::FramebufferChannelOrder::rgba;
+                if (observed[x] != bgra(expected[x])) {
+                    const std::uint32_t wanted = bgra(expected[x]);
+                    bool rounding = true; // Skia hosts, now BGRA as well, may round one level
                     for (unsigned shift = 0; shift < 32; shift += 8)
                         rounding = rounding &&
-                                   std::abs(static_cast<int>((surface_bgra(observed[x], actual.pixel_format()) >> shift) & 255U) -
+                                   std::abs(static_cast<int>((observed[x] >> shift) & 255U) -
                                             static_cast<int>((wanted >> shift) & 255U)) <= 1;
                     // Skia's clipped SIMD spans can round an 8-bit blend one level
                     // differently. Bound both the channel error and pixel count;
@@ -104,8 +95,8 @@ struct PuzzleFramebufferTest {
                     }
                     if (mismatches < 8)
                         std::cerr << "pixel " << x << ',' << y << " expected=" << std::hex
-                                  << bgra(expected[x], (*reference).channel_order())
-                                  << " observed=" << surface_bgra(observed[x], actual.pixel_format()) << std::dec << '\n';
+                                  << bgra(expected[x])
+                                  << " observed=" << observed[x] << std::dec << '\n';
                     ++mismatches;
                 }
         }
@@ -167,11 +158,11 @@ struct PuzzleFramebufferTest {
                 pixels_match = compare(view, window) && pixels_match;
             }
             const std::uint64_t generations = (*view.surface_).snapshot().published_generation;
-            view.set_visible(false);
+            view.visible = false;
             view.tick();
             require((*view.surface_).snapshot().published_generation == generations,
                     "Hidden game stops publishing");
-            view.set_visible(true);
+            view.visible = true;
         }
         require(pixels_match,
                 "Cached partial frames match full native redraws within bounded blend rounding");
@@ -209,13 +200,21 @@ int main(int argc, char** argv) {
             gui_forms::Size{100, 100});
         games::require(!headless.create_framebuffer({100, 100}, 1),
                        "A headless window explicitly reports no native framebuffer");
+        // The application first (the base theme is enough here), then its window.
+        gui_forms::ApplicationCreateResult created = gui_forms::Application::create(gui_forms::ApplicationConfig{});
+        if (!created)
+            throw std::runtime_error("The application could not be made");
+        gui_forms::Application& application = *created.application;
         std::shared_ptr<games::Collection> collection =
             gui_forms::make_control<games::Collection>(gui_forms::StableId("fixture"));
         gui_forms::ApplicationWindowOptions options;
         options.title = "PlaySuite native framebuffer test";
         options.ready = games::FramebufferReady{collection};
-        gui_forms::ApplicationResult result = gui_forms::Application::run(
-            std::make_unique<gui_forms::Window>(collection, gui_forms::Size{1060, 680}), options);
+        gui_forms::ApplicationResult result = application.run(
+            std::make_unique<gui_forms::Window>(application, collection, gui_forms::Size{1060, 680}), std::move(options));
+        collection.reset();
+        created.application.reset();
+        static_cast<void>(gui_forms::Application::shutdown());
         if (result.callback_exception)
             std::rethrow_exception(result.callback_exception);
         if (!result.accepted())

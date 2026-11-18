@@ -8,6 +8,7 @@
 // Every call is on the UI thread. A scenery may run its own background work and
 // report it through poll(); it must wait for that work in its destructor.
 #include "cadence.hpp"
+#include "held_keys.hpp"
 #include "present.hpp"
 #include "settings.hpp"
 #include "sound_desk.hpp"
@@ -32,7 +33,20 @@ struct SceneContext {
     double charged{};      // seconds of this call's work the scenery already charged to the governor
     bool persist{};        // set true to have the view save the settings
     bool redraw{};         // set true (in poll) to have the view draw a picture even while paused
+    // The view whose held keys steer the scene (key_held below); null while Help is open,
+    // so that no key steers then. Observes the view, which outlives every call.
+    const games::gf::Control* keys{};
 };
+
+// Whether physical key `key` (a gf::PhysicalKey) is held now for the scene: down in the
+// window while the focus is in the view, and Help closed.
+[[nodiscard]] inline bool key_held(const SceneContext& context, std::uint32_t key) {
+    if (context.keys == nullptr) {
+        return false;
+    }
+    const bool result = games::key_held(*context.keys, key);
+    return result;
+}
 
 class Scenery {
   public:
@@ -82,12 +96,13 @@ class Scenery {
     virtual bool change_setting(std::string_view, double, SceneContext&) {
         return false;
     }
-    // The command a key runs, if the scene gives it one (a gf::PhysicalKey); empty for none.
-    // A key held or let go, before the view's own keys: true if the scene took it (a
-    // mower steered by the arrow keys while they are held, say).
-    virtual bool hold_key(std::uint32_t, bool, SceneContext&) {
+    // True for a key the scene steers with while it is held (a mower steered by the arrow
+    // keys, say): the view leaves it to the scene, which reads it with key_held(context,
+    // key) as it advances, before the view's own keys.
+    [[nodiscard]] virtual bool steers_with(std::uint32_t) const {
         return false;
     }
+    // The command a key runs, if the scene gives it one (a gf::PhysicalKey); empty for none.
     [[nodiscard]] virtual std::string key_command(std::uint32_t) const {
         return {};
     }

@@ -11,6 +11,7 @@
 #include <fstream>
 #include <map>
 #include <sstream>
+#include "stable_ids.hpp"
 namespace games {
 namespace {
 // Nature Cube's sound for a path that just changed: it grew, shrank or reached its pair.
@@ -42,7 +43,7 @@ class PuzzleScenePart final : public gf::Control {
   public:
     PuzzleScenePart(gf::StableId id, PuzzleView& owner, int part)
         : Control(std::move(id)), owner_(owner), part_(part) {
-        set_hit_test_transparent(true);
+        hit_test_transparent = true;
     }
     void on_paint(gf::Painter& painter, gf::Rect) override {
         if (owner_.surface_) {
@@ -75,7 +76,7 @@ void PuzzleView::refresh_scene() {
         static_cast<void>(prepare_framebuffer());
     for (int index = 0; index < 3; ++index)
         if (scene_parts_[index]) {
-            (*scene_parts_[index]).set_visible(panel_ == 0 && (!surface_ || index == 0));
+            (*scene_parts_[index]).visible = panel_ == 0 && (!surface_ || index == 0);
             if (!surface_)
                 (*scene_parts_[index]).invalidate(gf::Dirty::paint);
         }
@@ -123,10 +124,9 @@ bool PuzzleView::prepare_framebuffer() {
     gf::LiveSurfaceDescription description;
     description.width = (*replacement).width();
     description.height = (*replacement).height();
-    // The framebuffer's own byte order, and opaque: presenting it is a straight copy.
-    description.pixel_format = (*replacement).channel_order() == gf::FramebufferChannelOrder::rgba
-                                   ? gf::LiveSurfacePixelFormat::rgba32_premultiplied_srgb
-                                   : gf::LiveSurfacePixelFormat::bgra32_premultiplied_srgb;
+    // The framebuffer's byte order (BGRA on every host), and opaque: presenting it is a
+    // straight copy.
+    description.pixel_format = gf::LiveSurfacePixelFormat::bgra32_premultiplied_srgb;
     description.opaque = true;
     if (surface_) {
         if (!(*surface_).reconfigure(description))
@@ -142,8 +142,8 @@ bool PuzzleView::prepare_framebuffer() {
     surface_whole_ = false;
     static_pixels_dirty_ = true;
     static_pixels_.clear();
-    (*scene_parts_[1]).set_visible(false);
-    (*scene_parts_[2]).set_visible(false);
+    (*scene_parts_[1]).visible = false;
+    (*scene_parts_[2]).visible = false;
     direct_ = window.queue_live_surface_presentation(scene_parts_[0], surface_);
     if (game.kind == PuzzleKind::gems) {
         render();
@@ -305,9 +305,7 @@ void PuzzleView::present_gems(render::Rect area) {
         unpublished_[3] = area.y1;
         return;
     }
-    const render::Order order = target.channel_order() == gf::FramebufferChannelOrder::rgba
-                                    ? render::Order::rgba
-                                    : render::Order::bgra;
+    const render::Order order = render::Order::bgra;
     const render::Target out{reinterpret_cast<std::uint32_t*>(lease.pixels().data()),
                              static_cast<int>(lease.row_bytes() / 4), width, height, order};
     const render::Target still{reinterpret_cast<std::uint32_t*>(static_pixels_.data()),
@@ -351,9 +349,7 @@ void PuzzleView::present_gem_changes() {
         invalidate_animation(damage);
         return;
     }
-    const render::Order order = target.channel_order() == gf::FramebufferChannelOrder::rgba
-                                    ? render::Order::rgba
-                                    : render::Order::bgra;
+    const render::Order order = render::Order::bgra;
     const render::Target out{reinterpret_cast<std::uint32_t*>(lease.pixels().data()),
                              static_cast<int>(lease.row_bytes() / 4), width, height, order};
     const render::Target still{reinterpret_cast<std::uint32_t*>(static_pixels_.data()),
@@ -371,6 +367,34 @@ void PuzzleView::present_gem_changes() {
                                      static_cast<double>(all.x1 - all.x0), static_cast<double>(all.y1 - all.y0)}));
     if (!direct_)
         (*scene_parts_[0]).invalidate(damage);
+}
+// Joins rectangles that share pixels until none do (touching edges share none). Empty ones go.
+static void merge_overlapping(std::vector<render::Rect>& rects) {
+    std::vector<render::Rect> merged;
+    merged.reserve(rects.size());
+    for (render::Rect r : rects) {
+        if (r.empty())
+            continue;
+        bool joined = true;
+        while (joined) {
+            joined = false;
+            for (std::size_t k = 0; k < merged.size(); ++k)
+                if (!r.intersected(merged[k]).empty()) {
+                    r = r.united(merged[k]);
+                    merged.erase(merged.begin() + static_cast<std::ptrdiff_t>(k));
+                    joined = true;
+                    break;
+                }
+        }
+        merged.push_back(r);
+    }
+    rects.swap(merged);
+}
+double PuzzleView::ambient_time(double time) {
+    // Fifteen steps a second, the rate a resting board is drawn at while it is watched.
+    const double step = 1.0 / 15.0;
+    const double stepped = std::floor(time / step) * step;
+    return stepped;
 }
 static const gf::Color ink = gf::Color::rgba(231, 238, 247), muted = gf::Color::rgba(154, 177, 198),
                        accent = gf::Color::rgba(119, 216, 229);
@@ -395,9 +419,17 @@ static gf::ImageId load_art(gf::Window& window, const std::string& name) {
     gf::ImageLoadResult result = window.load_png(bytes);
     return result ? result.image : gf::ImageId{};
 }
-PuzzleView::PuzzleView(gf::StableId id, PuzzleKind kind) : Control(std::move(id)), game(kind) {
-    set_focusable(true);
-    set_accessible_name(puzzle_title(kind));
+PuzzleView::PuzzleView(gf::StableId id, PuzzleKind kind) : gf::Control(std::move(id)), game(kind) {
+    drag_tracker_.callbacks.plan = gf::Delegate<gf::DragPlan&>::bind<PuzzleView, &PuzzleView::plan_drag>(*this);
+    drag_tracker_.callbacks.preview =
+        gf::Delegate<const gf::DragTrackerFrame&>::bind<PuzzleView, &PuzzleView::preview_drag>(*this);
+    drag_tracker_.callbacks.finished =
+        gf::Delegate<const gf::DragTrackerFrame&>::bind<PuzzleView, &PuzzleView::finish_drag>(*this);
+    focusable = true;
+    // Every release over the view is a click: a quick second press is another click, not a
+    // double click.
+    set_style(gf::ControlStyles::standard_double_click, false);
+    accessible_name = puzzle_title(kind);
     if (!game.load(path())) {
         if (game.kind == PuzzleKind::cube || game.kind == PuzzleKind::solve) {
             PuzzleGame previous(game.kind);
@@ -426,7 +458,7 @@ void PuzzleView::initialize_control_tree() {
     if (game.kind == PuzzleKind::gems || game.kind == PuzzleKind::untangle)
         for (int i = 0; i < 3; ++i) {
             scene_parts_[i] = gf::make_control<PuzzleScenePart>(
-                gf::StableId(std::string(puzzle_slug(game.kind)) + ".scene." + std::to_string(i)),
+                games::stable_id(std::string(puzzle_slug(game.kind)) + ".scene." + std::to_string(i)),
                 *this, i);
             add_child(scene_parts_[i]);
         }
@@ -434,7 +466,7 @@ void PuzzleView::initialize_control_tree() {
                             "Flip",     "Close", "Save name",  "New game"};
     for (int i = 0; i < 9; ++i) {
         buttons_[i] = gf::make_control<GameButton>(
-            gf::StableId(std::string(puzzle_slug(game.kind)) + ".action." + std::to_string(i)),
+            games::stable_id(std::string(puzzle_slug(game.kind)) + ".action." + std::to_string(i)),
             labels[i]);
         add_child(buttons_[i]);
         subscriptions_.push_back(
@@ -445,16 +477,15 @@ void PuzzleView::initialize_control_tree() {
                     gf::Delegate<gf::ButtonBase&>::bind<PuzzleView, &PuzzleView::action>(*this)));
         // New game, Help and Top scores run from the PlaySuite capsule.
         (*buttons_[i])
-            .set_visible(
-                (i == 3 && (game.kind == PuzzleKind::pegs || game.kind == PuzzleKind::atom)) ||
-                false); // Rotate and Flip live in the capsule; R, F and right click work while
+            .visible = (i == 3 && (game.kind == PuzzleKind::pegs || game.kind == PuzzleKind::atom)) ||
+                false; // Rotate and Flip live in the capsule; R, F and right click work while
                         // dragging.
     }
     name_ = gf::make_control<gf::TextBox>(
-        gf::StableId(std::string(puzzle_slug(game.kind)) + ".name"), game.player_name);
-    (*name_).set_maximum_length(24);
-    (*name_).set_accessible_name("Your name for the top scores");
-    (*name_).set_visible(false);
+        games::stable_id(std::string(puzzle_slug(game.kind)) + ".name"), game.player_name);
+    (*name_).maximum_length = 24;
+    (*name_).accessible_name = "Your name for the top scores";
+    (*name_).visible = false;
     add_child(name_);
 }
 void PuzzleView::on_attached_to_window() {
@@ -471,7 +502,9 @@ void PuzzleView::on_attached_to_window() {
         guess_[i] = game.state.marks[i];
     clock_start_ = gf::FrameClock::now();
 }
-void PuzzleView::on_detaching_from_window(gf::Window& window) noexcept {
+void PuzzleView::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
+    drag_subject_ = DragSubject::none;
+    drag_tracker_.owner_detaching(window);
     persist();
     framebuffer_.reset();
     surface_.reset();
@@ -540,7 +573,7 @@ void PuzzleView::arrange(gf::Rect b) {
         board_ = {24, 82, b.width - 332, b.height - 139};
         set_child_layout(buttons_[3],
                          {board_.x + board_.width - 151, board_.y + board_.height - 57, 124, 36});
-        (*buttons_[3]).set_text("Check code");
+        (*buttons_[3]).text = "Check code";
     }
     popup_ = {std::max(8.0, b.width * .5 - 320), 60, std::min(640.0, b.width - 16),
               std::min(530.0, b.height - 70)};
@@ -575,7 +608,6 @@ void PuzzleView::fit_raster() {
             raster_.width = w;
             raster_.height = h;
             gem_pixels_.assign(static_cast<std::size_t>(w) * static_cast<std::size_t>(h), 0);
-            gem_depth_.resize(w, h, false);
             gem_layer_whole_ = false;
         }
         return;
@@ -599,6 +631,12 @@ gf::Rect PuzzleView::gem_rect() const {
     const render::Rect box = gem_box();
     return {box.x0 / device, box.y0 / device, (box.x1 - box.x0) / device,
             (box.y1 - box.y0) / device};
+}
+gf::Rect PuzzleView::gem_change_rect(render::Rect device_area) const {
+    const double device = attached_window() ? (*attached_window()).scale() : 1.0;
+    const gf::Rect area{device_area.x0 / device, device_area.y0 / device, (device_area.x1 - device_area.x0) / device,
+                        (device_area.y1 - device_area.y0) / device};
+    return area;
 }
 void PuzzleView::upload_gem_layer() {
     if (!gem_image_stale_ && frame_image_.value)
@@ -696,11 +734,12 @@ const PuzzleView::GemPicture& PuzzleView::gem_picture(int value, int step, doubl
     made.key = key;
     made.side = static_cast<int>(std::ceil(radius * 2.7)) + 6;
     made.pixels.assign(static_cast<std::size_t>(made.side) * static_cast<std::size_t>(made.side), 0U);
-    gem_picture_depth_.resize(made.side, made.side, false);
-    gem_picture_depth_.clear({0, 0, made.side, made.side});
-    render::r3d::Pass pass{render::Target{made.pixels.data(), made.side, made.side, made.side, gem_order_},
-                           &gem_picture_depth_, render::Rect{0, 0, made.side, made.side}};
-    draw_gem(pass, made.side * .5, made.side * .5, radius, value, 0, 0, 0.F);
+    gem_picture_canvas_.begin(render::Target{made.pixels.data(), made.side, made.side, made.side, gem_order_},
+                              render::Rect{0, 0, made.side, made.side});
+    gem_picture_canvas_.gem(GemPlacement{.x = made.side * .5, .y = made.side * .5, .radius = radius, .value = value});
+    // A refused drawing leaves the picture clear: that gem is missing from resting boards until
+    // the gems change size and the pictures are made again.
+    static_cast<void>(gem_picture_canvas_.finish());
     made.rows.assign(static_cast<std::size_t>(made.side) + 1, 0);
     for (int row = 0; row < made.side; ++row) {
         made.rows[static_cast<std::size_t>(row)] = static_cast<int>(made.runs.size());
@@ -771,15 +810,12 @@ void PuzzleView::render() {
         raster_.cube(game, yaw_, pitch_, hover_);
     else if (game.kind == PuzzleKind::gems) {
         // Drawn in the order the window's buffer takes, so laying it is a straight blend.
-        const bool rgba = framebuffer_ &&
-                          (*framebuffer_).channel_order() == gf::FramebufferChannelOrder::rgba;
-        const render::Order order = rgba ? render::Order::rgba : render::Order::bgra;
+        const render::Order order = render::Order::bgra;
         if (order != gem_order_)
             gem_layer_whole_ = false;
         gem_order_ = order;
-        render::r3d::Pass layer{render::Target{gem_pixels_.data(), raster_.width, raster_.width,
-                                              raster_.height, gem_order_},
-                                &gem_depth_, render::Rect{0, 0, raster_.width, raster_.height}};
+        const render::Target layer{gem_pixels_.data(), raster_.width, raster_.width, raster_.height, gem_order_};
+        const render::Rect whole{0, 0, raster_.width, raster_.height};
         // The board's corner inside the layer, which starts on a whole device pixel.
         const double device = attached_window() ? (*attached_window()).scale() : 1.0;
         const render::Rect box = gem_box();
@@ -838,17 +874,24 @@ void PuzzleView::render() {
         if (intro_ && intro_t > 1.4)
             intro_ = false;
         // A resting board: every gem a copy of its picture at one of eight breaths, its
-        // sparkle over it. Only the gems that look different from the last render are drawn
-        // again, with whatever overlaps where they were and are.
-        if (!moving && intro_t >= 1.4 && lifted < 0 && partner < 0 && gem_pick_ < 0 && hover_ < 0) {
+        // sparkle over it, but for the hovered gem turning and the picked gem pulsing, which
+        // are drawn whole. Only the gems that look different from the last render are drawn
+        // again, with whatever overlaps where they were and are; a gem that moves every frame
+        // is drawn again inside its own area only.
+        if (!moving && intro_t >= 1.4 && lifted < 0 && partner < 0) {
             struct Resting {
                 int value = 0, step = 0;
-                double x = 0, y = 0, size = 0, glisten = 0;
+                double x = 0, y = 0, size = 0, glisten = 0, angle = 0;
+                bool live = false;  // drawn whole every frame (turning or pulsing)
                 std::uint64_t key = 0;
                 render::Rect box{};
             };
             std::array<Resting, 64> gems{};
             const double base = cell * .38;
+            // Breathing, sparkle and the hint's nudge move at the ambient rate whatever the frame
+            // rate: frames between its steps (a gem turning under the pointer) change nothing
+            // else. The turning and the picked gem's pulse follow `time`.
+            const double ambient = ambient_time(time);
             for (int i = 0; i < 64; ++i) {
                 Resting& gem = gems[static_cast<std::size_t>(i)];
                 gem.value = (*grid)[i];
@@ -860,11 +903,11 @@ void PuzzleView::render() {
                     // After a long pause, one pair that would match nudges toward each other.
                     const int other = i == gem_hint_ ? gem_hint_to_ : gem_hint_;
                     const double nudge =
-                        std::fmod(time, 1.6) < .7 ? std::max(0.0, std::sin(time * 9)) * .09 : 0;
+                        std::fmod(ambient, 1.6) < .7 ? std::max(0.0, std::sin(ambient * 9)) * .09 : 0;
                     gem.x += (other % 8 - i % 8) * cell * nudge;
                     gem.y += (other / 8 - i / 8) * cell * nudge;
                 }
-                const double breath = reduced_ ? 0 : std::sin(time * 2.3 + i * 1.7);
+                const double breath = reduced_ ? 0 : std::sin(ambient * 2.3 + i * 1.7);
                 gem.step = reduced_ ? 8 : static_cast<int>(std::lround((breath + 1) * 3.5));
                 gem.size = reduced_ ? base : base * (1 + .022 * (gem.step / 3.5 - 1));
                 // Its place and its sparkle's reach to a quarter of a layer pixel: what the key
@@ -872,65 +915,122 @@ void PuzzleView::render() {
                 const long long quarter_x = std::lround(gem.x * 4), quarter_y = std::lround(gem.y * 4);
                 gem.x = quarter_x / 4.0;
                 gem.y = quarter_y / 4.0;
-                const double glisten = reduced_ ? 0 : .5 + .5 * std::sin(time * 1.25 + i * 2.7);
+                const double glisten = reduced_ ? 0 : .5 + .5 * std::sin(ambient * 1.25 + i * 2.7);
                 const long long reach = glisten > .7 ? std::lround(gem.size * (glisten - .7) * 6.8) : -1;
                 gem.glisten = reach < 0 ? 0 : .7 + std::max(reach / 4.0, 1e-6) / (gem.size * 1.7);
                 gem.key = static_cast<std::uint64_t>(gem.value) | static_cast<std::uint64_t>(gem.step) << 8 |
                           (static_cast<std::uint64_t>(reach + 1) & 0xFFFU) << 12 |
                           (static_cast<std::uint64_t>(quarter_x) & 0xFFFFU) << 24 |
                           (static_cast<std::uint64_t>(quarter_y) & 0xFFFFU) << 40;
+                // The hovered gem turns (when motion is allowed) and the picked gem pulses, as
+                // the whole drawing below turns and pulses them.
+                gem.live = (hover_ == i && !reduced_) || i == gem_pick_;
+                if (gem.live) {
+                    gem.angle = reduced_ ? 0 : time * 2.1;
+                    gem.size = reduced_ ? base : base * (1 + .022 * breath);
+                    if (i == gem_pick_)
+                        gem.size *= 1.08 + .04 * std::sin(time * 7);
+                    gem.glisten = glisten;
+                }
                 const int side = static_cast<int>(std::ceil(gem.size * 2.7)) + 6;
                 const int left = static_cast<int>(std::lround(gem.x - side * .5)),
                           top = static_cast<int>(std::lround(gem.y - side * .5));
                 gem.box = render::Rect{left - 1, top - 1, left + side + 1, top + side + 1};
             }
-            const render::Rect whole{0, 0, raster_.width, raster_.height};
+            // A square of the board in layer pixels, a pixel beyond its edges.
+            struct SquareBox {
+                double origin_x, origin_y, cell;
+                render::Rect operator()(int i) const {
+                    return render::Rect{static_cast<int>(std::floor(origin_x + (i % 8) * cell)) - 1,
+                                        static_cast<int>(std::floor(origin_y + (i / 8) * cell)) - 1,
+                                        static_cast<int>(std::ceil(origin_x + (i % 8 + 1) * cell)) + 1,
+                                        static_cast<int>(std::ceil(origin_y + (i / 8 + 1) * cell)) + 1};
+                }
+            };
+            const SquareBox square_box{origin_x, origin_y, cell};
+            const std::array<int, 2> overlay{hover_ >= 0 && hover_ < 64 ? hover_ : -1, gem_pick_};
             std::vector<render::Rect> regions;
             if (!gem_layer_whole_)
                 regions.push_back(whole);
-            else
-                for (int i = 0; i < 64; ++i)
-                    if (gems[static_cast<std::size_t>(i)].key != gem_shown_[static_cast<std::size_t>(i)])
-                        regions.push_back(gem_covered_[static_cast<std::size_t>(i)]
-                                              .united(gems[static_cast<std::size_t>(i)].box)
-                                              .intersected(whole));
-            for (const render::Rect& region : regions) {
-                if (region.empty())
-                    continue;
+            else {
+                for (int i = 0; i < 64; ++i) {
+                    const Resting& gem = gems[static_cast<std::size_t>(i)];
+                    if (gem.live || gem.key != gem_shown_[static_cast<std::size_t>(i)])
+                        regions.push_back(
+                            gem_covered_[static_cast<std::size_t>(i)].united(gem.box).intersected(whole));
+                }
+                // The highlights compose_gems lays under the gems: the hovered square, and the
+                // picked square and its four neighbours. Where they come or go, those squares
+                // are presented again; the picked square's ring pulses every frame.
+                if (overlay[1] >= 0)
+                    regions.push_back(square_box(overlay[1]).intersected(whole));
+                if (overlay != gem_overlay_shown_)
+                    for (int k = 0; k < 2; ++k) {
+                        const std::array<int, 2> squares{overlay[static_cast<std::size_t>(k)],
+                                                         gem_overlay_shown_[static_cast<std::size_t>(k)]};
+                        for (const int square : squares) {
+                            if (square < 0 || square >= 64)
+                                continue;
+                            regions.push_back(square_box(square).intersected(whole));
+                            if (k == 0)
+                                continue;
+                            for (const int d : {-8, 8, -1, 1}) {
+                                const int n = square + d;
+                                if (n < 0 || n >= 64 || ((d == 1 || d == -1) && n / 8 != square / 8))
+                                    continue;
+                                regions.push_back(square_box(n).intersected(whole));
+                            }
+                        }
+                    }
+            }
+            // Overlapping areas become one, so each layer pixel is cleared and drawn once; the
+            // copies go straight into the layer, area by area, and one drawing then lays every
+            // sparkle and moving gem over them, each kept to its own area.
+            merge_overlapping(regions);
+            for (const render::Rect& region : regions)
                 for (int y = region.y0; y < region.y1; ++y)
                     std::fill_n(gem_pixels_.data() + static_cast<std::size_t>(y) * raster_.width + region.x0,
                                 region.x1 - region.x0, 0U);
-                gem_depth_.clear(region);
-                render::r3d::Pass clipped{render::Target{gem_pixels_.data(), raster_.width, raster_.width,
-                                                         raster_.height, gem_order_},
-                                          &gem_depth_, region};
+            gem_canvas_.begin(layer, whole);
+            for (const render::Rect& region : regions)
                 for (const Resting& gem : gems) {
                     if (!gem.value || gem.box.intersected(region).empty())
                         continue;
+                    if (gem.live) {
+                        gem_canvas_.gem(GemPlacement{.x = gem.x, .y = gem.y, .radius = gem.size, .value = gem.value,
+                                                     .angle = gem.angle, .glisten = gem.glisten},
+                                        region);
+                        continue;
+                    }
                     copy_gem(gem_picture(gem.value, gem.step, gem.size, base), gem.x, gem.y, region);
-                    draw_gem_sparkle(clipped, gem.x, gem.y, gem.size, gem.glisten, 0.F);
+                    gem_canvas_.sparkle(GemSparkle{.x = gem.x, .y = gem.y, .radius = gem.size, .glisten = gem.glisten},
+                                        region);
                 }
-            }
+            // A refused drawing leaves the copies without their sparkles or the moving gem (until
+            // they are drawn again): nothing else to undo.
+            static_cast<void>(gem_canvas_.finish());
             gem_changed_.clear();
             for (const render::Rect& region : regions) {
                 if (region.empty())
                     continue;
-                const render::Rect device_box = gem_box();
-                gem_changed_.push_back({device_box.x0 + region.x0 / gem_scale_, device_box.y0 + region.y0 / gem_scale_,
-                                        device_box.x0 + (region.x1 + gem_scale_ - 1) / gem_scale_,
-                                        device_box.y0 + (region.y1 + gem_scale_ - 1) / gem_scale_});
+                gem_changed_.push_back({box.x0 + region.x0 / gem_scale_, box.y0 + region.y0 / gem_scale_,
+                                        box.x0 + (region.x1 + gem_scale_ - 1) / gem_scale_,
+                                        box.y0 + (region.y1 + gem_scale_ - 1) / gem_scale_});
             }
             for (int i = 0; i < 64; ++i) {
                 gem_shown_[static_cast<std::size_t>(i)] = gems[static_cast<std::size_t>(i)].key;
                 gem_covered_[static_cast<std::size_t>(i)] = gems[static_cast<std::size_t>(i)].box;
             }
+            gem_overlay_shown_ = overlay;
             gem_layer_whole_ = true;
             gem_partial_ = true;
         } else {
             gem_partial_ = false;
             gem_layer_whole_ = false;  // a resting board after this is drawn whole once
             std::fill(gem_pixels_.begin(), gem_pixels_.end(), 0U);
-            gem_depth_.clear({0, 0, raster_.width, raster_.height});
+            // Copies go straight into the layer as they come; the canvas draws everything else
+            // over them when it finishes, farthest first, the lifted gem above all.
+            gem_canvas_.begin(layer, whole);
             for (int pass = 0; pass < 2; ++pass)
                 for (int i = 0; i < 64; ++i) {
                     // The lifted gem draws last, above everything it passes over.
@@ -1006,14 +1106,18 @@ void PuzzleView::render() {
                         const double breath = reduced_ ? 0 : std::sin(time * 2.3 + i * 1.7);
                         const int step = reduced_ ? 8 : static_cast<int>(std::lround((breath + 1) * 3.5));
                         const double size = reduced_ ? base : base * (1 + .022 * (step / 3.5 - 1));
-                        copy_gem(gem_picture(value, step, size, base), x + origin_x, y + origin_y,
-                                 {0, 0, raster_.width, raster_.height});
-                        draw_gem_sparkle(layer, x + origin_x, y + origin_y, size, glisten, 0.F);
+                        copy_gem(gem_picture(value, step, size, base), x + origin_x, y + origin_y, whole);
+                        gem_canvas_.sparkle(
+                            GemSparkle{.x = x + origin_x, .y = y + origin_y, .radius = size, .glisten = glisten});
                         continue;
                     }
-                    draw_gem(layer, x + origin_x, y + origin_y, radius, value, spin, glisten,
-                             i == lifted ? -20.F : 0.F);
+                    gem_canvas_.gem(GemPlacement{.x = x + origin_x, .y = y + origin_y, .radius = radius,
+                                                 .value = value, .angle = spin, .glisten = glisten,
+                                                 .lifted = i == lifted});
                 }
+            // A refused drawing leaves the layer with the copies and whatever was drawn before
+            // the refusal; the next frame draws it whole again.
+            static_cast<void>(gem_canvas_.finish());
         }
     } else
         return;
@@ -1030,6 +1134,36 @@ void PuzzleView::render() {
                                       : std::span<const std::byte>(raster_.pixels);
     gf::Window& window = *attached_window();
     gf::Control& consumer = scene_parts_[1] ? *scene_parts_[1] : *this;
+    // A resting board patches only the areas of the layer that changed, each damaging its own
+    // area (none changed: no patch and no damage). A refused patch falls back to the whole.
+    const gf::Size layer_size{static_cast<double>(raster_.width), static_cast<double>(raster_.height)};
+    if (game.kind == PuzzleKind::gems && gem_partial_ && image_.value && image_size_ == layer_size) {
+        const render::Rect box = gem_box();
+        const render::Rect layer_bounds{0, 0, raster_.width, raster_.height};
+        bool patched_all = true;
+        for (const render::Rect& changed : gem_changed_) {
+            const render::Rect area = render::Rect{(changed.x0 - box.x0) * gem_scale_, (changed.y0 - box.y0) * gem_scale_,
+                                                   (changed.x1 - box.x0) * gem_scale_, (changed.y1 - box.y0) * gem_scale_}
+                                          .intersected(layer_bounds);
+            if (area.empty())
+                continue;
+            const std::size_t first = static_cast<std::size_t>(area.y0) * static_cast<std::size_t>(raster_.width) +
+                                      static_cast<std::size_t>(area.x0);
+            const std::span<const std::uint32_t> from(gem_pixels_.data() + first, gem_pixels_.size() - first);
+            const gf::ImageLoadResult patched = window.patch_bgra32_premultiplied(
+                image_, static_cast<std::uint32_t>(area.x0), static_cast<std::uint32_t>(area.y0),
+                static_cast<std::uint32_t>(area.x1 - area.x0), static_cast<std::uint32_t>(area.y1 - area.y0),
+                static_cast<std::uint64_t>(raster_.width) * 4U, std::as_bytes(from), consumer,
+                gem_change_rect(changed));
+            if (!patched) {
+                patched_all = false;
+                break;
+            }
+            image_ = patched.image;
+        }
+        if (patched_all)
+            return;
+    }
     gf::ImageLoadResult result =
         !image_.value ? window.load_bgra32_premultiplied(raster_.width, raster_.height,
                                                          raster_.width * 4, bytes)
@@ -1137,6 +1271,61 @@ void PuzzleView::step_effects() {
     std::erase_if(effects_, ExpiredEffect{});
     shake_ = std::max(0.0, shake_ - dt * 2.6);
     callout_life_ = std::max(0.0, callout_life_ - dt);
+}
+// Each effect's bounds as paint_gems draws it (unshaken), with room for anti-aliased edges.
+std::vector<gf::Rect> PuzzleView::effect_areas() const {
+    std::vector<gf::Rect> areas;
+    areas.reserve(effects_.size());
+    const double cell = board_.width / 8;
+    const double margin = 3;
+    for (const GemEffect& e : effects_) {
+        const double k = std::clamp(e.age / e.life, 0.0, 1.0), fade = 1 - k;
+        const gf::Point q{board_.x + e.x * cell, board_.y + e.y * cell};
+        double reach = 0;  // half the side of a square about q, for the round effects
+        switch (e.kind) {
+        case GemEffect::shard:
+            reach = e.size * cell * (1 - k * .5);
+            break;
+        case GemEffect::ring:
+            reach = cell * (.25 + e.size * k) + 3;
+            break;
+        case GemEffect::shock:
+            reach = cell * (.3 + e.size * k) + cell * .12 * fade + 1;
+            break;
+        case GemEffect::beam_row:
+        case GemEffect::beam_column: {
+            const double half = cell * (.12 + .3 * fade);
+            const gf::Rect beam = e.kind == GemEffect::beam_row
+                                      ? gf::Rect{board_.x, q.y - half, board_.width, half * 2}
+                                      : gf::Rect{q.x - half, board_.y, half * 2, board_.height};
+            areas.push_back({beam.x - margin, beam.y - margin, beam.width + margin * 2, beam.height + margin * 2});
+            continue;
+        }
+        case GemEffect::points: {
+            // The label is at most a few digits in a face of at most 26 points, centred on q
+            // across and drawn from q down (its shadow 2 points lower).
+            const double size = std::clamp(cell * .42, 14.0, 26.0);
+            areas.push_back({q.x - size * 2.5, q.y - size * 1.5, size * 5, size * 3.5});
+            continue;
+        }
+        case GemEffect::bolt: {
+            // From q to its far end, each joint jittered by up to .225 cells, 4 points wide.
+            const gf::Point end{q.x + e.vx * cell, q.y + e.vy * cell};
+            const double jitter = cell * .25 + 2;
+            const double x0 = std::min(q.x, end.x) - jitter, y0 = std::min(q.y, end.y) - jitter;
+            const double x1 = std::max(q.x, end.x) + jitter, y1 = std::max(q.y, end.y) + jitter;
+            areas.push_back({x0 - margin, y0 - margin, x1 - x0 + margin * 2, y1 - y0 + margin * 2});
+            continue;
+        }
+        default:
+            // Not an effect paint_gems draws: the whole board, to be safe.
+            areas.push_back(board_);
+            continue;
+        }
+        reach += margin;
+        areas.push_back({q.x - reach, q.y - reach, reach * 2, reach * 2});
+    }
+    return areas;
 }
 void PuzzleView::paint_gems(gf::Painter& p, int part) {
     const gf::Rect b = client_rectangle();
@@ -2141,7 +2330,7 @@ void PuzzleView::solve_draw(gf::Painter& p, const SolveSprite& sprite, double x,
                   sprite.height / solve_scale_},
                  opacity);
 }
-void PuzzleView::solve_release_images(gf::Window& window) {
+void PuzzleView::solve_release_images(gf::SurfaceRoot& window) {
     for (SolveSprite& sprite : solve_board_sprites_)
         if (sprite.image.value)
             static_cast<void>(window.remove_image(sprite.image));
@@ -2734,13 +2923,13 @@ void PuzzleView::panel(int kind) {
     gem_layer_whole_ = false;  // the board, covered or uncovered, is drawn whole once
     refresh_scene();
     for (int i = 0; i < 6; ++i)
-        (*buttons_[i]).set_enabled(!kind);
-    (*buttons_[6]).set_visible(kind != 0);
-    (*buttons_[7]).set_visible(kind == 2 && game.qualifies());
-    (*buttons_[8]).set_visible(kind == 2 && game.state.over);
-    (*name_).set_visible(kind == 2 && game.qualifies());
+        (*buttons_[i]).enabled = !kind;
+    (*buttons_[6]).visible = kind != 0;
+    (*buttons_[7]).visible = kind == 2 && game.qualifies();
+    (*buttons_[8]).visible = kind == 2 && game.state.over;
+    (*name_).visible = kind == 2 && game.qualifies();
     if (kind == 2)
-        (*name_).set_text(game.player_name);
+        (*name_).text = game.player_name;
     if (attached_window())
         static_cast<void>(
             (*attached_window()).request_focus(kind ? buttons_[6] : shared_from_this()));
@@ -2806,6 +2995,7 @@ void PuzzleView::new_game() {
     untangle_idle_ = 0;
     swat_peg_ = frozen_nudge_ = -1;
     puffs_.clear();
+    end_tracked_drag();
     kitten_.reset(game.state.seed);
     cat_carried_ = false;
     // With more than one colour of yarn, say once what the colours mean.
@@ -2901,7 +3091,7 @@ void PuzzleView::action(gf::ButtonBase& button) {
     }
     if (index == 6)
         panel(0);
-    if (index == 7 && game.record(std::string((*name_).text()))) {
+    if (index == 7 && game.record(std::string((*name_).text.read()))) {
         persist();
         sound_play("ui_name_confirm", sound_);
         panel(2);
@@ -3007,7 +3197,8 @@ void PuzzleView::gem_drag(gf::Point local) {
     if (std::abs(o.x) + std::abs(o.y) >= .72) {
         const int from = drag_;
         drag_ = -1;
-        set_pointer_capture(false);
+        gem_dragging_ = false;
+        end_tracked_drag();
         gem_swap(from,
                  from +
                      (o.x > 0   ? 1
@@ -3153,7 +3344,7 @@ void PuzzleView::tick() {
     const bool was_celebrating =
         game.kind == PuzzleKind::untangle && game.state.won && animation_duration_ > 0;
     const bool was_shaking = shake_ > 0;
-    const bool had_outer_effects = !effects_.empty() || shake_ > 0 || callout_life_ > 0;
+    const bool had_whole_view_effects = shake_ > 0 || callout_life_ > 0;
     if (game.kind == PuzzleKind::gems) {
         step_effects();
         if (gem_spring_ >= 0) {
@@ -3233,16 +3424,36 @@ void PuzzleView::tick() {
     }
     if (game.kind != PuzzleKind::cube || raster_dirty_)
         render();
-    // Celebrations draw beyond the board, so the whole view repaints while they run.
+    // A shake moves everything and the callout is drawn across the view, so the whole view
+    // repaints while they run. Effects repaint where they were and where they are now.
     if (game.kind == PuzzleKind::gems) {
         if (was_shaking || shake_ > 0)
             invalidate_static_scene();
-        const bool outer = had_outer_effects || !effects_.empty() || shake_ > 0 || callout_life_ > 0;
-        // A resting board shows only the gems that changed (none: no frame).
-        if (gem_partial_ && !outer)
+        const bool whole_view = had_whole_view_effects || shake_ > 0 || callout_life_ > 0;
+        std::vector<gf::Rect> effects_now = effect_areas();
+        const bool effects_shown = !effects_now.empty() || !effect_areas_shown_.empty();
+        if (whole_view) {
+            invalidate_animation(client_rectangle());
+        } else if (gem_partial_ && !effects_shown) {
+            // A resting board shows only the gems that changed (none: no frame).
             present_gem_changes();
-        else
-            invalidate_animation(outer ? client_rectangle() : board_);
+        } else if (effects_shown) {
+            // The gems that changed (or the whole board while they move), and the effects.
+            std::vector<gf::Rect> areas;
+            areas.reserve(gem_changed_.size() + effects_now.size() + effect_areas_shown_.size() + 1);
+            if (gem_partial_)
+                for (const render::Rect& changed : gem_changed_)
+                    areas.push_back(gem_change_rect(changed));
+            else
+                areas.push_back(board_);
+            gem_changed_.clear();
+            areas.insert(areas.end(), effect_areas_shown_.begin(), effect_areas_shown_.end());
+            areas.insert(areas.end(), effects_now.begin(), effects_now.end());
+            invalidate_animation_areas(areas);
+        } else {
+            invalidate_animation(board_);
+        }
+        effect_areas_shown_ = std::move(effects_now);
     } else if (game.kind != PuzzleKind::untangle) {
         if (animation_duration_ > 0)
             invalidate_scene();
@@ -3254,7 +3465,7 @@ void PuzzleView::tick() {
         // Eggy is drawn), five with the window behind another.
         const bool breathing_only = animation_duration_ <= 0 && effects_.empty() && !intro_ &&
                                     gem_spring_ < 0 && gem_pick_ < 0 && drag_ < 0 && shake_ <= 0 &&
-                                    callout_life_ <= 0 && hover_ < 0;
+                                    callout_life_ <= 0 && (hover_ < 0 || reduced_);
         const gf::Window* window = attached_window();
         const bool front = window == nullptr || (*window).active();
         (*timer_).set_interval(std::chrono::milliseconds(breathing_only ? (front ? 66 : 200) : 16));
@@ -3267,353 +3478,555 @@ void PuzzleView::tick() {
     if (!moving && timer_)
         (*timer_).stop();
 }
-void PuzzleView::on_pointer(gf::PointerEvent& e) {
-    const gf::Point local_position = point_from_window(e.position);
+// The pointer, in GUI.Forms' raisers. Each puzzle reads the press, the moves
+// and the release in its own way (pointer_down, pointer_move, pointer_up):
+// tracing on the cube, swapping or dragging gems, carrying untangle pegs and
+// the cat, carrying and placing solve pieces, setting sticks. Two clicks are
+// the derived click: a tray piece pressed and released in place turns (when
+// it was already chosen), and a gem pressed and released in place is picked
+// or dropped. A capture lost mid-trace ends the cube's trace.
+void PuzzleView::on_mouse_move(gf::MouseEventArgs& e) {
+    pointer_move(e);
+    // The kind's own geometry ran first; the session then sees the move (it may plan the drag
+    // past its threshold). A gem swapped by its pull has already ended the session.
+    if (drag_tracker_.running()) {
+        const gf::PointerEvent moved = gf::pointer_event_of(e);
+        if (drag_tracker_.pointer(moved))
+            e.handled = true;
+    }
+    gf::Control::on_mouse_move(e);
+}
+
+void PuzzleView::on_mouse_down(gf::MouseEventArgs& e) {
+    solve_click_ = -1;
+    gem_click_ = -1;
+    pointer_down(e);
+    if (is_alive())
+        gf::Control::on_mouse_down(e);
+}
+
+void PuzzleView::on_mouse_up(gf::MouseEventArgs& e) {
+    pointer_up(e);
+    gf::Control::on_mouse_up(e);
+}
+
+void PuzzleView::on_mouse_click(gf::MouseEventArgs& e) {
+    const gf::Point local_position = e.location;
+    const int solve_click = solve_click_;
+    const int gem_click = gem_click_;
+    solve_click_ = -1;
+    gem_click_ = -1;
+    if (!panel_ && game.kind == PuzzleKind::solve && solve_click >= 0 &&
+        solve_click < static_cast<int>(cells_.size()) &&
+        in_rect(cells_[static_cast<std::size_t>(solve_click)], local_position)) {
+        if (tray_turn_) {
+            rotation_ = (rotation_ + 1) % 4;
+            sound_play("puzzle_solve_rotate", sound_);
+        }
+        tray_turn_ = false;
+        invalidate_scene();
+    } else if (!panel_ && game.kind == PuzzleKind::gems && gem_click >= 0 && hit(local_position) == gem_click) {
+        gem_pick_ = gem_pick_ == gem_click ? -1 : gem_click;
+        if (gem_pick_ >= 0)
+            sound_play("gems_hover", sound_);
+        invalidate_scene();
+    }
+    if (is_alive())
+        gf::Control::on_mouse_click(e);
+}
+
+// A capture lost before the release (a modal, the window deactivating) ends
+// the cube's trace, as the release would.
+void PuzzleView::on_mouse_capture_changed() {
+    if (game.kind == PuzzleKind::cube && tracing_) {
+        tracing_ = false;
+        orbit_ = false;
+        persist();
+    }
+    gf::Control::on_mouse_capture_changed();
+}
+
+void PuzzleView::pointer_move(gf::MouseEventArgs& e) {
+    const gf::Point local_position = e.location;
     if (panel_)
         return;
     int cell = hit(local_position);
-    if (e.action == gf::PointerAction::move) {
-        if (game.kind == PuzzleKind::sticks) {
-            int next = -1;
-            for (int i = 0; i < 21; ++i)
-                if (in_rect(clues_[i], local_position))
-                    next = 100 + i;
-            if (next != hover_) {
-                hover_ = next;
-                invalidate_scene();
-            }
-        }
-        if (game.kind == PuzzleKind::solve && drag_ >= 0) {
-            solve_pointer_ = local_position;
+    if (game.kind == PuzzleKind::sticks) {
+        int next = -1;
+        for (int i = 0; i < 21; ++i)
+            if (in_rect(clues_[i], local_position))
+                next = 100 + i;
+        if (next != hover_) {
+            hover_ = next;
             invalidate_scene();
-            e.handled = true;
         }
-
-        if (game.kind == PuzzleKind::gems && drag_ >= 0)
-            gem_drag(local_position);
-        if (game.kind == PuzzleKind::gems) {
-            if (hover_ != cell) {
-                hover_ = cell;
-                if (reduced_) {
-                    request_render();
-                    invalidate_animation(board_);
-                }
-            }
-        }
-        if (game.kind == PuzzleKind::untangle)
-            pointer_seen_ = local_position;
-        if (game.kind == PuzzleKind::untangle && cat_carried_) {
-            const gf::Rect before = kitten_.paint_bounds(board_);
-            kitten_.carry({(local_position.x - board_.x) / board_.width, (local_position.y - board_.y) / board_.height});
-            invalidate_animation(gf::Rect::united(before, kitten_.paint_bounds(board_)));
-            e.handled = true;
-        }
-        if (game.kind == PuzzleKind::untangle && drag_ < 0 && hover_ != cell) {
-            hover_ = cell;
-            invalidate_animation(untangle_board_damage());
-        }
-        if (game.kind == PuzzleKind::untangle && drag_ >= 0) {
-            drag_position_ = {
-                std::clamp((local_position.x - board_.x) / board_.width, .035, .965),
-                std::clamp((local_position.y - board_.y) / board_.height, .035, .965)};
-            // Keep yarn and heads in the same input frame, even before the next timer tick.
-            if (update_untangle_geometry()) {
-                invalidate_static_scene();
-            }
-            invalidate_animation(untangle_board_damage());
-        }
-        if (game.kind == PuzzleKind::cube) {
-            if (!tracing_) {
-                gf::Rect bounds = client_rectangle();
-                target_yaw_ =
-                    std::clamp(.75 + (local_position.x / bounds.width - .5) * .8, .40, 1.10);
-                target_pitch_ =
-                    std::clamp(-.56 + (local_position.y / bounds.height - .5) * .55, -.78, -.34);
-                if (timer_)
-                    (*timer_).start();
-            }
-            if (tracing_ && cell >= 0) {
-                const int pair = game.state.stage - 1;
-                const bool held = pair >= 0 && pair < game.cube_pairs();
-                const std::size_t before = held ? game.state.paths[pair].size() : 0;
-                bool extended = game.cube_extend(cell);
-                // A quick diagonal flick skips a cell; route through the free corner cell.
-                if (!extended && pair >= 0 && pair < game.cube_pairs() &&
-                    !game.state.paths[pair].empty()) {
-                    const int back = game.state.paths[pair].back();
-                    for (int m = 0; m < 96 && !extended; ++m)
-                        if (PuzzleGame::cube_adjacent(back, m) &&
-                            PuzzleGame::cube_adjacent(m, cell)) {
-                            PuzzleGame trial = game;
-                            if (trial.cube_extend(m) && trial.cube_extend(cell)) {
-                                game = trial;
-                                extended = true;
-                            }
-                        }
-                }
-                if (extended)
-                    changed(cube_step_sound(game, before));
-                else if (held && cell != hover_ && cube_refused(game, cell))
-                    sound_play("nature_cube_blocked", sound_);
-            }
-            if (hover_ != cell)
-                raster_dirty_ = true;
-            hover_ = cell;
-            last_pointer_ = local_position;
-            // Rendering happens once per frame in tick(), however many moves arrive.
-            if (timer_)
-                (*timer_).start();
-        }
-        return;
     }
-    if (e.action == gf::PointerAction::down) {
-        if (attached_window())
-            static_cast<void>((*attached_window()).request_focus(shared_from_this()));
-        if (game.state.over)
-            return;
-        if (game.kind == PuzzleKind::cube) {
-            last_pointer_ = local_position;
-            orbit_ = false;
-            if (e.button != gf::PointerButton::primary)
-                return;
-            if (cell >= 0) {
-                bool started = false;
-                for (int pair = 0; pair < game.cube_pairs(); ++pair)
-                    if (!game.state.paths[pair].empty() && game.state.paths[pair].back() == cell &&
-                        !game.cube_pair(cell)) {
-                        game.state.stage = pair + 1;
-                        started = true;
-                    }
-                if (!started)
-                    started = game.cube_start(cell);
-                if (started) {
-                    tracing_ = true;
-                    set_pointer_capture(true);
-                    target_yaw_ = yaw_;
-                    target_pitch_ = pitch_;
-                    changed("nature_cube_pick");
-                }
-            }
-            return;
-        }
-        if (animation_duration_ > 0)
-            return;
-        if (game.kind == PuzzleKind::gems && cell >= 0) {
-            gem_idle_ = 0;
-            gem_hint_ = gem_hint_to_ = -1;
-            if (gem_pick_ >= 0 && cell != gem_pick_ &&
-                std::abs(gem_pick_ / 8 - cell / 8) + std::abs(gem_pick_ % 8 - cell % 8) == 1) {
-                gem_swap(gem_pick_, cell, 0);
-                e.handled = true;
-                return;
-            }
-            drag_ = cell;
-            gem_press_ = local_position;
-            gem_dragging_ = false;
-            gem_spring_ = -1;
-            gem_offset_ = {};
-            set_pointer_capture(true);
-            if (timer_)
-                (*timer_).start();
-        } else if (game.kind == PuzzleKind::untangle) {
-            const Point2 spot{(local_position.x - board_.x) / board_.width,
-                              (local_position.y - board_.y) / board_.height};
-            if (kitten_.hit(spot) || (cell >= 0 && kitten_.perch() == cell)) {
-                // The cat is in the way: pick it up, and set it down somewhere else.
-                kitten_.pick_up();
-                kitten_.carry(spot);
-                cat_carried_ = true;
-                game.message = cell >= 0 ? "The cat was sitting on that peg." : "Up you come.";
-                set_pointer_capture(true);
-                sound_play("untangle_grab", sound_);
-            } else if (cell >= 0 && game.untangle_frozen(cell)) {
-                frozen_nudge_ = cell;
-                frozen_nudge_t_ = 0;
-                game.message = "That peg is frozen until its threads are clear.";
-            } else if (cell >= 0) {
-                drag_ = cell;
-                drag_position_ = game.state.nodes[cell];
-                untangle_idle_ = 0;
-                set_pointer_capture(true);
-                sound_play("untangle_grab", sound_);
-                if (game.untangle_layers() > 1) {
-                    invalidate_static_scene();
-                    invalidate_animation(untangle_board_damage());
-                }
-            }
-            if (timer_)
-                (*timer_).start();
-        } else if (game.kind == PuzzleKind::pegs) {
-            if (cell >= 0 && cell < 4)
-                selection_ = cell;
-            if (cell >= 4 && cell < 10 && !game.state.over) {
-                guess_[selection_] = cell - 3;
-                selection_ = (selection_ + 1) % 4;
-                sound_play("four_pegs_place", sound_);
-                persist();
-            }
-        } else if (game.kind == PuzzleKind::atom && cell >= 0) {
-            if (cell < 16 && game.mark_atom(cell))
-                changed("atom_probe_mark");
-            else if (cell >= 16 && game.probe(cell - 16))
-                changed("atom_probe_fire");
-        } else if (game.kind == PuzzleKind::solve) {
-            solve_pointer_ = local_position;
-            const bool secondary = e.button == gf::PointerButton::secondary;
-            if (drag_ >= 0 && secondary) {
-                // Right click while carrying a piece turns it about its center.
-                rotation_ = (rotation_ + 1) % 4;
-                solve_recenter();
-                sound_play("puzzle_solve_rotate", sound_);
-            } else if (cell >= 0 && !secondary && !game.state.over) {
-                // Pressing the piece that is already chosen, without dragging, turns it.
-                tray_turn_ = cell == selection_;
-                press_point_ = local_position;
-                solve_select(cell);
-                for (int i = 0; i < game.solve_atoms(); ++i)
-                    if (game.state.grid[i] / 4 == cell + 1) {
-                        game.remove_piece(cell);
-                        break;
-                    }
-                lifted_ = false;
-                solve_recenter();
-                sound_play("puzzle_solve_pickup", sound_);
-                drag_ = cell;
-                set_pointer_capture(true);
-            } else if (in_rect(board_, local_position) && !game.state.over) {
-                const int atom = solve_atom_at(local_position);
-                const int piece = atom < 0 ? -1 : game.state.grid[atom] / 4 - 1;
-                if (piece >= 0 && secondary) {
-                    // Right click returns a placed piece to the tray.
-                    if (game.remove_piece(piece)) {
-                        solve_select(piece);
-                        changed("puzzle_solve_pickup");
-                    }
-                } else if (piece >= 0 && solve_lift(piece)) {
-                    drag_ = piece;
-                    set_pointer_capture(true);
-                    sound_play("puzzle_solve_pickup", sound_);
-                } else if (piece < 0 && !secondary) {
-                    // Clicking empty frame space drops the selected piece there, kept inside the
-                    // frame.
-                    int mx = 0, my = 0;
-                    for (const PieceCell& c : game.piece_cells(selection_, rotation_, flip_)) {
-                        mx = std::max(mx, c.x + 1);
-                        my = std::max(my, c.y + 1);
-                    }
-                    const double unit = solve_unit();
-                    const int px = std::clamp(static_cast<int>(std::lround(
-                                                  (local_position.x - board_.x) / unit - mx * .5)),
-                                              0, std::max(0, game.solve_columns() - mx)),
-                              py = std::clamp(static_cast<int>(std::lround(
-                                                  (local_position.y - board_.y) / unit - my * .5)),
-                                              0, std::max(0, game.solve_rows() - my));
-                    if (game.place_piece(selection_, px, py, rotation_, flip_))
-                        changed("puzzle_solve_place");
-                    else
-                        sound_play("puzzle_solve_no_fit", sound_);
-                }
-            }
-        } else if (game.kind == PuzzleKind::sticks) {
-            if (cell >= 0 &&
-                game.set_stick(cell, e.button == gf::PointerButton::secondary ? 0 : palette_))
-                changed(palette_ == 1 ? "sticks_stones_stone_place" : "sticks_stones_stick_place");
-            if (cell >= 37 && cell < 44)
-                palette_ = cell - 36;
-        }
+    if (game.kind == PuzzleKind::solve && drag_ >= 0) {
+        solve_pointer_ = local_position;
         invalidate_scene();
         e.handled = true;
     }
-    if (e.action == gf::PointerAction::up) {
-        if (!(game.kind == PuzzleKind::solve && drag_ >= 0 &&
-              e.button == gf::PointerButton::secondary))
-            set_pointer_capture(false);
-        if (game.kind == PuzzleKind::solve && drag_ >= 0 &&
-            e.button != gf::PointerButton::secondary) {
-            const int carried = drag_;
-            drag_ = -1;
-            solve_pointer_ = local_position;
-            int x = 0, y = 0;
-            const bool clicked = std::hypot(local_position.x - press_point_.x,
-                                            local_position.y - press_point_.y) < 5;
-            if (!lifted_ && clicked && carried >= 0 && carried < static_cast<int>(cells_.size()) &&
-                in_rect(cells_[static_cast<std::size_t>(carried)], local_position)) {
-                if (tray_turn_) {
-                    rotation_ = (rotation_ + 1) % 4;
-                    sound_play("puzzle_solve_rotate", sound_);
-                }
-                tray_turn_ = false;
-                invalidate_scene();
-            } else if (in_rect(board_, local_position) && solve_snap(x, y) &&
-                       game.place_piece(selection_, x, y, rotation_, flip_))
-                changed("puzzle_solve_place");
-            else {
-                // A piece carried from the frame and dropped nowhere useful goes back where it was.
-                if (lifted_ && in_rect(board_, local_position)) {
-                    sound_play("puzzle_solve_no_fit", sound_);
-                    game.place_piece(selection_, lift_x_, lift_y_, lift_rotation_, lift_flip_);
-                }
-                persist();
-            }
-            lifted_ = false;
-            invalidate_scene();
-        }
-        if (game.kind == PuzzleKind::cube) {
-            tracing_ = false;
-            orbit_ = false;
-            persist();
-        }
-        if (game.kind == PuzzleKind::untangle && cat_carried_) {
-            cat_carried_ = false;
-            kitten_.put_down();
-            game.message = "";
-            invalidate_animation(kitten_.paint_bounds(board_));
-        }
-        if (game.kind == PuzzleKind::untangle && drag_ >= 0) {
-            const std::array<int, 96> marks = game.state.marks;
-            game.move_node(drag_, drag_position_);
-            drag_ = -1;
-            untangle_idle_ = 0;
-            untangle_released(marks);
-            changed("untangle_release");
-        }
-        if (game.kind == PuzzleKind::gems && drag_ >= 0) {
-            const int from = drag_;
-            drag_ = -1;
-            const double reach = std::abs(gem_offset_.x) + std::abs(gem_offset_.y);
-            if (gem_dragging_) {
-                gem_dragging_ = false;
-                const int sx = gem_offset_.x > 0   ? 1
-                               : gem_offset_.x < 0 ? -1
-                                                   : 0,
-                          sy = gem_offset_.y > 0   ? 1
-                               : gem_offset_.y < 0 ? -1
-                                                   : 0;
-                const int col = from % 8 + sx, row = from / 8 + sy;
-                if (reach >= .3 && (sx || sy) && col >= 0 && col < 8 && row >= 0 && row < 8)
-                    gem_swap(from, row * 8 + col, reach);
+
+    if (game.kind == PuzzleKind::gems && drag_ >= 0)
+        gem_drag(local_position);
+    if (game.kind == PuzzleKind::gems) {
+        if (hover_ != cell) {
+            hover_ = cell;
+            // With motion reduced nothing turns and no timer runs: the squares that changed
+            // are drawn now. Otherwise the next tick draws the hovered gem turning.
+            if (reduced_) {
+                render();
+                if (gem_partial_)
+                    present_gem_changes();
                 else
-                    gem_spring_ = from; // not far enough: it settles back into its socket
-            } else if (cell >= 0 && cell != from &&
-                       std::abs(from / 8 - cell / 8) + std::abs(from % 8 - cell % 8) == 1)
-                gem_swap(from, cell, 0);
-            else if (cell == from) {
-                gem_pick_ = gem_pick_ == from ? -1 : from;
-                if (gem_pick_ >= 0)
-                    sound_play("gems_hover", sound_);
-                invalidate_scene();
+                    invalidate_animation(board_);
             }
+        }
+    }
+    if (game.kind == PuzzleKind::untangle)
+        pointer_seen_ = local_position;
+    if (game.kind == PuzzleKind::untangle && cat_carried_) {
+        const gf::Rect before = kitten_.paint_bounds(board_);
+        kitten_.carry({(local_position.x - board_.x) / board_.width, (local_position.y - board_.y) / board_.height});
+        invalidate_animation(gf::Rect::united(before, kitten_.paint_bounds(board_)));
+        e.handled = true;
+    }
+    if (game.kind == PuzzleKind::untangle && drag_ < 0 && hover_ != cell) {
+        hover_ = cell;
+        invalidate_animation(untangle_board_damage());
+    }
+    if (game.kind == PuzzleKind::untangle && drag_ >= 0) {
+        drag_position_ = {
+            std::clamp((local_position.x - board_.x) / board_.width, .035, .965),
+            std::clamp((local_position.y - board_.y) / board_.height, .035, .965)};
+        // Keep yarn and heads in the same input frame, even before the next timer tick.
+        if (update_untangle_geometry()) {
+            invalidate_static_scene();
+        }
+        invalidate_animation(untangle_board_damage());
+    }
+    if (game.kind == PuzzleKind::cube) {
+        if (!tracing_) {
+            gf::Rect bounds = client_rectangle();
+            target_yaw_ =
+                std::clamp(.75 + (local_position.x / bounds.width - .5) * .8, .40, 1.10);
+            target_pitch_ =
+                std::clamp(-.56 + (local_position.y / bounds.height - .5) * .55, -.78, -.34);
             if (timer_)
                 (*timer_).start();
         }
-        e.handled = true;
+        if (tracing_ && cell >= 0) {
+            const int pair = game.state.stage - 1;
+            const bool held = pair >= 0 && pair < game.cube_pairs();
+            const std::size_t before = held ? game.state.paths[pair].size() : 0;
+            bool extended = game.cube_extend(cell);
+            // A quick diagonal flick skips a cell; route through the free corner cell.
+            if (!extended && pair >= 0 && pair < game.cube_pairs() &&
+                !game.state.paths[pair].empty()) {
+                const int back = game.state.paths[pair].back();
+                for (int m = 0; m < 96 && !extended; ++m)
+                    if (PuzzleGame::cube_adjacent(back, m) &&
+                        PuzzleGame::cube_adjacent(m, cell)) {
+                        PuzzleGame trial = game;
+                        if (trial.cube_extend(m) && trial.cube_extend(cell)) {
+                            game = trial;
+                            extended = true;
+                        }
+                    }
+            }
+            if (extended)
+                changed(cube_step_sound(game, before));
+            else if (held && cell != hover_ && cube_refused(game, cell))
+                sound_play("nature_cube_blocked", sound_);
+        }
+        if (hover_ != cell)
+            raster_dirty_ = true;
+        hover_ = cell;
+        last_pointer_ = local_position;
+        // Rendering happens once per frame in tick(), however many moves arrive.
+        if (timer_)
+            (*timer_).start();
+    }
+    return;
+}
+
+void PuzzleView::pointer_down(gf::MouseEventArgs& e) {
+    const gf::Point local_position = e.location;
+    if (panel_)
+        return;
+    int cell = hit(local_position);
+    if (attached_window())
+        static_cast<void>((*attached_window()).request_focus(shared_from_this()));
+    if (game.state.over)
+        return;
+    if (game.kind == PuzzleKind::cube) {
+        last_pointer_ = local_position;
+        orbit_ = false;
+        if (e.button != gf::PointerButton::primary)
+            return;
+        if (cell >= 0) {
+            bool started = false;
+            for (int pair = 0; pair < game.cube_pairs(); ++pair)
+                if (!game.state.paths[pair].empty() && game.state.paths[pair].back() == cell &&
+                    !game.cube_pair(cell)) {
+                    game.state.stage = pair + 1;
+                    started = true;
+                }
+            if (!started)
+                started = game.cube_start(cell);
+            if (started) {
+                tracing_ = true;
+                set_pointer_capture(true);
+                target_yaw_ = yaw_;
+                target_pitch_ = pitch_;
+                changed("nature_cube_pick");
+            }
+        }
+        return;
+    }
+    if (animation_duration_ > 0)
+        return;
+    if (game.kind == PuzzleKind::gems && cell >= 0) {
+        gem_idle_ = 0;
+        gem_hint_ = gem_hint_to_ = -1;
+        if (gem_pick_ >= 0 && cell != gem_pick_ &&
+            std::abs(gem_pick_ / 8 - cell / 8) + std::abs(gem_pick_ % 8 - cell % 8) == 1) {
+            gem_swap(gem_pick_, cell, 0);
+            e.handled = true;
+            return;
+        }
+        // Only the primary button drags a gem (the tracker's sessions are primary).
+        if (e.button != gf::PointerButton::primary) {
+            e.handled = true;
+            return;
+        }
+        drag_ = cell;
+        gem_press_ = local_position;
+        gem_dragging_ = false;
+        gem_spring_ = -1;
+        gem_offset_ = {};
+        arm_drag(e, DragSubject::gem, gf::Rect{local_position.x - 1, local_position.y - 1, 2, 2}, 6);
+        if (timer_)
+            (*timer_).start();
+    } else if (game.kind == PuzzleKind::untangle) {
+        const Point2 spot{(local_position.x - board_.x) / board_.width,
+                          (local_position.y - board_.y) / board_.height};
+        if (kitten_.hit(spot) || (cell >= 0 && kitten_.perch() == cell)) {
+            // The cat is in the way: pick it up, and set it down somewhere else.
+            if (e.button != gf::PointerButton::primary) {
+                e.handled = true;
+                return;
+            }
+            kitten_.pick_up();
+            kitten_.carry(spot);
+            cat_carried_ = true;
+            game.message = cell >= 0 ? "The cat was sitting on that peg." : "Up you come.";
+            arm_drag(e, DragSubject::cat, gf::Rect{local_position.x - 1, local_position.y - 1, 2, 2}, 0);
+            sound_play("untangle_grab", sound_);
+        } else if (cell >= 0 && game.untangle_frozen(cell)) {
+            frozen_nudge_ = cell;
+            frozen_nudge_t_ = 0;
+            game.message = "That peg is frozen until its threads are clear.";
+        } else if (cell >= 0 && e.button == gf::PointerButton::primary) {
+            drag_ = cell;
+            drag_position_ = game.state.nodes[cell];
+            untangle_idle_ = 0;
+            arm_drag(e, DragSubject::untangle_peg, gf::Rect{local_position.x - 1, local_position.y - 1, 2, 2}, 0);
+            sound_play("untangle_grab", sound_);
+            if (game.untangle_layers() > 1) {
+                invalidate_static_scene();
+                invalidate_animation(untangle_board_damage());
+            }
+        }
+        if (timer_)
+            (*timer_).start();
+    } else if (game.kind == PuzzleKind::pegs) {
+        if (cell >= 0 && cell < 4)
+            selection_ = cell;
+        if (cell >= 4 && cell < 10 && !game.state.over) {
+            guess_[selection_] = cell - 3;
+            selection_ = (selection_ + 1) % 4;
+            sound_play("four_pegs_place", sound_);
+            persist();
+        }
+    } else if (game.kind == PuzzleKind::atom && cell >= 0) {
+        if (cell < 16 && game.mark_atom(cell))
+            changed("atom_probe_mark");
+        else if (cell >= 16 && game.probe(cell - 16))
+            changed("atom_probe_fire");
+    } else if (game.kind == PuzzleKind::solve) {
+        solve_pointer_ = local_position;
+        const bool secondary = e.button == gf::PointerButton::secondary;
+        if (drag_ >= 0 && secondary) {
+            // Right click while carrying a piece turns it about its center.
+            rotation_ = (rotation_ + 1) % 4;
+            solve_recenter();
+            sound_play("puzzle_solve_rotate", sound_);
+        } else if (cell >= 0 && !secondary && !game.state.over) {
+            // Pressing the piece that is already chosen, without dragging, turns it.
+            tray_turn_ = cell == selection_;
+            press_point_ = local_position;
+            solve_select(cell);
+            for (int i = 0; i < game.solve_atoms(); ++i)
+                if (game.state.grid[i] / 4 == cell + 1) {
+                    game.remove_piece(cell);
+                    break;
+                }
+            lifted_ = false;
+            solve_recenter();
+            sound_play("puzzle_solve_pickup", sound_);
+            drag_ = cell;
+            arm_drag(e, DragSubject::solve_piece, cells_[static_cast<std::size_t>(cell)], 5);
+        } else if (in_rect(board_, local_position) && !game.state.over) {
+            const int atom = solve_atom_at(local_position);
+            const int piece = atom < 0 ? -1 : game.state.grid[atom] / 4 - 1;
+            if (piece >= 0 && secondary) {
+                // Right click returns a placed piece to the tray.
+                if (game.remove_piece(piece)) {
+                    solve_select(piece);
+                    changed("puzzle_solve_pickup");
+                }
+            } else if (piece >= 0 && solve_lift(piece)) {
+                drag_ = piece;
+                arm_drag(e, DragSubject::solve_piece, gf::Rect{local_position.x - 1, local_position.y - 1, 2, 2}, 0);
+                sound_play("puzzle_solve_pickup", sound_);
+            } else if (piece < 0 && !secondary) {
+                // Clicking empty frame space drops the selected piece there, kept inside the
+                // frame.
+                int mx = 0, my = 0;
+                for (const PieceCell& c : game.piece_cells(selection_, rotation_, flip_)) {
+                    mx = std::max(mx, c.x + 1);
+                    my = std::max(my, c.y + 1);
+                }
+                const double unit = solve_unit();
+                const int px = std::clamp(static_cast<int>(std::lround(
+                                              (local_position.x - board_.x) / unit - mx * .5)),
+                                          0, std::max(0, game.solve_columns() - mx)),
+                          py = std::clamp(static_cast<int>(std::lround(
+                                              (local_position.y - board_.y) / unit - my * .5)),
+                                          0, std::max(0, game.solve_rows() - my));
+                if (game.place_piece(selection_, px, py, rotation_, flip_))
+                    changed("puzzle_solve_place");
+                else
+                    sound_play("puzzle_solve_no_fit", sound_);
+            }
+        }
+    } else if (game.kind == PuzzleKind::sticks) {
+        if (cell >= 0 &&
+            game.set_stick(cell, e.button == gf::PointerButton::secondary ? 0 : palette_))
+            changed(palette_ == 1 ? "sticks_stones_stone_place" : "sticks_stones_stick_place");
+        if (cell >= 37 && cell < 44)
+            palette_ = cell - 36;
+    }
+    invalidate_scene();
+    e.handled = true;
+}
+
+void PuzzleView::pointer_up(gf::MouseEventArgs& e) {
+    const gf::Point local_position = e.location;
+    if (panel_)
+        return;
+    int cell = hit(local_position);
+    // A primary release of a drag reaches the session first: dragging, it ends there and
+    // finish_drag drops (end_drag); only armed (short of the threshold), with no session (the
+    // press could not arm one), or a scripted hold ("drag" in scripted_action), the release is
+    // ended here as before.
+    const bool primary = e.button == gf::PointerButton::primary;
+    const bool holding = drag_subject_ != DragSubject::none || drag_ >= 0 || cat_carried_;
+    if (primary && holding) {
+        bool taken = false;
+        if (drag_tracker_.running()) {
+            const gf::PointerEvent released = gf::pointer_event_of(e);
+            taken = drag_tracker_.pointer(released);
+        }
+        if (!taken) {
+            drag_subject_ = DragSubject::none;
+            set_pointer_capture(false);
+            end_drag(true, local_position, cell);
+        }
+    } else if (!(game.kind == PuzzleKind::solve && drag_ >= 0 && !primary)) {
+        set_pointer_capture(false);
+    }
+    if (game.kind == PuzzleKind::cube) {
+        tracing_ = false;
+        orbit_ = false;
+        persist();
+    }
+    e.handled = true;
+}
+
+// Ends the drag of the current kind at `local_position` over `cell`: `commits` drops it (the
+// release), otherwise it is put back (Escape, a lost capture, a cancel). The cat is put down
+// either way.
+void PuzzleView::end_drag(bool commits, gf::Point local_position, int cell) {
+    if (game.kind == PuzzleKind::solve && drag_ >= 0 && !commits) {
+        // Escape, a lost capture or a cancel: a piece lifted from the frame goes back where it
+        // was; one taken from the tray stays in the tray.
+        drag_ = -1;
+        if (lifted_)
+            game.place_piece(selection_, lift_x_, lift_y_, lift_rotation_, lift_flip_);
+        lifted_ = false;
+        persist();
+        invalidate_scene();
+    }
+    if (game.kind == PuzzleKind::solve && drag_ >= 0) {
+        const int carried = drag_;
+        drag_ = -1;
+        solve_pointer_ = local_position;
+        int x = 0, y = 0;
+        const bool clicked = std::hypot(local_position.x - press_point_.x,
+                                        local_position.y - press_point_.y) < 5;
+        if (!lifted_ && clicked && carried >= 0 && carried < static_cast<int>(cells_.size()) &&
+            in_rect(cells_[static_cast<std::size_t>(carried)], local_position)) {
+            // A press and release on the tray piece without moving: the click
+            // that follows may turn it.
+            solve_click_ = carried;
+            invalidate_scene();
+        } else if (in_rect(board_, local_position) && solve_snap(x, y) &&
+                   game.place_piece(selection_, x, y, rotation_, flip_))
+            changed("puzzle_solve_place");
+        else {
+            // A piece carried from the frame and dropped nowhere useful goes back where it was.
+            if (lifted_ && in_rect(board_, local_position)) {
+                sound_play("puzzle_solve_no_fit", sound_);
+                game.place_piece(selection_, lift_x_, lift_y_, lift_rotation_, lift_flip_);
+            }
+            persist();
+        }
+        lifted_ = false;
+        invalidate_scene();
+    }
+    if (game.kind == PuzzleKind::untangle && cat_carried_) {
+        cat_carried_ = false;
+        kitten_.put_down();
+        game.message = "";
+        invalidate_animation(kitten_.paint_bounds(board_));
+    }
+    if (game.kind == PuzzleKind::untangle && drag_ >= 0 && !commits) {
+        // The peg goes back: nothing moved in the game.
+        drag_ = -1;
+        untangle_idle_ = 0;
+        if (update_untangle_geometry())
+            invalidate_static_scene();
+        invalidate_animation(untangle_board_damage());
+    }
+    if (game.kind == PuzzleKind::untangle && drag_ >= 0) {
+        const std::array<int, 96> marks = game.state.marks;
+        game.move_node(drag_, drag_position_);
+        drag_ = -1;
+        untangle_idle_ = 0;
+        untangle_released(marks);
+        changed("untangle_release");
+    }
+    if (game.kind == PuzzleKind::gems && drag_ >= 0 && !commits) {
+        // The gem settles back into its socket.
+        gem_spring_ = drag_;
+        drag_ = -1;
+        gem_dragging_ = false;
+        if (timer_)
+            (*timer_).start();
+    }
+    if (game.kind == PuzzleKind::gems && drag_ >= 0) {
+        const int from = drag_;
+        drag_ = -1;
+        const double reach = std::abs(gem_offset_.x) + std::abs(gem_offset_.y);
+        if (gem_dragging_) {
+            gem_dragging_ = false;
+            const int sx = gem_offset_.x > 0   ? 1
+                           : gem_offset_.x < 0 ? -1
+                                               : 0,
+                      sy = gem_offset_.y > 0   ? 1
+                           : gem_offset_.y < 0 ? -1
+                                               : 0;
+            const int col = from % 8 + sx, row = from / 8 + sy;
+            if (reach >= .3 && (sx || sy) && col >= 0 && col < 8 && row >= 0 && row < 8)
+                gem_swap(from, row * 8 + col, reach);
+            else
+                gem_spring_ = from; // not far enough: it settles back into its socket
+        } else if (cell >= 0 && cell != from &&
+                   std::abs(from / 8 - cell / 8) + std::abs(from % 8 - cell % 8) == 1)
+            gem_swap(from, cell, 0);
+        else if (cell == from)
+            gem_click_ = from;  // the click that follows picks or drops it
+        if (timer_)
+            (*timer_).start();
     }
 }
-void PuzzleView::on_key_bubble(gf::KeyEvent& e) {
-    on_key(e);
+
+// Arms the session for `subject`, pressed in `source` (local units). A press the tracker
+// refuses keeps the capture by hand; pointer_up then ends the drag as before.
+void PuzzleView::arm_drag(gf::MouseEventArgs& e, DragSubject subject, gf::Rect source, double threshold) {
+    drag_subject_ = subject;
+    gf::DragStart start{};
+    start.key = static_cast<std::uint64_t>(subject);
+    const gf::Point corner = point_to_window(gf::Point{source.x, source.y});
+    start.source.set(gf::Rect{corner.x, corner.y, source.width, source.height});
+    start.threshold = threshold;
+    const gf::PointerEvent press = gf::pointer_event_of(e);
+    const gf::DragStartResult armed = drag_tracker_.press(press, start);
+    // A refused plan has already ended the drag through finish_drag; any other refusal (busy,
+    // detached, bad input) leaves it to the hand-held capture.
+    if (armed != gf::DragStartResult::armed && armed != gf::DragStartResult::started &&
+        armed != gf::DragStartResult::refused)
+        set_pointer_capture(true);
 }
-void PuzzleView::on_key(gf::KeyEvent& e) {
-    if (e.handled || e.action != gf::KeyAction::down)
+
+// Ends the session without a drop or a restore: the caller has already settled the drag (a
+// gem's swap, a new game).
+void PuzzleView::end_tracked_drag() {
+    drag_subject_ = DragSubject::none;
+    if (drag_tracker_.running())
+        drag_tracker_.cancel(gf::DragEnd::model_changed);
+    set_pointer_capture(false);
+}
+
+// Past the threshold: a free placement with no targets. Every kind picks its own drop (the
+// frame's snap, the neighbouring gem, the peg's new place), so the tracker runs the session only.
+void PuzzleView::plan_drag(gf::DragPlan& plan) {
+    if (drag_subject_ == DragSubject::none || panel_ || game.state.over) {
+        plan.refused = true;
+        return;
+    }
+    plan.kind = gf::DragKind::placement;
+    plan.placement.grid_by_default = false;
+    plan.placement.free_drop = true;
+    plan.container = this;
+}
+
+// The moves themselves are drawn by pointer_move; the frame only asks for one.
+void PuzzleView::preview_drag(const gf::DragTrackerFrame&) {
+    invalidate_scene();
+}
+
+// The session's one end. A subject already settled (end_tracked_drag) does nothing.
+void PuzzleView::finish_drag(const gf::DragTrackerFrame& frame) {
+    if (drag_subject_ == DragSubject::none)
+        return;
+    drag_subject_ = DragSubject::none;
+    const bool commits = gf::drag_end_commits(frame.end);
+    const gf::Point local_position = point_from_window(frame.pointer);
+    const int cell = hit(local_position);
+    end_drag(commits, local_position, cell);
+}
+
+// The keys: the view's own handling runs after the base raised the event, on
+// a key its subscribers left unhandled; keys bubbling from a focused child
+// take the same handling.
+void PuzzleView::on_key_down(gf::KeyEventArgs& e) {
+    gf::Control::on_key_down(e);
+    key_down(e);
+}
+
+void PuzzleView::on_key_bubble(gf::KeyEvent& e) {
+    if (e.action != gf::KeyAction::down)
+        return;
+    gf::KeyEventArgs arguments = gf::key_event_arguments(e);
+    key_down(arguments);
+    e.handled = arguments.handled;
+}
+
+void PuzzleView::key_down(gf::KeyEventArgs& e) {
+    if (e.handled)
         return;
     if (e.physical_key == gf::PhysicalKey::escape) {
         panel(0);
@@ -3642,10 +4055,13 @@ void PuzzleView::on_key(gf::KeyEvent& e) {
     invalidate_scene();
     e.handled = true;
 }
-void PuzzleView::on_text_input(gf::TextInputEvent& e) {
-    if (panel_ || game.state.over || animation_duration_ > 0 || e.text_utf8.size() != 1)
+
+// Committed text: a peg colour (1 to 6, or a to f) or a stick palette entry.
+void PuzzleView::on_key_press(gf::KeyPressEventArgs& e) {
+    gf::Control::on_key_press(e);
+    if (e.handled || panel_ || game.state.over || animation_duration_ > 0 || e.text.size() != 1)
         return;
-    char c = e.text_utf8[0];
+    char c = e.text[0];
     int value = c >= '1' && c <= '7'   ? c - '0'
                 : c >= 'a' && c <= 'f' ? c - 'a' + 1
                 : c >= 'A' && c <= 'F' ? c - 'A' + 1

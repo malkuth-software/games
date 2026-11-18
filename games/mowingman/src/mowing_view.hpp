@@ -37,7 +37,7 @@ class MowingScenery final : public ambient::Scenery {
     void drag(double x, double y, ambient::SceneContext& context) override;
     void release(double x, double y, ambient::SceneContext& context) override;
     [[nodiscard]] bool grabbable(double x, double y) const override;
-    bool hold_key(std::uint32_t key, bool down, ambient::SceneContext& context) override;
+    [[nodiscard]] bool steers_with(std::uint32_t key) const override;
     void add_commands(std::vector<games::GameCommand>& list, const ambient::Settings& settings) const override;
     bool run_command(std::string_view id, ambient::SceneContext& context) override;
     void add_settings(std::vector<games::GameSetting>& list, const ambient::Settings& settings) const override;
@@ -71,7 +71,6 @@ class MowingScenery final : public ambient::Scenery {
     ambient::SceneSize wanted_{};
     bool settled_{};
     bool dirty_all_{true};
-    bool keys_[4]{};      // up, left, down, right held
     bool keyboard_{};     // the keys have the controls
     std::vector<std::uint32_t> picture_{};
     int picture_width_{}, picture_height_{};  // picture_'s size, which may be the size before a resize

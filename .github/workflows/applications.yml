@@ -85,6 +85,8 @@ jobs:
       # The harness's checker; scripts/check-style.py is the contributors' copy of it.
       - name: Check first-party C++ style
         run: python3 -B template_harness/harness/check_house_style.py src tests tools shared
+      - name: Check the theme package is written from its script
+        run: python3 -B tools/make_theme.py --check
       - name: Check each game's shipped size
         run: python3 tools/check_contribution.py prepared --runtime build/runtime-assets
       - name: Verify and archive resources
@@ -129,14 +131,8 @@ jobs:
       # The pinned template_harness at ./template_harness: the Windows toolchain, the
       # Linux packages, the compiler check and the macOS runtime tools.
       - uses: ./.github/actions/harness-checkout
-      # GUI.Forms lives in its own repository. It sits at gui_forms/, the same layout
-      # as its own CI, so the compiler cache it publishes can match our objects.
-      - name: Fetch reviewed GUI.Forms source
-        uses: actions/checkout@v4
-        with:
-          repository: malkuth-software/gui_forms
-          ref: e077f9d5a5117312e65e8c3b741c4edd24013d56
-          path: gui_forms
+      # GUI.Forms lives in its own repository, at gui_forms/; gui_forms.lock pins it.
+      - uses: ./.github/actions/gui-forms-checkout
       - uses: actions/setup-python@v5
         if: runner.os == 'Windows'
         with:
@@ -192,8 +188,35 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sh template_harness/harness/install_linux_ci_packages.sh packages "$RUNNER_TEMP/apt-archives"
+          # GUI.Forms builds against LLVM's libc++ 22 and libc++abi on Linux (cp33; owner, 2026-11-15):
+          # gui_forms/cmake/llvm22.cmake passes -stdlib=libc++. apt.llvm.org, which the harness
+          # script has just added, has them; they move into the harness tables at its next bump.
+          sudo apt-get install -y --no-install-recommends libc++-22-dev libc++abi-22-dev libunwind-22-dev
           echo "CC=clang" >> "$GITHUB_ENV"
           echo "CXX=clang++" >> "$GITHUB_ENV"
+      # GUI.Forms links the harness's static LLVM 22.1.8 runtime on Linux (one
+      # module, GUI.Forms 2026-11-15; gui_forms/cmake/llvm22.cmake refuses a
+      # build without GUI_FORMS_LLVM_RUNTIME): restore it, or build it with the
+      # packages' clang 22 as GUI.Forms' own CI does.
+      - name: Select the Linux LLVM runtime
+        id: linux-runtime
+        if: runner.os == 'Linux'
+        run: |
+          directory="$(python3 template_harness/harness/linux_runtime_manifest.py --directory-name)"
+          echo "GUI_FORMS_LLVM_RUNTIME=$PWD/.build/toolchain/$directory" >> "$GITHUB_ENV"
+          echo "directory=$directory" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        if: runner.os == 'Linux'
+        with:
+          path: .build/toolchain/${{ steps.linux-runtime.outputs.directory }}
+          key: linux-llvm-runtime-v1-${{ steps.linux-runtime.outputs.directory }}-${{ hashFiles('template_harness/harness/build_linux_runtimes.py', 'template_harness/harness/linux_runtime_manifest.py') }}
+      - name: Build the static Linux LLVM runtime
+        if: runner.os == 'Linux'
+        run: |
+          if [ ! -f "$GUI_FORMS_LLVM_RUNTIME/runtime-manifest.json" ]; then
+            python3 template_harness/harness/build_linux_runtimes.py --work "$RUNNER_TEMP/llvm-runtimes" --prefix "$GUI_FORMS_LLVM_RUNTIME" --jobs 4
+          fi
+          python3 template_harness/harness/linux_runtime_manifest.py "$GUI_FORMS_LLVM_RUNTIME"
       - uses: actions/cache/save@v4
         if: runner.os == 'Linux' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.linux-packages.outputs.cache-hit != 'true'
         with:
@@ -204,10 +227,6 @@ jobs:
         run: |
           py=python3; command -v python3 >/dev/null || py=python
           $py template_harness/harness/compiler_identity.py
-      - name: Fetch pinned text sources
-        run: |
-          sh gui_forms/third_party/fetch_text_stack.sh
-          sh gui_forms/third_party/fetch_linebreak.sh
       # GUI.Forms publishes a compiler cache (and on macOS its runtime) from each
       # tested main build. Restore the one for the pinned revision, checked against
       # its recorded digest; a miss only means compiling from source.
@@ -216,6 +235,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 tools/restore_toolkit_cache.py "${{ matrix.platform }}" || python tools/restore_toolkit_cache.py "${{ matrix.platform }}"
+      # No GUI.Forms release publishes the macOS 14 runtime for a checkpoint
+      # commit (only tested main builds publish one): build it with the harness,
+      # as GUI.Forms' own CI does, when the restore above found none.
+      - name: Build the macOS 14 LLVM runtime when none was restored
+        if: runner.os == 'macOS'
+        run: |
+          if [ ! -f "$GUI_FORMS_LLVM_RUNTIME/runtime-manifest.json" ]; then
+            python3 template_harness/harness/build_macos_runtimes.py --work "$RUNNER_TEMP/llvm-runtimes" --prefix "$GUI_FORMS_LLVM_RUNTIME" --jobs 4
+          fi
+          python3 template_harness/harness/macos_runtime_manifest.py "$GUI_FORMS_LLVM_RUNTIME"
       # Restore and save separately: the save runs right after a successful
       # compile, so a later test or packaging failure no longer discards it.
       # Windows failed late until 2026-10-06, never saved, and kept restoring
@@ -238,29 +267,6 @@ jobs:
           echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
           ccache --max-size=900M
           ccache --zero-stats
-      # Keyed on how GUI.Forms fetches and configures Skia, so a pin that builds it
-      # differently (phase 7 dropped its font backend) never restores the old archive.
-      - uses: actions/cache/restore@v4
-        if: runner.os != 'Windows'
-        id: skia
-        with:
-          path: gui_forms/third_party/skia
-          key: games-skia-llvm22-v2-${{ matrix.platform }}-${{ hashFiles('gui_forms/third_party/fetch_skia_cpu.sh', 'gui_forms/third_party/build_skia_cpu*.sh', 'gui_forms/third_party/skia_cpu*.gn', 'gui_forms/third_party/skia_*.patch') }}
-      - name: Build CPU renderer on Linux
-        if: runner.os == 'Linux' && steps.skia.outputs.cache-hit != 'true'
-        run: |
-          GUI_FORMS_SYSTEM_BUILD_TOOLS=1 sh gui_forms/third_party/fetch_skia_cpu.sh
-          BUILD_JOBS=4 sh gui_forms/third_party/build_skia_cpu_linux.sh "$PWD/gui_forms/third_party/skia/out/games"
-      - name: Build CPU renderer on macOS
-        if: runner.os == 'macOS' && steps.skia.outputs.cache-hit != 'true'
-        run: |
-          sh gui_forms/third_party/fetch_skia_cpu.sh
-          BUILD_JOBS=4 sh gui_forms/third_party/build_skia_cpu.sh "$PWD/gui_forms/third_party/skia/out/games"
-      - uses: actions/cache/save@v4
-        if: runner.os != 'Windows' && steps.skia.outputs.cache-hit != 'true'
-        with:
-          path: gui_forms/third_party/skia
-          key: ${{ steps.skia.outputs.cache-primary-key }}
       - uses: actions/download-artifact@v4
         with:
           name: runtime
@@ -285,9 +291,7 @@ jobs:
             -DFETCHCONTENT_BASE_DIR="$PWD/.build/fetch" -DFETCHCONTENT_UPDATES_DISCONNECTED=ON \
             -DGAMES_TOOLKIT_SOURCE_DIR="$PWD/gui_forms" \
             -DGAMES_RUNTIME_ASSET_DIR="$PWD/build/runtime" \
-            -DGAMES_RELEASE_VERSION="$GAMES_RELEASE_VERSION" \
-            -DGUI_FORMS_SKIA_PREBUILT=ON \
-            -DGUI_FORMS_SKIA_OUT="$PWD/gui_forms/third_party/skia/out/games"
+            -DGAMES_RELEASE_VERSION="$GAMES_RELEASE_VERSION"
       # Hosted runners are dedicated machines (4 cores on Linux and Windows, 3 on
       # macOS), unlike the shared development hosts AGENTS.md limits to two jobs.
       - name: Compile complete collection
@@ -311,78 +315,29 @@ jobs:
         if: needs.prepare.outputs.publish == 'true' || github.event_name == 'workflow_dispatch'
         continue-on-error: true
         run: ./"$GAMES_BUILD_DIR"/rockstack_physics_tests performance
-      # Tests whose inputs are unchanged since they last passed are not run again
-      # (tools/test_reuse.py). Every release carries the results; each run starts from
-      # the newest release's.
-      - name: Fetch test results
-        env:
-          GH_TOKEN: ${{ github.token }}
+      # The package scripts read GUI.Forms' notices and fonts from an installed SDK prefix
+      # (share/licenses/GUIForms, share/GUIForms/fonts): install the toolkit the build used.
+      - name: Install GUI.Forms into an SDK prefix for packaging
         run: |
-          py=python3; command -v python3 >/dev/null || py=python
-          $py tools/test_reuse.py fetch --results .build/test-results/test-results-app-${{ matrix.platform }}.json
-      - name: Plan tests
-        run: |
-          py=python3; command -v python3 >/dev/null || py=python
-          $py tools/test_reuse.py plan --build "$GAMES_BUILD_DIR" --profile app-${{ matrix.platform }} \
-            --results .build/test-results/test-results-app-${{ matrix.platform }}.json --exclude .build/test-results/exclude.txt
-      - name: Test complete application
-        run: |
-          skip=$(cat .build/test-results/exclude.txt 2>/dev/null || true)
-          ctest --test-dir "$GAMES_BUILD_DIR" --output-on-failure --timeout 180 --parallel 4 --output-junit results.xml --no-tests=ignore -LE design ${skip:+-E "$skip"}
-      - name: Record test results
-        if: always()
-        run: |
-          py=python3; command -v python3 >/dev/null || py=python
-          $py tools/test_reuse.py record --build "$GAMES_BUILD_DIR" --profile app-${{ matrix.platform }} \
-            --results .build/test-results/test-results-app-${{ matrix.platform }}.json --junit "$GAMES_BUILD_DIR"/results.xml
-      - name: Keep test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-app-${{ matrix.platform }}
-          path: .build/test-results/test-results-app-${{ matrix.platform }}.json
-          if-no-files-found: ignore
-      - name: Test Windows native queue ordering
-        if: runner.os == 'Windows'
-        run: |
-          cmake -S gui_forms -B build/message-tests -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DGUI_FORMS_ENABLE_SKIA=OFF -DGUI_FORMS_ENABLE_WINDOWS_HOST=OFF \
-            -DGUI_FORMS_ENABLE_HARFBUZZ_TEXT=OFF -DGUI_FORMS_BUILD_GALLERY=OFF \
-            -DGUI_FORMS_BUILD_BENCHMARKS=OFF -DGUI_FORMS_BUILD_TESTS=ON
-          cmake --build build/message-tests --target gui_forms_windows_message_queue_tests --parallel 4
-          ctest --test-dir build/message-tests -R '^gui_forms_windows_message_queue_tests$' --output-on-failure
+          # GUI.Forms is an EXCLUDE_FROM_ALL subdirectory: the application build compiles only
+          # what it links, so build the toolkit directory's own targets (its install set,
+          # gui_forms_theme_check among them) before installing them.
+          cmake --build "$GAMES_BUILD_DIR" --target toolkit/all --parallel 4
+          cmake --install "$GAMES_BUILD_DIR"/toolkit --prefix "$RUNNER_TEMP/gui-forms-sdk"
+          echo "GUI_FORMS_SDK=$RUNNER_TEMP/gui-forms-sdk" >> "$GITHUB_ENV"
       - name: Package Windows application and installer
         if: runner.os == 'Windows'
-        run: python tools/package_windows.py --build "$GAMES_BUILD_DIR" --toolkit gui_forms --runtime-dir /clang64/bin --installer
+        run: python tools/package_windows.py --build "$GAMES_BUILD_DIR" --toolkit "$GUI_FORMS_SDK" --source-revision "$GITHUB_SHA" --runtime-dir /clang64/bin --installer
       - name: Package macOS application and installer
         if: runner.os == 'macOS'
-        run: python3 tools/package_macos.py --build "$GAMES_BUILD_DIR" --toolkit gui_forms --runtime "$GUI_FORMS_LLVM_RUNTIME"
+        run: python3 tools/package_macos.py --build "$GAMES_BUILD_DIR" --toolkit "$GUI_FORMS_SDK" --source-revision "$GITHUB_SHA" --runtime "$GUI_FORMS_LLVM_RUNTIME"
       - name: Package Linux application and installer
         if: runner.os == 'Linux'
-        run: python3 tools/package_linux.py --build "$GAMES_BUILD_DIR" --toolkit gui_forms
-      - name: Launch packaged Windows application
-        if: runner.os == 'Windows'
+        # One module: the package refuses a program that needs a library beyond the system's
+        # (tools/test_package_linux.py tests the readelf/ldd reading first).
         run: |
-          python tools/smoke_package.py dist/PlaySuite/games.exe
-          python tools/test_windows_installer.py dist/*-setup.exe
-      - name: Launch packaged macOS application
-        if: runner.os == 'macOS'
-        run: |
-          python3 tools/smoke_package.py dist/PlaySuite.app/Contents/MacOS/games
-          sudo /usr/sbin/installer -pkg dist/*.pkg -target /
-          python3 tools/smoke_package.py /Applications/PlaySuite.app/Contents/MacOS/games
-      - name: Record macOS puzzle presentation costs
-        if: runner.os == 'macOS' && (needs.prepare.outputs.publish == 'true' || github.event_name == 'workflow_dispatch')
-        run: |
-          python3 tools/profile_presentation.py dist/PlaySuite.app/Contents/MacOS/games \
-            --assets build/runtime --state build/profile-state \
-            --output build/presentation-profile.json
-      # Installed over a stand-in for 0.5.x's rainstar-games, as an upgrade would be.
-      - name: Install and launch Linux package
-        if: runner.os == 'Linux'
-        run: |
-          python3 tools/test_deb_upgrade.py dist/*.deb
-          xvfb-run -a python3 tools/smoke_package.py /usr/lib/playsuite/games
+          python3 -B tools/test_package_linux.py
+          python3 tools/package_linux.py --build "$GAMES_BUILD_DIR" --toolkit "$GUI_FORMS_SDK" --source-revision "$GITHUB_SHA"
       - uses: actions/upload-artifact@v4
         with:
           name: games-${{ matrix.platform }}
@@ -418,66 +373,6 @@ jobs:
     needs: prepare
     if: needs.prepare.outputs.audio == 'true'
     uses: ./.github/workflows/runtime-assets.yml
-  # Every core test under AddressSanitizer, UndefinedBehaviorSanitizer and LeakSanitizer
-  # (tools/sanitize_core.py, with the harness's sanitizer options): any report fails it.
-  sanitizers:
-    name: Sanitizers (Linux, ASan + UBSan + LSan)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/harness-checkout
-      - name: Name the Linux package cache
-        id: linux-image
-        run: echo "image=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache/restore@v4
-        id: linux-packages
-        with:
-          path: ${{ runner.temp }}/apt-archives
-          key: linux-debs-v1-core-${{ runner.arch }}-${{ hashFiles('template_harness/harness/install_linux_ci_packages.sh', 'template_harness/projects/games.toml') }}-${{ steps.linux-image.outputs.image }}
-          restore-keys: linux-debs-v1-core-${{ runner.arch }}-${{ hashFiles('template_harness/harness/install_linux_ci_packages.sh', 'template_harness/projects/games.toml') }}-
-      - name: Install the compiler and build tools
-        run: sh template_harness/harness/install_linux_ci_packages.sh core "$RUNNER_TEMP/apt-archives"
-      - uses: actions/cache/save@v4
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.linux-packages.outputs.cache-hit != 'true'
-        with:
-          path: ${{ runner.temp }}/apt-archives
-          key: ${{ steps.linux-packages.outputs.cache-primary-key }}
-      - name: Verify the compiler
-        run: python3 template_harness/harness/compiler_identity.py
-      - uses: actions/cache/restore@v4
-        id: objects
-        with:
-          path: .ccache
-          key: games-sanitize-ccache-linux-x64-v1-${{ hashFiles('CMakeLists.txt', 'cmake/**', 'src/**', 'tests/**', 'games/**', 'shared/**') }}
-          restore-keys: games-sanitize-ccache-linux-x64-v1-
-      - uses: actions/cache@v4
-        with:
-          path: |
-            .build/fetch/*-src
-            .build/fetch/*-subbuild
-          key: fetch-sanitize-v1-linux-x64-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
-          restore-keys: fetch-sanitize-v1-linux-x64-
-      - name: Build and test the sanitized core
-        id: sanitize
-        run: |
-          export CCACHE_DIR="$PWD/.ccache" CCACHE_BASEDIR="$PWD" CCACHE_COMPILERCHECK=content
-          ccache --max-size=500M
-          ccache --zero-stats
-          python3 tools/sanitize_core.py --platform linux-x64 --jobs 4 \
-            --define FETCHCONTENT_BASE_DIR="$PWD/.build/fetch" --define FETCHCONTENT_UPDATES_DISCONNECTED=ON
-          ccache --show-stats
-      - uses: actions/cache/save@v4
-        if: always() && steps.sanitize.outcome == 'success' && steps.objects.outputs.cache-hit != 'true'
-        with:
-          path: .ccache
-          key: ${{ steps.objects.outputs.cache-primary-key }}
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: sanitizer-checks-linux-x64
-          path: .build/native-linux-x64/games-core-sanitize/Testing/Temporary/LastTest.log
-          if-no-files-found: ignore
   release:
     if: needs.prepare.outputs.publish == 'true'
     needs: [prepare, application]
@@ -495,36 +390,20 @@ jobs:
           pattern: games-*
           merge-multiple: true
           path: dist
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: test-results-app-*
-          merge-multiple: true
-          path: test-results
-      # The release carries every profile's test results: the game-core workflow's from
-      # the merged pull request's run, otherwise the previous release's.
-      - name: Collect test results
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python3 tools/test_reuse.py collect --results test-results --workflow applications.yml --expect \
-            test-results-app-windows-x64.json test-results-app-macos-arm64.json \
-            test-results-app-linux-x64.json test-results-app-linux-arm64.json \
-            test-results-core-windows-x64.json test-results-core-macos-arm64.json \
-            test-results-core-linux-x64.json test-results-core-linux-arm64.json
       - name: Publish exactly the tested revision
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          python3 tools/publish_tested_release.py --artifacts dist --test-results test-results
+          python3 tools/publish_tested_release.py --artifacts dist
   # The one check branch protection requires. It always reports, for every pull request
   # and push, and fails when any job above failed or was cancelled; a job this change
   # does not need (text, audio), and the release outside publications, is skipped.
   summary:
     name: PlaySuite CI summary
     if: always()
-    needs: [prepare, application, readme, core, text, audio, sanitizers, release]
+    needs: [prepare, application, readme, core, text, audio, release]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

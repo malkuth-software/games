@@ -13,11 +13,18 @@ set(GUI_FORMS_ENABLE_SKIA OFF CACHE BOOL "" FORCE)
 set(GUI_FORMS_ENABLE_MACOS_HOST OFF CACHE BOOL "" FORCE)
 set(GUI_FORMS_ENABLE_WINDOWS_HOST OFF CACHE BOOL "" FORCE)
 set(GUI_FORMS_ENABLE_LINUX_HOST OFF CACHE BOOL "" FORCE)
-set(GUI_FORMS_ENABLE_HARFBUZZ_TEXT ON CACHE BOOL "" FORCE)
 set(GUI_FORMS_BUILD_PREPARED_TEXT OFF CACHE BOOL "" FORCE)
 set(GUI_FORMS_BUILD_TEXT_MASKS ON CACHE BOOL "" FORCE)
 set(GUI_FORMS_BUILD_GALLERY OFF CACHE BOOL "" FORCE)
 set(GUI_FORMS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+# The vendor frames play audio through GUIForms::Audio, which the embedded
+# GUI.Forms builds itself with audio on (its Audio.cmake needs the stx package's
+# Vorbis decoder, which only GUI.Forms' own configure finds), with the loop transport.
+if(GAMES_TEST_VENDOR_FRAMES)
+    set(GUI_FORMS_BUILD_AUDIO ON CACHE BOOL "" FORCE)
+    set(GUI_FORMS_AUDIO_VORBIS_BACKEND "stx" CACHE STRING "" FORCE)
+    set(GUI_FORMS_BUILD_AUDIO_LOOP_TRANSPORT ON CACHE BOOL "" FORCE)
+endif()
 add_subdirectory("${GAMES_TEXT_SOURCE_DIR}" toolkit EXCLUDE_FROM_ALL)
 get_filename_component(games_root "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -65,8 +72,6 @@ option(GAMES_TEST_VENDOR_FRAMES "Render complete vendor game frames with real po
 if(GAMES_TEST_VENDOR_FRAMES)
     set(GAMES_BUILD_APPLICATION OFF CACHE BOOL "" FORCE)
     add_subdirectory("${games_root}" game_cores EXCLUDE_FROM_ALL)
-    set(GUI_FORMS_BUILD_AUDIO_LOOP_TRANSPORT ON CACHE BOOL "" FORCE)
-    include("${GAMES_TEXT_SOURCE_DIR}/cmake/Audio.cmake")
     add_library(fourpegs_frame_audio STATIC
         "${games_root}/src/audio_loader.cpp"
         "${games_root}/src/pcm_player.cpp"

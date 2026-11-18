@@ -8,13 +8,16 @@ if(NOT GAMES_RELEASE_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
   message(FATAL_ERROR "GAMES_RELEASE_VERSION must be a numeric major.minor.patch")
 endif()
 project(Games VERSION ${GAMES_RELEASE_VERSION} LANGUAGES C CXX)
-# Windows finds a program's DLLs beside it: build every program and DLL, GUI.Forms'
-# Application and Threading included, into one folder.
+# Every program in one folder on Windows (GUI.Forms is one module and ships no DLL; any
+# other DLL a build makes is found beside the programs).
 if(WIN32)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 endif()
 set(GAMES_RUNTIME_ASSET_DIR "" CACHE PATH "Complete verified portable runtime assets")
 option(GAMES_BUILD_APPLICATION "Build the complete graphical game collection and UI tests" ON)
+# The capsule title loads Barlow Condensed through GUI.Forms' app-font API (claude/app-fonts,
+# 2558e326c); turn it off only to build against a GUI.Forms without that API.
+option(GAMES_GUI_FORMS_APP_FONTS "Load the capsule title's face through GUI.Forms' app-font API" ON)
 enable_testing()
 add_executable(dogfood_tests tests/dogfood_tests.cpp src/dogfood.cpp)
 target_include_directories(dogfood_tests PRIVATE src)
@@ -44,8 +47,40 @@ set(GAMES_GUI_FORMS_INSTALLED OFF)
 if(GAMES_BUILD_APPLICATION)
   set(GAMES_TOOLKIT_SOURCE_DIR "" CACHE PATH "GUI.Forms source to build with the application; empty to use an installed GUI.Forms")
 endif()
+# GUI.Forms on Linux builds against LLVM's libc++ 22 and libc++abi (cp33; owner, 2026-11-15),
+# and an application that links it must use the same C++ library: gui_forms/cmake/llvm22.cmake
+# passes -stdlib=libc++. A tree that would compile against libstdc++ is refused here, as
+# GUI.Forms' own configure refuses it, rather than at the first link or library difference.
+# A shipped program also has no native library dependency (owner, 2026-11-15): the toolchain
+# links libc++, libc++abi and libunwind statically (-nostdlib++ and the archives last on every
+# C++ link line, GUI.Forms 39d2ea6b0), and a tree whose link line would take them shared is
+# refused too. tools/package_linux.py checks the result with readelf and ldd.
+if(GAMES_BUILD_APPLICATION AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  include(CheckCXXSourceCompiles)
+  check_cxx_source_compiles([=[
+#include <version>
+#if !defined(_LIBCPP_VERSION) || _LIBCPP_VERSION < 220000 || _LIBCPP_VERSION >= 230000
+#error "not libc++ 22"
+#endif
+int main() { return 0; }
+]=] GAMES_LINUX_LIBCXX_22)
+  # GUI.Forms' toolchain file reports a static libc++, libc++abi and libunwind
+  # (the harness's runtime, GUI_FORMS_LLVM_RUNTIME) as GUI_FORMS_STATIC_CXX_RUNTIME.
+  if(NOT GUI_FORMS_STATIC_CXX_RUNTIME)
+    message(FATAL_ERROR "PlaySuite on Linux links libc++, libc++abi and libunwind statically: configure "
+                        "with gui_forms/cmake/llvm22.cmake and GUI_FORMS_LLVM_RUNTIME naming the "
+                        "harness's static Linux runtime (template_harness/harness/build_linux_runtimes.py)")
+  endif()
+  if(NOT GAMES_LINUX_LIBCXX_22)
+    # Not cached as a failure: the next configure checks again.
+    unset(GAMES_LINUX_LIBCXX_22 CACHE)
+    message(FATAL_ERROR "PlaySuite on Linux builds against libc++ 22 and libc++abi, as GUI.Forms does: "
+                        "configure with gui_forms/cmake/llvm22.cmake and install libc++-22-dev and "
+                        "libc++abi-22-dev")
+  endif()
+endif()
 if(GAMES_BUILD_APPLICATION AND GAMES_TOOLKIT_SOURCE_DIR STREQUAL "")
-  find_package(GUIForms CONFIG REQUIRED COMPONENTS Application Audio TextMasks AudioLoopTransport)
+  find_package(GUIForms 0.6 CONFIG REQUIRED COMPONENTS Application Audio TextMasks AudioLoopTransport)
   set(GAMES_GUI_FORMS_INSTALLED ON)
   message(STATUS "GUI.Forms: installed package ${GUIForms_DIR}")
 elseif(GAMES_BUILD_APPLICATION)
@@ -59,13 +94,18 @@ elseif(GAMES_BUILD_APPLICATION)
   # GUI.Forms' own Vorbis decoder; forced so an older build folder cannot keep stb.
   set(GUI_FORMS_AUDIO_VORBIS_BACKEND stx CACHE STRING "" FORCE)
   set(GUI_FORMS_BUILD_TEXT_MASKS ON CACHE BOOL "" FORCE)
-  set(GUI_FORMS_ENABLE_HARFBUZZ_TEXT ON CACHE BOOL "" FORCE)
-  if(WIN32)
-    set(GUI_FORMS_ENABLE_SKIA OFF CACHE BOOL "" FORCE)
-  elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # forms/playsuite.form is compiled at build time.
+  set(GUI_FORMS_BUILD_FORM_COMPILER ON CACHE BOOL "" FORCE)
+  # Every host draws with GUI.Forms' CPU Skia (built from the pinned stx); the Win32
+  # host requires it since stage SK3.
+  set(GUI_FORMS_ENABLE_SKIA ON CACHE BOOL "" FORCE)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(GUI_FORMS_ENABLE_LINUX_HOST ON CACHE BOOL "" FORCE)
   endif()
   add_subdirectory("${GAMES_TOOLKIT_SOURCE_DIR}" toolkit EXCLUDE_FROM_ALL)
+  # gui_forms_add_theme reads GUI_FORMS_THEME_EMBED_SCRIPT, which the toolkit sets only in
+  # its own directory scope (and its module will not run twice), so it is set here too.
+  set(GUI_FORMS_THEME_EMBED_SCRIPT "${GAMES_TOOLKIT_SOURCE_DIR}/cmake/GUIFormsThemeEmbed.cmake")
   set(GUIForms_FONT_DIR "${GAMES_TOOLKIT_SOURCE_DIR}/assets/fonts")
 endif()
 add_library(game_paths src/runtime_paths.cpp src/game_data.cpp)
@@ -73,7 +113,7 @@ target_include_directories(game_paths PUBLIC src)
 add_library(game_rules shared/cards/game.cpp src/storage.cpp src/suite_settings.cpp src/scores.cpp games/sudoku/src/sudoku.cpp shared/puzzles/puzzles.cpp)
 target_include_directories(game_rules PUBLIC src shared/cards shared/puzzles games/sudoku/src)
 target_link_libraries(game_rules PUBLIC game_paths)
-add_library(game_raster shared/puzzles/puzzle_render.cpp shared/puzzles/puzzle_image.cpp shared/puzzles/gem_art.cpp)
+add_library(game_raster shared/puzzles/puzzle_render.cpp shared/puzzles/puzzle_image.cpp)
 target_link_libraries(game_raster PUBLIC game_rules render_core)
 add_executable(raster_tests tests/raster_tests.cpp)
 target_link_libraries(raster_tests PRIVATE game_raster)

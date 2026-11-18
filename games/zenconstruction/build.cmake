@@ -42,3 +42,5 @@ add_executable(rockstack_physics_tests ${GAME_MODULE_DIR}/phys/tests/phys_tests.
 target_link_libraries(rockstack_physics_tests PRIVATE zc_phys)
 add_test(NAME rockstack_physics COMMAND rockstack_physics_tests rest stack mass overhang incline drop hold setdown shove consequence wake load concave determinism robustness static restitution stable)
 set_tests_properties(rockstack_physics PROPERTIES LABELS design)
+# Degenerate point sets (the hull builder's boundary-loop pass); unlabelled, so every run takes it.
+add_test(NAME rockstack_degenerate_hulls COMMAND rockstack_physics_tests degenerate)

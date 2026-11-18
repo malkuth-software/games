@@ -13,10 +13,10 @@ add_library(game_felt STATIC shared/felt/carpet.cpp shared/felt/image.cpp)
 # The felt and drawn card backs every card table shares, made once per run (Koi-Koi too).
 # Also the room's light on a card's face, baked offline (shared/cards/table_light.hpp), and
 # the cards printed in it (card_print.hpp, card_press.hpp): their PNGs read with the ambient
-# engine's inflater, on the paper engine's stock. And a card held in the hand (held_card.hpp).
+# engine's inflater, on the paper engine's stock.
 add_library(game_table_art STATIC shared/cards/table_art.cpp shared/cards/card_backs.cpp
             shared/cards/table_light.cpp shared/cards/table_light_bake.cpp
-            shared/cards/card_print.cpp shared/cards/card_press.cpp shared/cards/held_card.cpp)
+            shared/cards/card_print.cpp shared/cards/card_press.cpp)
 target_include_directories(game_table_art PUBLIC shared PRIVATE shared/cards shared/felt)
 target_link_libraries(game_table_art PUBLIC game_felt game_paths GUIForms::Application PRIVATE paper_core ambient_core)
 # The shelf's wood (src/wood.cpp), in a library of its own so a game can stand its own
@@ -34,11 +34,21 @@ endif()
 target_link_libraries(vendor_game_ui ${module_link_scope} ${GAMES_MODULE_LIBRARIES}
     game_audio_adapters game_text_frames game_felt game_table_art game_wood GUIForms::Application)
 target_compile_definitions(vendor_game_ui INTERFACE _USE_MATH_DEFINES)
-add_library(game_ui ${GAMES_MODULE_SOURCES} "${GAMES_CATALOG_DIR}/game_registry.cpp" shared/cards/table.cpp shared/cards/dealer.cpp src/presentation.cpp shared/puzzles/puzzle_view.cpp src/collection.cpp src/open_link.cpp
-    games/sudoku/src/sudoku_view.cpp src/suite.cpp src/text_sprites.cpp src/shelf.cpp src/capsule.cpp shared/puzzles/kitten.cpp
-    src/help_book.cpp src/help_content.cpp src/business_card.cpp src/card_remarks.cpp src/settings_sheet.cpp
+add_library(game_ui ${GAMES_MODULE_SOURCES} "${GAMES_CATALOG_DIR}/game_registry.cpp" shared/cards/table.cpp shared/cards/dealer.cpp src/presentation.cpp shared/puzzles/puzzle_view.cpp shared/puzzles/gem_art.cpp src/collection.cpp
+    games/sudoku/src/sudoku_view.cpp src/suite.cpp src/text_sprites.cpp src/shelf.cpp src/capsule.cpp src/capsule_title_face.cpp shared/puzzles/kitten.cpp
+    src/help_book.cpp src/help_content.cpp src/card_remarks.cpp src/settings_sheet.cpp
     src/suite_model.cpp src/paper_sheet.cpp)
 target_include_directories(game_ui PUBLIC src PRIVATE shared/felt)
+# The capsule is a GUI.Forms composite: its class derives from the one the form compiler
+# generates from controls/command-capsule.control. capsule.hpp includes the generated header,
+# so every target that includes it (the tests) sees the generated directory.
+gui_forms_add_control(game_ui controls/command-capsule.control CLASS CommandCapsuleControl NAMESPACE games)
+target_include_directories(game_ui PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/gui_forms_controls")
+# The capsule title's app-loaded face (src/capsule_title_face.cpp) uses GUI.Forms' app-font
+# API (claude/app-fonts); with the option off the bundled fallback draws it.
+if(GAMES_GUI_FORMS_APP_FONTS)
+    target_compile_definitions(game_ui PUBLIC GAMES_GUI_FORMS_APP_FONTS=1)
+endif()
 target_link_libraries(game_ui PUBLIC game_rules game_solver game_raster sudoku_generator vendor_game_ui paper_core
     ambient_core game_wood)
 if(WIN32)
@@ -55,6 +65,15 @@ if(WIN32)
     endif()
 endif()
 target_link_libraries(games PRIVATE game_ui)
+# The business card prints the version (src/main.cpp, gf::set_program_identity).
+target_compile_definitions(games PRIVATE GAMES_VERSION="${PROJECT_VERSION}")
+# The suite's window is forms/playsuite.form (its root the shell, an application type);
+# its look is the theme package themes/playsuite, written by tools/make_theme.py.
+set(GAMES_FORM_TYPES "collection,games::Collection,user_control,collection.hpp")
+gui_forms_add_form(games forms/playsuite.form CLASS PlaySuiteWindow NAMESPACE games DERIVED
+                   TYPES "${GAMES_FORM_TYPES}")
+gui_forms_add_theme(games themes/playsuite FUNCTION playsuite_theme NAMESPACE games
+                    FORMS forms/playsuite.form)
 set_target_properties(games PROPERTIES
     MACOSX_BUNDLE_BUNDLE_NAME "PlaySuite"
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.malkuthsoft.playsuite"
@@ -62,37 +81,18 @@ set_target_properties(games PROPERTIES
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
 if(APPLE)
     set(games_resources "$<TARGET_BUNDLE_DIR:games>/Contents/Resources")
-    set(games_libraries "$<TARGET_BUNDLE_DIR:games>/Contents/Frameworks")
-    set_target_properties(games PROPERTIES BUILD_RPATH "@executable_path/../Frameworks")
     set_source_files_properties(assets/Games.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
     target_sources(games PRIVATE assets/Games.icns)
     set_target_properties(games PROPERTIES MACOSX_BUNDLE_ICON_FILE "Games.icns")
 else()
     set(games_resources "$<TARGET_FILE_DIR:games>")
-    set(games_libraries "$<TARGET_FILE_DIR:games>")
-    if(UNIX)
-        set_target_properties(games PROPERTIES BUILD_RPATH "$ORIGIN")
-    endif()
 endif()
+# GUI.Forms is one module (static archives linked into the program): no GUI.Forms library is
+# copied beside the executable and no rpath points at one.
 add_custom_command(TARGET games POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${games_libraries}"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:GUIForms::Application>" "${games_libraries}"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${GAMES_RUNTIME_ASSET_DIR}" "${games_resources}/assets"
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${GUIForms_FONT_DIR}" "${games_resources}/fonts"
     VERBATIM)
-# An installed GUI.Forms keeps its DLLs in <prefix>/bin; Windows finds a DLL beside the
-# executable, so the games and the tests (all built in this directory) get copies.
-if(WIN32 AND GAMES_GUI_FORMS_INSTALLED)
-    add_custom_command(TARGET games POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:GUIForms::Threading>" "${games_libraries}"
-        VERBATIM)
-endif()
-if(UNIX)
-    add_custom_command(TARGET games POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:GUIForms::Application>"
-            "${games_libraries}/$<TARGET_SONAME_FILE_NAME:GUIForms::Application>"
-        VERBATIM)
-endif()
 add_executable(ui_tests tests/ui_tests.cpp)
 add_executable(puzzle_frame_tests tests/puzzle_frame_tests.cpp)
 if("gems" IN_LIST GAMES_MODULE_IDS AND "untangle" IN_LIST GAMES_MODULE_IDS)
@@ -117,7 +117,34 @@ set_tests_properties(puzzle_native_framebuffers PROPERTIES TIMEOUT 120 ENVIRONME
 endif()
 target_link_libraries(puzzle_frame_tests PRIVATE game_ui)
 add_test(NAME puzzle_frames COMMAND puzzle_frame_tests)
+# The gems drawn through GUI.Forms' raster engine (shared/puzzles/gem_art.cpp).
+add_executable(gem_art_tests tests/gem_art_tests.cpp)
+target_link_libraries(gem_art_tests PRIVATE game_ui)
+add_test(NAME gem_art COMMAND gem_art_tests)
 set_tests_properties(puzzle_frames PROPERTIES ENVIRONMENT "GAMES_ASSET_DIR=${GAMES_RUNTIME_ASSET_DIR}")
+# The Solitaire deal stepped frame by frame through the window's schedule (wakes, damage,
+# where each card is drawn) against the deal's own sequence.
+add_executable(solitaire_deal_tests tests/solitaire_deal_tests.cpp)
+target_link_libraries(solitaire_deal_tests PRIVATE game_ui)
+add_test(NAME solitaire_deal COMMAND solitaire_deal_tests)
+set_tests_properties(solitaire_deal PROPERTIES TIMEOUT 60 ENVIRONMENT "GAMES_ASSET_DIR=${GAMES_RUNTIME_ASSET_DIR}")
+# The same deal in PlaySuite's real AppKit window at backing scale 2: every presented draw's
+# time, cost and damage from the host's draw trace, judged for gaps and per-card flights
+# (exit 77 at another scale; PLAYSUITE_DEAL_CAPTURE_DIR saves frames of a second deal).
+if(APPLE)
+add_executable(solitaire_deal_native_probe MACOSX_BUNDLE tests/solitaire_deal_native_probe.mm)
+target_link_libraries(solitaire_deal_native_probe PRIVATE game_ui "-framework AppKit")
+gui_forms_add_form(solitaire_deal_native_probe forms/playsuite.form CLASS PlaySuiteWindow NAMESPACE games DERIVED
+                   TYPES "${GAMES_FORM_TYPES}")
+gui_forms_add_theme(solitaire_deal_native_probe themes/playsuite FUNCTION playsuite_theme NAMESPACE games
+                    FORMS forms/playsuite.form)
+add_custom_command(TARGET solitaire_deal_native_probe POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${GUIForms_FONT_DIR}"
+            "$<TARGET_BUNDLE_DIR:solitaire_deal_native_probe>/Contents/Resources/fonts")
+add_test(NAME solitaire_deal_native COMMAND $<TARGET_FILE:solitaire_deal_native_probe>)
+set_tests_properties(solitaire_deal_native PROPERTIES RUN_SERIAL TRUE TIMEOUT 60 SKIP_RETURN_CODE 77
+                     LABELS native ENVIRONMENT "GAMES_ASSET_DIR=${GAMES_RUNTIME_ASSET_DIR}")
+endif()
 if("fourpegs" IN_LIST GAMES_MODULE_IDS)
 add_executable(fourpegs_pointer_tests tests/fourpegs_pointer_tests.cpp)
 target_link_libraries(fourpegs_pointer_tests PRIVATE vendor_game_ui)
@@ -126,6 +153,13 @@ set_tests_properties(fourpegs_pointer PROPERTIES ENVIRONMENT "GAMES_ASSET_DIR=${
 endif()
 target_link_libraries(ui_tests PRIVATE game_ui)
 add_test(NAME ui_routing COMMAND ui_tests)
+# The views' input on GUI.Forms' raisers (this branch, claude/conformance-raisers; the prep
+# branch keeps the RoutedInput fallback): derived clicks and double clicks, suppressed clicks
+# after a drag, keys bubbling to a view, and the drags on GUI.Forms' DragTracker.
+add_executable(view_input_tests tests/view_input_tests.cpp)
+target_link_libraries(view_input_tests PRIVATE game_ui)
+add_test(NAME view_input COMMAND view_input_tests)
+set_tests_properties(view_input PROPERTIES ENVIRONMENT "GAMES_ASSET_DIR=${GAMES_RUNTIME_ASSET_DIR}")
 set(collection_fixture_available TRUE)
 foreach(required solitaire spider freecell hearts sudoku gems cube untangle atomprobe fourpegs switchbox solve eggy koikoi parrots liarsdice penthesheep zenconstruction)
     if(NOT required IN_LIST GAMES_MODULE_IDS)
@@ -167,6 +201,19 @@ add_executable(shelf_help_tests tests/shelf_help_tests.cpp)
 target_link_libraries(shelf_help_tests PRIVATE game_ui)
 add_test(NAME shelf_help COMMAND shelf_help_tests)
 set_tests_properties(shelf_help PROPERTIES ENVIRONMENT "GAMES_ASSET_DIR=${GAMES_RUNTIME_ASSET_DIR}")
+# The theme package compiles with no finding, and the form window is made with the shell.
+add_executable(playsuite_theme_tests tests/playsuite_theme_tests.cpp)
+target_link_libraries(playsuite_theme_tests PRIVATE game_ui)
+gui_forms_add_form(playsuite_theme_tests forms/playsuite.form CLASS PlaySuiteWindow NAMESPACE games DERIVED
+                   TYPES "${GAMES_FORM_TYPES}")
+gui_forms_add_theme(playsuite_theme_tests themes/playsuite FUNCTION playsuite_theme NAMESPACE games
+                    FORMS forms/playsuite.form)
+add_test(NAME playsuite_theme COMMAND playsuite_theme_tests)
+set_tests_properties(playsuite_theme PROPERTIES ENVIRONMENT "GAMES_ASSET_DIR=${GAMES_RUNTIME_ASSET_DIR}")
+# The held-key query the steering games read (games::key_held): focus, release, deactivation.
+add_executable(held_keys_tests tests/held_keys_tests.cpp)
+target_link_libraries(held_keys_tests PRIVATE game_ui)
+add_test(NAME held_keys COMMAND held_keys_tests)
 # The help book's business card: the held card's drawing and picking, and its remarks.
 add_executable(business_card_tests tests/business_card_tests.cpp)
 target_link_libraries(business_card_tests PRIVATE game_ui)

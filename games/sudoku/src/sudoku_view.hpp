@@ -1,7 +1,8 @@
 #pragma once
 #include "gui_forms/basic_controls.hpp"
-#include "gui_forms/controls/panel/text_box/text_box.hpp"
+#include "gui_forms/controls/text_box.hpp"
 #include "gui_forms/timer.hpp"
+#include "gui_forms/events/key_events/key_events.hpp"
 #include "sudoku.hpp"
 #include "suite.hpp"
 #include <future>
@@ -14,10 +15,11 @@ class SudokuView final : public gf::Control, public CommandSource {
     void initialize_control_tree();
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& event) override;
-    void on_key(gf::KeyEvent& event) override;
+    void on_mouse_down(gf::MouseEventArgs& event) override;
+    void on_mouse_move(gf::MouseEventArgs& event) override;
+    void on_key_down(gf::KeyEventArgs& event) override;
     void on_key_bubble(gf::KeyEvent& event) override;
-    void on_text_input(gf::TextInputEvent& event) override;
+    void on_key_press(gf::KeyPressEventArgs& event) override;
     void activate();
     [[nodiscard]] std::vector<GameCommand> commands() const override;
     void run_command(std::string_view id) override;
@@ -27,6 +29,8 @@ class SudokuView final : public gf::Control, public CommandSource {
     Sudoku game;
 
   private:
+    int cell_at(gf::Point local) const;
+    void key_down(gf::KeyEventArgs& event);
     std::array<std::shared_ptr<gf::Button>, 20> buttons_;
     std::shared_ptr<gf::TextBox> name_;
     std::vector<gf::SubscriptionToken> subscriptions_;
@@ -40,7 +44,7 @@ class SudokuView final : public gf::Control, public CommandSource {
     std::vector<int> celebrated_;
     gf::FrameTime celebration_start_{};
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
     void action(gf::ButtonBase& button);
     void new_game();
     void tick();

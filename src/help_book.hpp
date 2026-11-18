@@ -1,19 +1,24 @@
 #pragma once
-#include "gui_forms/controls/scrollable_control/scrollable_control.hpp"
-#include "business_card.hpp"
+#include "gui_forms/controls/scrollable_control.hpp"
+#include "gui_forms/components/business_card/business_card.hpp"
+#include "game_text.hpp"
+#include "presentation.hpp"
 #include "paper_sheet.hpp"
 #include "suite.hpp"
 #include <functional>
+#include <memory>
+#include <string>
+#include <vector>
 namespace games {
 // Visually a text link; retains keyboard and accessibility semantics.
+// Which ink a HelpGlyph takes from themes/playsuite: the help sheet's brown-gold (plain),
+// the shelf's brighter help link, or the business card's pale mark.
+enum class HelpGlyphVariant { plain, help_link, card_mark };
 class HelpGlyph final : public gf::Button {
   public:
     HelpGlyph(gf::StableId id, std::string glyph);
-    void set_ink(gf::Color ink);
+    void set_variant(HelpGlyphVariant variant);
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-
-  private:
-    gf::Color ink_ = gf::Color::rgba(184, 137, 42);
 };
 class HelpPages final : public gf::ScrollableControl {
   public:
@@ -22,11 +27,14 @@ class HelpPages final : public gf::ScrollableControl {
     void initialize_control_tree();
     void arrange(gf::Rect bounds) override;
     void on_key_bubble(gf::KeyEvent& event) override;
+    // A wheel turned over the business card, which lies over the pages: the pages scroll
+    // as under a wheel turned over them (ScrollableControl's own wheel handling).
+    void wheel_from_card(gf::PointerEvent& event);
     void select(int entry, std::string_view topic);
     // Where the business card rests beside the front lines, in these pages' visible points:
     // its middle and width, and how far above the pages it may still be seen. Told on every
     // layout and scroll.
-    std::function<void(gf::Point, double, double)> card_moved;
+    std::function<void(gf::Point, double)> card_moved;
 
   protected:
     void on_scroll_position_changed() override;
@@ -61,19 +69,33 @@ class HelpBook final : public gf::Control {
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
     void select(int entry, std::string_view topic);
     void on_key_bubble(gf::KeyEvent& event) override;
+    // A wheel turned over the business card, which lies over the pages, bubbles here: the
+    // pages scroll as under a wheel turned over them.
+    void on_pointer_bubble(gf::PointerEvent& event) override;
     std::function<void()> close;
     std::function<void()> open_card;  // the business card was clicked: open it in the hand
 
   private:
+    // The book's heading band (its title and rule, painted by the book above the pages): a
+    // control with no paint and no hit, so GUI.Forms' card can keep the page card under it
+    // (BusinessCard::set_heading_band) as the pages scroll it up.
+    class HeadingBand final : public gf::Control {
+      public:
+        explicit HeadingBand(gf::StableId id) : gf::Control(std::move(id)) {}
+        [[nodiscard]] bool hit_test_local(gf::Point) const override {
+            return false;
+        }
+    };
     std::shared_ptr<HelpPages> pages_;
-    std::shared_ptr<BusinessCard> card_;
+    std::shared_ptr<HeadingBand> band_;
+    // GUI.Forms' business card, lying on the page beside the dedication and kept under the
+    // heading band; its look is themes/playsuite's business-card rules.
+    std::shared_ptr<gf::BusinessCard> card_;
     std::shared_ptr<HelpGlyph> close_;
     PaperSheet sheet_;
     void clicked_close();
-    void place_card(gf::Point centre, double width, double top_room);
-    void wheel_over_card(gf::PointerEvent& event);
-    void card_clicked();
-    void visibility(bool shown);
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void place_card(gf::Point centre, double width);
+    void card_clicked(gf::BusinessCardRequest& request);
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
 };
 } // namespace games

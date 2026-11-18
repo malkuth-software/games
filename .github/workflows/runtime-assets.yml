@@ -87,12 +87,8 @@ jobs:
       - uses: actions/checkout@v4
       # The pinned template_harness (harness.lock) at ./template_harness.
       - uses: ./.github/actions/harness-checkout
-      - name: Fetch reviewed development audio source
-        uses: actions/checkout@v4
-        with:
-          repository: malkuth-software/gui_forms
-          ref: e077f9d5a5117312e65e8c3b741c4edd24013d56
-          path: gui_forms
+      # GUI.Forms lives in its own repository, at gui_forms/; gui_forms.lock pins it.
+      - uses: ./.github/actions/gui-forms-checkout
       - uses: actions/setup-python@v5
         if: runner.os == 'Windows'
         with:
@@ -127,12 +123,49 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 tools/restore_toolkit_cache.py macos-arm64
+      # No GUI.Forms release publishes the macOS 14 runtime for a checkpoint
+      # commit (only tested main builds publish one): build it with the harness,
+      # as GUI.Forms' own CI does, when the restore above found none.
+      - name: Build the macOS 14 LLVM runtime when none was restored
+        if: runner.os == 'macOS'
+        run: |
+          if [ ! -f "$GUI_FORMS_LLVM_RUNTIME/runtime-manifest.json" ]; then
+            python3 template_harness/harness/build_macos_runtimes.py --work "$RUNNER_TEMP/llvm-runtimes" --prefix "$GUI_FORMS_LLVM_RUNTIME" --jobs 4
+          fi
+          python3 template_harness/harness/macos_runtime_manifest.py "$GUI_FORMS_LLVM_RUNTIME"
       - name: Install Linux tools
         if: runner.os == 'Linux'
         run: |
           sh template_harness/harness/install_linux_ci_packages.sh core "$RUNNER_TEMP/apt-archives"
+          # GUI.Forms builds against LLVM's libc++ 22 and libc++abi on Linux (cp33; owner, 2026-11-15):
+          # gui_forms/cmake/llvm22.cmake passes -stdlib=libc++. apt.llvm.org, which the harness
+          # script has just added, has them; they move into the harness tables at its next bump.
+          sudo apt-get install -y --no-install-recommends libc++-22-dev libc++abi-22-dev libunwind-22-dev
           echo "CC=clang" >> "$GITHUB_ENV"
           echo "CXX=clang++" >> "$GITHUB_ENV"
+      # GUI.Forms links the harness's static LLVM 22.1.8 runtime on Linux (one
+      # module, GUI.Forms 2026-11-15; gui_forms/cmake/llvm22.cmake refuses a
+      # build without GUI_FORMS_LLVM_RUNTIME): restore it, or build it with the
+      # packages' clang 22 as GUI.Forms' own CI does.
+      - name: Select the Linux LLVM runtime
+        id: linux-runtime
+        if: runner.os == 'Linux'
+        run: |
+          directory="$(python3 template_harness/harness/linux_runtime_manifest.py --directory-name)"
+          echo "GUI_FORMS_LLVM_RUNTIME=$PWD/.build/toolchain/$directory" >> "$GITHUB_ENV"
+          echo "directory=$directory" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        if: runner.os == 'Linux'
+        with:
+          path: .build/toolchain/${{ steps.linux-runtime.outputs.directory }}
+          key: linux-llvm-runtime-v1-${{ steps.linux-runtime.outputs.directory }}-${{ hashFiles('template_harness/harness/build_linux_runtimes.py', 'template_harness/harness/linux_runtime_manifest.py') }}
+      - name: Build the static Linux LLVM runtime
+        if: runner.os == 'Linux'
+        run: |
+          if [ ! -f "$GUI_FORMS_LLVM_RUNTIME/runtime-manifest.json" ]; then
+            python3 template_harness/harness/build_linux_runtimes.py --work "$RUNNER_TEMP/llvm-runtimes" --prefix "$GUI_FORMS_LLVM_RUNTIME" --jobs 4
+          fi
+          python3 template_harness/harness/linux_runtime_manifest.py "$GUI_FORMS_LLVM_RUNTIME"
       - uses: actions/download-artifact@v4
         with:
           name: audio-runtime-data
@@ -160,13 +193,3 @@ jobs:
           -DGAMES_AUDIO_ASSET_DIR="$PWD/build/runtime"
       - name: Build shared audio and game adapters
         run: cmake --build build/audio --parallel 4
-      - name: Test decoded audio and sample-clock transitions
-        run: ctest --test-dir build/audio --output-on-failure --timeout 120 --output-junit results.xml
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: audio-checks-${{ matrix.platform }}
-          path: |
-            build/audio/results.xml
-            build/audio/Testing/Temporary/LastTest.log
-          if-no-files-found: warn

@@ -253,12 +253,19 @@ HullData build_hull(const std::vector<Vec3>& input) {
                 }
             }
         }
+        // Degenerate input (repeated points, a hull too thin to enclose a volume, an
+        // exactly flat ring) can leave a group with no boundary edge: start is still -1
+        // and there is no loop to follow (following it read next[-1] and put -1 into
+        // loops). The group is skipped; the faces left must still close the hull.
+        if (start < 0) { continue; }
         std::vector<int> loop;
         int cursor = start;
         for (int guard = 0; guard <= boundary_edges; guard += 1) {
             loop.push_back(cursor);
             cursor = next[cursor];
-            if (cursor == start) { break; }
+            // A walk that leaves the group's boundary (a vertex with no outgoing edge)
+            // stops here rather than index with -1.
+            if (cursor == start || cursor < 0) { break; }
         }
         loops.push_back(loop);
     }
@@ -294,6 +301,11 @@ HullData build_hull(const std::vector<Vec3>& input) {
         hull.face_first.push_back(static_cast<std::int32_t>(hull.face_loop.size()));
         hull.face_normals.push_back(normal);
         hull.face_offsets.push_back(offset);
+    }
+    // A closed convex polyhedron has at least four faces; fewer means the merged groups
+    // above did not describe one (degenerate input whose groups were skipped).
+    if (hull.face_normals.size() < 4) {
+        throw std::runtime_error("hull faces are degenerate");
     }
     return hull;
 }

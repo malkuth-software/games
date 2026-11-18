@@ -78,7 +78,7 @@ void HoldButton::set_progress(double progress) {
     const bool was = progress_ > 0;
     progress_ = progress;
     if (was != (progress_ > 0)) {
-        set_text(progress_ > 0 ? std::string("Keep holding...") : rest_);
+        text = progress_ > 0 ? std::string("Keep holding...") : rest_;
     }
     invalidate(gf::Dirty::paint);
 }

@@ -1,5 +1,6 @@
 #pragma once
 #include "capsule.hpp"
+#include "card_remarks.hpp"
 #include "game_module.hpp"
 #include "gui_forms/timer.hpp"
 #include "gui_forms/window.hpp"
@@ -19,7 +20,13 @@ namespace games {
 // change to the games and to the audio volumes, wherever the change came from.
 class Collection final : public gf::Control, public HelpHost {
   public:
+    // `dev` turns on the games' development behaviour (scripts, unlocked levels); the
+    // form-made shell (forms/playsuite.form) is constructed without it and told by
+    // set_development before it is activated.
     explicit Collection(gf::StableId id, bool dev = false);
+    // Sets the development flag the games are created with: before the first game
+    // opens (activate, open_entry), as a game made earlier keeps the flag it had.
+    void set_development(bool dev);
     ~Collection() override;
     static constexpr bool initialize_tree_after_construction = true;
     void initialize_control_tree();
@@ -37,19 +44,20 @@ class Collection final : public gf::Control, public HelpHost {
     void show_settings();
     void close_settings();
     [[nodiscard]] bool settings_open() const {
-        return settings_ && (*settings_).visible();
+        return settings_ && (*settings_).visible.read();
     }
     bool dispatch_action(std::string_view action) { return !shelf_open_ && (*games_.at(active_)).scripted_action(action); }
     void dispatch_command(const std::string& id) { run_command(id); }
     [[nodiscard]] bool help_open() const {
-        return help_ && (*help_).visible();
+        return help_ && (*help_).visible.read();
     }
-    // Rainstar Software's business card, opened from help over the whole window.
+    // The business card in the hand: GUI.Forms' (cp33), opened from help over the whole window
+    // in the window's own modal layer. That layer's overlay belongs to the window's root, outside
+    // the help book, so help's contained focus scope is ended while the card is out (a nested
+    // scope must lie inside the one containing it) and begun again when the card goes back.
     void show_card();
     void close_card();
-    [[nodiscard]] bool card_open() const {
-        return card_ && (*card_).visible();
-    }
+    [[nodiscard]] bool card_open() const;
     [[nodiscard]] bool shelf_open() const {
         return shelf_open_;
     }
@@ -70,8 +78,14 @@ class Collection final : public gf::Control, public HelpHost {
     gf::FocusScopeId help_focus_{};
     std::shared_ptr<SettingsSheet> settings_;
     gf::FocusScopeId settings_focus_{};
-    std::shared_ptr<BusinessCard> card_;
-    gf::FocusScopeId card_focus_{};
+    // The remarks the card in the hand makes (card_remarks.hpp), through GUI.Forms' remark
+    // source, which this shell names while it lives.
+    CardRemarks remarks_{0x51ed2701U};
+    // The capsule title's application font family (Barlow Condensed): loaded before the
+    // capsule is made, released in ~Collection; the capsule copies its number.
+    CapsuleTitleFamily title_family_;
+    static void write_remark(void* context, std::string& remark);
+    void declare_release_regions(gf::Rect capsule, gf::Rect help_link);
     SettingsObservation masters_{};
     bool music_shown_ = true, sound_shown_ = true, reduced_shown_ = false;
     ModuleContext modules_;
@@ -86,9 +100,12 @@ class Collection final : public gf::Control, public HelpHost {
     gf::Point pointer_{-1000, -1000};
     double capsule_width_limit_ = 0;
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
     void tick();
     void wake();
+    // Help open, the card put away (by close_card, or by the card itself) and help's focus scope
+    // ended for it: begins that scope again.
+    void restore_help_scope();
     void ensure_view(Entry entry);
     void visibility();
     void preferences();

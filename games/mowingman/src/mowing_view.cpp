@@ -245,8 +245,13 @@ void MowingScenery::advance(double seconds, ambient::SceneContext& context) {
     // The arrow keys (or WASD) drive just as a hand on the mower does: held, they take the
     // controls and steer it the way they point; let go, Eggy has it back.
     {
-        const double dx = (keys_[3] ? 1.0 : 0.0) - (keys_[1] ? 1.0 : 0.0);
-        const double dy = (keys_[2] ? 1.0 : 0.0) - (keys_[0] ? 1.0 : 0.0);
+        using Key = ambient::gf::PhysicalKey;
+        const bool up = ambient::key_held(context, Key::w) || ambient::key_held(context, Key::up);
+        const bool left = ambient::key_held(context, Key::a) || ambient::key_held(context, Key::left);
+        const bool down = ambient::key_held(context, Key::s) || ambient::key_held(context, Key::down);
+        const bool right = ambient::key_held(context, Key::d) || ambient::key_held(context, Key::right);
+        const double dx = (right ? 1.0 : 0.0) - (left ? 1.0 : 0.0);
+        const double dy = (down ? 1.0 : 0.0) - (up ? 1.0 : 0.0);
         const coverage::Pose& pose = mowing.mower().pose();
         if (dx != 0 || dy != 0) {
             if (!keyboard_)
@@ -429,21 +434,11 @@ bool MowingScenery::run_command(std::string_view id, ambient::SceneContext& cont
     return true;
 }
 
-bool MowingScenery::hold_key(std::uint32_t key, bool down, ambient::SceneContext&) {
+bool MowingScenery::steers_with(std::uint32_t key) const {
     using Key = ambient::gf::PhysicalKey;
-    int slot = -1;
-    if (key == Key::w || key == Key::up)
-        slot = 0;
-    else if (key == Key::a || key == Key::left)
-        slot = 1;
-    else if (key == Key::s || key == Key::down)
-        slot = 2;
-    else if (key == Key::d || key == Key::right)
-        slot = 3;
-    if (slot < 0)
-        return false;
-    keys_[slot] = down;
-    return true;
+    const bool result = key == Key::w || key == Key::up || key == Key::a || key == Key::left || key == Key::s
+                        || key == Key::down || key == Key::d || key == Key::right;
+    return result;
 }
 
 std::string MowingScenery::key_command(std::uint32_t key) const {

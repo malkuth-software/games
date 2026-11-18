@@ -59,10 +59,10 @@ if(DEFINED GAME_SHARED_ENGINE)
     add_test(NAME sudoku COMMAND sudoku_tests)
     set_tests_properties(sudoku PROPERTIES LABELS design)
   else()
-    # Gems are drawn by the render engine.
+    # The cube is drawn by the render engine (the gems by GUI.Forms' engine, in the application).
     set(ENGINE_DIR "${PLAYSUITE_SOURCE_DIR}/shared/render")
     include("${ENGINE_DIR}/build.cmake")
-    add_library(game_raster "${PLAYSUITE_SOURCE_DIR}/shared/puzzles/puzzle_render.cpp" "${PLAYSUITE_SOURCE_DIR}/shared/puzzles/puzzle_image.cpp" "${PLAYSUITE_SOURCE_DIR}/shared/puzzles/gem_art.cpp")
+    add_library(game_raster "${PLAYSUITE_SOURCE_DIR}/shared/puzzles/puzzle_render.cpp" "${PLAYSUITE_SOURCE_DIR}/shared/puzzles/puzzle_image.cpp")
     target_link_libraries(game_raster PUBLIC game_rules render_core)
     add_executable(raster_tests "${PLAYSUITE_SOURCE_DIR}/tests/raster_tests.cpp")
     target_link_libraries(raster_tests PRIVATE game_raster)

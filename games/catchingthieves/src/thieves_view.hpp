@@ -19,6 +19,7 @@
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
+#include "gui_forms/events/key_events/key_events.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -46,9 +47,13 @@ public:
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& p, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& e) override;
-    void on_key(gf::KeyEvent& e) override;
-    void on_key_bubble(gf::KeyEvent& e) override { on_key(e); }
+    void on_mouse_down(gf::MouseEventArgs& e) override;
+    void on_mouse_up(gf::MouseEventArgs& e) override;
+    void on_mouse_move(gf::MouseEventArgs& e) override;
+    void on_mouse_leave() override;
+    void on_mouse_click(gf::MouseEventArgs& e) override;
+    void on_key_down(gf::KeyEventArgs& e) override;
+    void on_key_bubble(gf::KeyEvent& e) override;
     void activate();
     // Cabinet hosting: the collection's master switches gate this game's own
     // music and sound; `foreground` is false while another game shows.
@@ -137,6 +142,11 @@ private:
     void request_frame();
     void commit_queued_moves();
     std::string hit_button() const;
+    void track_pointer(gf::Point local);
+    void update_hover();
+    void key_down(gf::KeyEventArgs& e);
+    // The painted button a release ended, for the click that follows it.
+    std::string released_;
     bool same_position(const Board& board) const;
 
     double mouse_x_ = 0, mouse_y_ = 0;
@@ -161,7 +171,7 @@ private:
     std::vector<HiText> texts_;
 
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
     void tick();
     void publish();
     // game

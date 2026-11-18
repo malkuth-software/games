@@ -32,7 +32,7 @@ bool Surface::configure(int width, int height) {
     }
     width_ = width;
     height_ = height;
-    order_ = description.pixel_format == gf::LiveSurfacePixelFormat::rgba32_premultiplied_srgb ? Order::rgba : Order::bgra;
+    order_ = Order::bgra; // every live surface and raster is BGRA8 since GUI.Forms 0.5
     invalidate_all();
     return true;
 }

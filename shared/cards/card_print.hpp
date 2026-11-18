@@ -56,7 +56,7 @@ struct CardPaper {
 // `emboss_pitch`: its dimples' spacing in device pixels.
 [[nodiscard]] CardPaper make_card_paper(int width, int height, double pixels_per_point, double emboss_depth,
                                         double emboss_pitch);
-// The finish's relief, for a card turned in the light rather than printed flat (held_card.hpp):
+// The finish's relief, for a card turned in the light rather than printed flat:
 // the slope of its dimpled surface (rise over run, as the flat print lights it) across and then
 // down, averaged over each pixel; width * height pairs, row-major, into `slopes`.
 void card_finish_slopes(int width, int height, double emboss_pitch, std::vector<float>& slopes);

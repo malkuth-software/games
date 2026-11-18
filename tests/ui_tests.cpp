@@ -134,8 +134,8 @@ int main() {
     for (const std::shared_ptr<gf::Control>& child : (*table).children())
         if ((*child).stable_id().value() == "score.name")
             name = std::dynamic_pointer_cast<gf::TextBox>(child);
-    require(name && (*name).visible(), "completion opens named score entry");
-    (*name).set_text("Routing Ace");
+    require(name && (*name).visible.read(), "completion opens named score entry");
+    (*name).text = "Routing Ace";
     const gf::Point save_name = center_of(*table, "action20");
     pointer(*window, gf::PointerAction::down, save_name);
     pointer(*window, gf::PointerAction::up, save_name);
@@ -144,7 +144,7 @@ int main() {
     require(saved.result_recorded[2] && saved.top_scores[5].size() == 1 &&
                 saved.top_scores[5][0].name == "Routing Ace",
             "named score saved");
-    require(!(*name).visible(), "entry closes after submission");
+    require(!(*name).visible.read(), "entry closes after submission");
     // Repeated clicks cannot create a duplicate score.
     pointer(*window, gf::PointerAction::down, save_name);
     pointer(*window, gf::PointerAction::up, save_name);

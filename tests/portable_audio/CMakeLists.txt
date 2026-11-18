@@ -4,32 +4,23 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(GAMES_AUDIO_SOURCE_DIR "" CACHE PATH "Development GUI.Forms source root; leave empty for installed Audio SDK")
 if(GAMES_AUDIO_SOURCE_DIR)
+    # GUI.Forms itself builds GUIForms::Audio (and GUIForms::Threading) with audio
+    # on: its Audio.cmake needs the stx package's Vorbis decoder, which only
+    # GUI.Forms' own configure builds and finds (cmake/Stx.cmake), so the audio
+    # build is GUI.Forms' with every host, the renderer and the Gallery off.
+    set(GUI_FORMS_ENABLE_SKIA OFF CACHE BOOL "" FORCE)
+    set(GUI_FORMS_ENABLE_MACOS_HOST OFF CACHE BOOL "" FORCE)
+    set(GUI_FORMS_ENABLE_WINDOWS_HOST OFF CACHE BOOL "" FORCE)
+    set(GUI_FORMS_ENABLE_LINUX_HOST OFF CACHE BOOL "" FORCE)
+    set(GUI_FORMS_BUILD_PREPARED_TEXT OFF CACHE BOOL "" FORCE)
+    set(GUI_FORMS_BUILD_GALLERY OFF CACHE BOOL "" FORCE)
+    set(GUI_FORMS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GUI_FORMS_BUILD_AUDIO ON CACHE BOOL "" FORCE)
+    set(GUI_FORMS_AUDIO_VORBIS_BACKEND stx CACHE STRING "" FORCE)
     set(GUI_FORMS_BUILD_AUDIO_LOOP_TRANSPORT ON CACHE BOOL "Development transport" FORCE)
-    set(GUI_FORMS_AUDIO_VORBIS_BACKEND stx CACHE STRING "Vorbis decoder: stx (GUI.Forms) or stb")
-    # Audio.cmake links GUIForms::Threading, which GUI.Forms' full build defines.
-    # This audio-only build defines it from the same two sources.
-    find_package(Threads REQUIRED)
-    add_library(gui_forms_threading SHARED
-        "${GAMES_AUDIO_SOURCE_DIR}/src/core/threading/atomic_pool/atomic_pool.c"
-        "${GAMES_AUDIO_SOURCE_DIR}/src/core/threading/worker.cpp")
-    add_library(GUIForms::Threading ALIAS gui_forms_threading)
-    target_include_directories(gui_forms_threading PUBLIC "${GAMES_AUDIO_SOURCE_DIR}/include")
-    target_compile_features(gui_forms_threading PUBLIC cxx_std_20)
-    target_link_libraries(gui_forms_threading PRIVATE Threads::Threads)
-    if(WIN32)
-        target_compile_definitions(gui_forms_threading PUBLIC _WIN32_WINNT=0x0A00 WINVER=0x0A00)
-        target_link_libraries(gui_forms_threading PRIVATE winpthread)
-        target_link_options(gui_forms_threading PRIVATE "-Wl,--export-all-symbols")
-    endif()
-    # Audio.cmake exports gui_forms_audio, which needs its Threading dependency in
-    # an export set too; this project is never installed.
-    include(GNUInstallDirs)
-    install(TARGETS gui_forms_threading EXPORT GUIFormsAudioTargets
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-    include("${GAMES_AUDIO_SOURCE_DIR}/cmake/Audio.cmake")
+    add_subdirectory("${GAMES_AUDIO_SOURCE_DIR}" toolkit EXCLUDE_FROM_ALL)
 else()
-    find_package(GUIForms CONFIG REQUIRED COMPONENTS Audio)
+    find_package(GUIForms 0.6 CONFIG REQUIRED COMPONENTS Audio)
 endif()
 get_filename_component(games_root "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 set(GAMES_AUDIO_ASSET_DIR "" CACHE PATH "Prepared Games runtime assets containing audio/")

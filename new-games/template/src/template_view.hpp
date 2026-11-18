@@ -16,6 +16,7 @@
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
+#include "gui_forms/events/key_events/key_events.hpp"
 
 #include <chrono>
 #include <memory>
@@ -39,11 +40,11 @@ public:
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& event) override;
-    void on_key(gf::KeyEvent& event) override;
-    void on_key_bubble(gf::KeyEvent& event) override {
-        on_key(event);
-    }
+    void on_mouse_down(gf::MouseEventArgs& event) override;
+    void on_mouse_move(gf::MouseEventArgs& event) override;
+    void on_mouse_leave() override;
+    void on_key_down(gf::KeyEventArgs& event) override;
+    void on_key_bubble(gf::KeyEvent& event) override;
 
     // The shell calls these. activate: the game has just been shown; take the keyboard.
     void activate();
@@ -56,6 +57,9 @@ public:
     void change_setting(std::string_view id, double value) override;
 
 private:
+    int cell_under(gf::Point local) const;
+    void show_hover(int hover);
+    void key_down(gf::KeyEventArgs& event);
     Options options_;
     Session session_;
     Layout layout_;
@@ -77,7 +81,7 @@ private:
     bool reduced_ = false;
 
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
     void tick();
     void request_frame();
     void note_player();

@@ -1,10 +1,12 @@
 #pragma once
 #include "gui_forms/basic_controls.hpp"
-#include "gui_forms/controls/panel/text_box/text_box.hpp"
+#include "gui_forms/controls/text_box.hpp"
+#include "gui_forms/drag/drag_tracker/drag_tracker.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/paint_framebuffer.hpp"
 #include "gui_forms/resources.hpp"
 #include "gui_forms/timer.hpp"
+#include "gui_forms/events/key_events/key_events.hpp"
 #include "kitten.hpp"
 #include "gem_art.hpp"
 #include "puzzle_render.hpp"
@@ -27,10 +29,14 @@ class PuzzleView final : public gf::Control, public CommandSource {
     void initialize_control_tree();
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& p, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& e) override;
-    void on_key(gf::KeyEvent& e) override;
+    void on_mouse_down(gf::MouseEventArgs& e) override;
+    void on_mouse_up(gf::MouseEventArgs& e) override;
+    void on_mouse_move(gf::MouseEventArgs& e) override;
+    void on_mouse_click(gf::MouseEventArgs& e) override;
+    void on_mouse_capture_changed() override;
+    void on_key_down(gf::KeyEventArgs& e) override;
     void on_key_bubble(gf::KeyEvent& e) override;
-    void on_text_input(gf::TextInputEvent& e) override;
+    void on_key_press(gf::KeyPressEventArgs& e) override;
     void activate();
     [[nodiscard]] std::vector<GameCommand> commands() const override;
     void run_command(std::string_view id) override;
@@ -50,8 +56,17 @@ class PuzzleView final : public gf::Control, public CommandSource {
     PuzzleGame game;
 
   private:
+    void pointer_move(gf::MouseEventArgs& e);
+    void pointer_down(gf::MouseEventArgs& e);
+    void pointer_up(gf::MouseEventArgs& e);
+    void key_down(gf::KeyEventArgs& e);
+    // A release in place, for the click that follows it: the solve tray piece
+    // (turned when already chosen) or the gem (picked or dropped).
+    int solve_click_ = -1;
+    int gem_click_ = -1;
     friend class PuzzleScenePart;
     friend struct PuzzleFramebufferTest;
+    friend struct PuzzleGemDamageTest;
     std::array<std::shared_ptr<gf::Control>, 3> scene_parts_;
     void refresh_scene();
     void invalidate_static_scene();
@@ -69,7 +84,9 @@ class PuzzleView final : public gf::Control, public CommandSource {
     // Makes the gem layer an image for a frame the painter draws.
     void upload_gem_layer();
     std::vector<std::uint32_t> gem_pixels_;  // premultiplied BGRA, gem_scale_ x the board
-    render::r3d::Buffers gem_depth_;
+    // Draws the gems (and the pictures below) through GUI.Forms' raster engine; UI thread.
+    GemCanvas gem_canvas_;
+    GemCanvas gem_picture_canvas_;  // the pictures' own, so one can be made mid-drawing
     int gem_scale_ = 1;
     // A resting board copies each gem from its picture instead of drawing it again: one
     // picture for each kind of gem at each of eight sizes of its breath, drawn without its
@@ -87,7 +104,6 @@ class PuzzleView final : public gf::Control, public CommandSource {
     std::vector<GemPicture> gem_pictures_;
     double gem_picture_radius_ = 0;
     render::Order gem_picture_order_ = render::Order::bgra;
-    render::r3d::Buffers gem_picture_depth_;
     // `radius` is the step's, `base` the gems' unbreathing radius (a new one forgets them all).
     const GemPicture& gem_picture(int value, int step, double radius, double base);
     // Laid over the layer inside `clip` (layer pixels).
@@ -96,8 +112,15 @@ class PuzzleView final : public gf::Control, public CommandSource {
     // (its gem, breath, sparkle and place, in quarter layer pixels) and the layer pixels it
     // covered. gem_changed_ holds the device pixels the last render changed; a frame with
     // none is not drawn at all.
+    // A gem that moves every frame (the hovered gem turning, the picked gem pulsing) is
+    // drawn whole each frame inside its own area only; the highlights under the pointer and
+    // the picked gem (gem_overlay_shown_: hover, pick) are drawn again where they changed.
     std::array<std::uint64_t, 64> gem_shown_{};
     std::array<render::Rect, 64> gem_covered_{};
+    std::array<int, 2> gem_overlay_shown_{-1, -1};
+    // `time` (seconds since the clock started) at the ambient rate: breathing, sparkle and the
+    // hint move in its steps.
+    [[nodiscard]] static double ambient_time(double time);
     bool gem_partial_ = false;      // the last render drew only what changed
     bool gem_layer_whole_ = false;  // the layer holds every gem as gem_shown_ says
     std::vector<render::Rect> gem_changed_;
@@ -186,7 +209,7 @@ class PuzzleView final : public gf::Control, public CommandSource {
                       double margin);
     void solve_draw(gf::Painter& p, const SolveSprite& sprite, double x, double y,
                     double opacity = 1) const;
-    void solve_release_images(gf::Window& window);
+    void solve_release_images(gf::SurfaceRoot& window);
     [[nodiscard]] double solve_unit() const;
     [[nodiscard]] int solve_atom_at(gf::Point local) const;
     [[nodiscard]] std::vector<PieceCell> solve_placed(int piece, int& x, int& y) const;
@@ -227,6 +250,12 @@ class PuzzleView final : public gf::Control, public CommandSource {
     void untangle_step();
     void untangle_released(const std::array<int, 96>& marks_before);
     std::vector<GemEffect> effects_;
+    // What the running effects covered in the last frame (points): a frame repaints where they
+    // were and where they are, not the whole view (shake and the callout still take it all).
+    std::vector<gf::Rect> effect_areas_shown_;
+    [[nodiscard]] std::vector<gf::Rect> effect_areas() const;
+    // A changed area of the gem layer (device pixels) in points.
+    [[nodiscard]] gf::Rect gem_change_rect(render::Rect device_area) const;
     std::chrono::steady_clock::time_point fx_clock_{};
     std::uint32_t fx_seed_ = 0x9E3779B9u;
     double shake_ = 0, callout_life_ = 0;
@@ -237,6 +266,22 @@ class PuzzleView final : public gf::Control, public CommandSource {
     gf::Rect target_{}, tray_{};
     gf::Point press_point_{};
     bool tray_turn_ = false;
+    // The drags (a Puzzle Solve piece, a gem, an Untangle peg, the cat) run their sessions on
+    // GUI.Forms' DragTracker: a primary press arms it (the piece past 5 pt, so a release short
+    // of that is still the click that turns it; the gem past 6 pt; a peg and the cat at once),
+    // the moves still go through pointer_move, which owns each kind's geometry (the game picks
+    // its own drop), and the session's one end comes back through finish_drag: the release
+    // drops (end_drag with commits), Escape, a lost capture or a cancel restore. A gem pulled
+    // most of the way swaps before the release: gem_drag ends the session first.
+    enum class DragSubject : std::uint8_t { none, solve_piece, gem, untangle_peg, cat };
+    gf::DragTracker drag_tracker_{*this};
+    DragSubject drag_subject_ = DragSubject::none;
+    void arm_drag(gf::MouseEventArgs& e, DragSubject subject, gf::Rect source, double threshold);
+    void end_tracked_drag();
+    void plan_drag(gf::DragPlan& plan);
+    void preview_drag(const gf::DragTrackerFrame& frame);
+    void finish_drag(const gf::DragTrackerFrame& frame);
+    void end_drag(bool commits, gf::Point local_position, int cell);
     gf::FrameTime animation_start_{}, clock_start_{};
     double animation_duration_ = 0;
     std::array<int, 4> guess_{};
@@ -245,7 +290,7 @@ class PuzzleView final : public gf::Control, public CommandSource {
     std::array<gf::Rect, 21> clues_{};
     std::filesystem::path path() const;
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window&) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot&) noexcept override;
     void action(gf::ButtonBase& button);
     void tick();
     void render();

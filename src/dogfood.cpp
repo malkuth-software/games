@@ -104,7 +104,8 @@ std::vector<Action> read_script(const std::filesystem::path& path) {
         action.argument = trimmed(action.argument);
         if (action.verb == "quit" || action.verb == "help" || action.verb == "shelf") {
             if (!action.argument.empty()) throw std::runtime_error(action.verb + " takes no arguments");
-        } else if (action.verb == "open" || action.verb == "command" || action.verb == "key" || action.verb == "action" || action.verb == "capture") {
+        } else if (action.verb == "open" || action.verb == "command" || action.verb == "key" || action.verb == "press" ||
+                   action.verb == "release" || action.verb == "action" || action.verb == "capture") {
             if (action.argument.empty()) throw std::runtime_error(action.verb + " needs an argument");
             if (action.verb != "action" && action.verb != "capture" && action.argument.find_first_of(" \t") != std::string::npos)
                 throw std::runtime_error(action.verb + " expects one name");

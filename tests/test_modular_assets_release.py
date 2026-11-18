@@ -12,7 +12,7 @@ import zlib
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from prepare_portable_assets import asset_inventory, audio_verification, card_verification
+from prepare_portable_assets import asset_inventory, audio_verification, card_verification, ogg_crc, set_vorbis_end
 from verify_portable_assets import verify
 from publication_version import select
 from package_common import missing_prepared_files
@@ -274,6 +274,45 @@ class PublicationGate(unittest.TestCase):
                                  {"playsuite-0.5.9-" + suffix for suffix in suffixes} | {"SHA256SUMS.txt"})
                 self.assertTrue(any(command[:2] == ("release", "edit") and "--draft=false" in command for command in commands))
                 self.assertEqual(len((Path(directory) / "SHA256SUMS.txt").read_text().splitlines()), 8)
+
+
+class VorbisEnd(unittest.TestCase):
+    """The prepared loop ends on its producer length whatever block the encoder ended on."""
+
+    @staticmethod
+    def page(flags, granule, body):
+        header = bytearray(b"OggS" + bytes([0, flags]) + struct.pack("<qIII", granule, 7, 0, 0) + bytes([1, len(body)]))
+        page = header + body
+        struct.pack_into("<I", page, 22, ogg_crc(bytes(page)))
+        return bytes(page)
+
+    def stream(self, before, ended):
+        return self.page(0x02, 0, b"\x01vorbis") + self.page(0, before, b"a" * 9) + self.page(0x04, ended, b"b" * 5)
+
+    def test_end_granule_set_to_the_loop_and_checksum_kept(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "loop.ogg"
+            path.write_bytes(self.stream(4096, 4937216))
+            set_vorbis_end(path, 4937184)
+            data = bytearray(path.read_bytes())
+            last = data.rfind(b"OggS")
+            self.assertEqual(struct.unpack_from("<q", data, last + 6)[0], 4937184)
+            stored = struct.unpack_from("<I", data, last + 22)[0]
+            struct.pack_into("<I", data, last + 22, 0)
+            self.assertEqual(ogg_crc(bytes(data[last:])), stored)
+            self.assertEqual(bytes(data[:last]), self.stream(4096, 4937216)[:last])
+
+    def test_exact_end_is_unchanged_and_unbounded_end_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "loop.ogg"
+            original = self.stream(4096, 8192)
+            path.write_bytes(original)
+            set_vorbis_end(path, 8192)
+            self.assertEqual(path.read_bytes(), original)
+            with self.assertRaises(ValueError):
+                set_vorbis_end(path, 4000)  # before the previous page's end
+            with self.assertRaises(ValueError):
+                set_vorbis_end(path, 9000)  # past the stream's end
 
 
 if __name__ == "__main__":

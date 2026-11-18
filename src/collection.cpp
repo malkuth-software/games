@@ -2,7 +2,9 @@
 #include "audio.hpp"
 #include "pcm_player.hpp"
 #include "storage.hpp"
-#include "gui_forms/controls/panel/text_box/text_box.hpp"
+#include "gui_forms/controls/text_box.hpp"
+#include <array>
+#include <span>
 #include <sstream>
 #include "gui_forms/window.hpp"
 #include <fstream>
@@ -69,9 +71,20 @@ Collection::Collection(gf::StableId id, bool dev) : Control(std::move(id)) {
         }
         shelf_open_ = true;
     }
-    set_theme_override(games_theme(ButtonSkin::ivory));
+    set_skin_class(*this, ButtonSkin::ivory);
 }
-Collection::~Collection() = default;
+// The remark source names this shell: cleared when it goes, if it is still the one named.
+// The capsule title's family is released here, in the shell's teardown before the
+// application shuts down (no static destructor holds it).
+Collection::~Collection() {
+    const gf::BusinessCardRemarkSource source = gf::business_card_remark_source();
+    if (source.context == this)
+        gf::set_business_card_remark_source(gf::BusinessCardRemarkSource{});
+    title_family_.release();
+}
+void Collection::set_development(bool dev) {
+    modules_.dev = dev;
+}
 void Collection::initialize_control_tree() {
     sprites_.request_update = std::bind_front(&Collection::wake, this);
     shelf_ = gf::make_control<ShelfView>(gf::StableId("collection.shelf"), sprites_);
@@ -79,7 +92,9 @@ void Collection::initialize_control_tree() {
     (*shelf_).open = std::bind_front(&Collection::open_entry, this);
     (*shelf_).bind_masters(model_);
     (*shelf_).select(active_);
-    capsule_ = gf::make_control<CommandCapsule>(gf::StableId("collection.capsule"), sprites_);
+    // The capsule title's family, loaded before the capsule that borrows it.
+    static_cast<void>(title_family_.load());
+    capsule_ = gf::make_control<CommandCapsule>(gf::StableId("collection.capsule"), title_family_);
     add_child(capsule_);
     (*capsule_).back = std::bind_front(&Collection::back, this);
     (*capsule_).command = std::bind_front(&Collection::run_command, this);
@@ -89,26 +104,26 @@ void Collection::initialize_control_tree() {
     gf::on(model_.reduced.invoked(), *this, &Collection::toggle, 2);
     gf::on(model_.settings.invoked(), *this, &Collection::toggle, 3);
     help_link_ = gf::make_control<HelpGlyph>(gf::StableId("collection.help"), "?");
-    (*help_link_).set_font({gf::FontRole::content, 32, 700, false});
-    (*help_link_).set_ink(gf::Color::rgba(240, 192, 84));
-    (*help_link_).set_accessible_name("PlaySuite help (H)");
+    (*help_link_).font = gf::FontSpec{gf::FontRole::content, 32, 700, false};
+    (*help_link_).set_variant(HelpGlyphVariant::help_link);
+    (*help_link_).accessible_name = "PlaySuite help (H)";
     (*help_link_).set_paint_plane(gf::PaintPlane::overlay);
     gf::on((*help_link_).clicked(), *this, &Collection::clicked_help);
     help_ = gf::make_control<HelpBook>(gf::StableId("collection.help-book"));
     (*help_).close = std::bind_front(&Collection::close_help, this);
-    (*help_).set_visible(false);
+    (*help_).visible = false;
     settings_ = gf::make_control<SettingsSheet>(gf::StableId("collection.settings"));
     (*settings_).bind_masters(model_);
     (*settings_).close = std::bind_front(&Collection::close_settings, this);
-    (*settings_).set_visible(false);
+    (*settings_).visible = false;
     (*help_).open_card = std::bind_front(&Collection::show_card, this);
-    card_ = gf::make_control<BusinessCard>(gf::StableId("collection.business-card"), BusinessCard::Kind::hand);
-    (*card_).close = std::bind_front(&Collection::close_card, this);
-    (*card_).set_visible(false);
+    gf::BusinessCardRemarkSource source{};
+    source.context = this;
+    source.write_remark = &Collection::write_remark;
+    gf::set_business_card_remark_source(source);
     add_child(help_link_);
     add_child(help_);
     add_child(settings_);
-    add_child(card_);
     masters_ = SettingsStore::shared().observe(std::bind_front(&Collection::masters_changed, this));
     const SuiteSettings& masters = SettingsStore::shared().values();
     music_shown_ = masters.music;
@@ -129,9 +144,15 @@ void Collection::ensure_view(Entry entry) {
     games_[entry] = std::move(instance);
     // Card modules intentionally share a control and cabinet. Attach it only once.
     if (std::find(children().begin(), children().end(), created) == children().end()) {
-        (*created).set_visible(false);
+        (*created).visible = false;
         add_child(created);
-        static_cast<void>(set_child_index((*created).runtime_id(), children().size()-1));
+        // Bottommost: the first of children(), below the capsule, the help link, help and
+        // settings, so the window's hit test finds those overlays before the full-window game
+        // (the paint plane orders only painting). The pre-0.6 call was set_child_index(id,
+        // size - 1), the bottom in Windows Forms' order; the 0.6 port had put it on top, and
+        // real clicks on the capsule went to the game.
+        const std::size_t bottom = children().size() - 1;
+        static_cast<void>(set_child_index_from_top((*created).runtime_id(), bottom));
     }
 }
 void Collection::on_attached_to_window() {
@@ -140,7 +161,7 @@ void Collection::on_attached_to_window() {
     last_tick_ = std::chrono::steady_clock::now();
     (*timer_).start();
 }
-void Collection::on_detaching_from_window(gf::Window& window) noexcept {
+void Collection::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
     if (timer_)
         (*timer_).stop();
     timer_.reset();
@@ -168,6 +189,8 @@ void Collection::tick() {
     const double dt = std::clamp(std::chrono::duration<double>(now - last_tick_).count(), 0.0, .25);
     last_tick_ = now;
     audio_poll();
+    // The card put itself away (a click or Escape on it): help holds the keyboard again.
+    restore_help_scope();
     if (gf::Window* window = attached_window())
         set_polygon_scale((*window).scale());
     if (gf::Window* window = attached_window(); window && sprites_.update(*window)) {
@@ -357,16 +380,16 @@ bool Collection::forward_game_key(const gf::KeyEvent& event) {
 }
 bool Collection::overlay(const std::shared_ptr<gf::Control>& child) const {
     return child == shelf_ || child == capsule_ || child == help_ || child == help_link_ ||
-           child == settings_ || child == card_;
+           child == settings_;
 }
 void Collection::visibility() {
     for (const std::shared_ptr<gf::Control>& child : children())
         if (!overlay(child))
-            (*child).set_visible(false);
+            (*child).visible = false;
     if (!shelf_open_)
-        (*view(active_)).set_visible(true);
-    (*shelf_).set_visible(shelf_open_);
-    (*capsule_).set_visible(!shelf_open_);
+        (*view(active_)).visible = true;
+    (*shelf_).visible = shelf_open_;
+    (*capsule_).visible = !shelf_open_;
     preferences();
     invalidate(gf::Dirty::layout | gf::Dirty::paint);
 }
@@ -387,7 +410,7 @@ void Collection::arrange(gf::Rect b) {
     // until they move.
     const bool on_rail = !shelf_open_ && railed(active_);
     for (const std::shared_ptr<gf::Control>& child : children())
-        if (!overlay(child) && (*child).visible())
+        if (!overlay(child) && (*child).visible.read())
             set_child_layout(child, on_rail ? below : full);
     set_child_layout(shelf_, full);
     gf::Rect capsule = (*capsule_).placement({0, 0, b.width - 48, on_rail ? current_rail_height_ : 60.0});
@@ -400,7 +423,29 @@ void Collection::arrange(gf::Rect b) {
     const double paper_width = std::min(780.0, b.width - 32);
     set_child_layout(help_, {b.width - paper_width - 16, 16, paper_width, b.height - 32});
     set_child_layout(settings_, full);
-    set_child_layout(card_, full);
+    // The capsule is hidden while the shelf is open; the help link is where it was just laid out.
+    const gf::Rect help_link = shelf_open_ ? ShelfView::help_slot({b.width, b.height})
+                                           : gf::Rect{b.width - 46, 8, 38, 38};
+    declare_release_regions(shelf_open_ ? gf::Rect{} : capsule, help_link);
+}
+// The shell stays clickable while a game holds the pointer (owner, 2026-11-15: every
+// PlaySuite game can always click the capsule): the capsule and the help link are the
+// window's pointer release regions, in window units, declared again at every layout. Over
+// one, a game's confined pointer is suspended and the ordinary pointer clicks it.
+void Collection::declare_release_regions(gf::Rect capsule, gf::Rect help_link) {
+    gf::Window* window = attached_window();
+    if (window == nullptr)
+        return;
+    const gf::Rect origin = absolute_bounds();
+    std::array<gf::Rect, 2> regions{};
+    std::size_t count = 0;
+    for (const gf::Rect local : {capsule, help_link}) {
+        if (local.width <= 0 || local.height <= 0)
+            continue;
+        regions[count] = gf::Rect{origin.x + local.x, origin.y + local.y, local.width, local.height};
+        count = count + 1;
+    }
+    static_cast<void>((*window).set_pointer_release_regions(std::span<const gf::Rect>(regions.data(), count)));
 }
 void Collection::on_paint(gf::Painter& p, gf::Rect) {
     if (shelf_open_ || !railed(active_))
@@ -524,7 +569,7 @@ void Collection::show_settings() {
     const bool was_open = settings_open();
     (*settings_).show_for(shelf_open_ ? std::string() : std::string(entry_info(active_).title),
                           shelf_open_ ? nullptr : source(active_));
-    (*settings_).set_visible(true);
+    (*settings_).visible = true;
     model_.settings.set_checked(true);
     if (!was_open && attached_window()) {
         settings_focus_ = (*attached_window()).begin_focus_scope(settings_);
@@ -538,7 +583,7 @@ void Collection::close_settings() {
     if (attached_window() && settings_focus_)
         static_cast<void>((*attached_window()).end_focus_scope(settings_focus_));
     settings_focus_ = {};
-    (*settings_).set_visible(false);
+    (*settings_).visible = false;
     model_.settings.set_checked(false);
     if (!shelf_open_)
         refresh_commands();
@@ -551,7 +596,7 @@ void Collection::show_help(std::string_view topic) {
     close_settings();
     const bool was_open = help_open();
     (*help_).select(shelf_open_ ? -1 : static_cast<int>(active_), topic);
-    (*help_).set_visible(true);
+    (*help_).visible = true;
     if (!was_open && attached_window())
         help_focus_ = (*attached_window()).begin_focus_scope(help_);
     invalidate(gf::Dirty::layout | gf::Dirty::paint);
@@ -563,33 +608,45 @@ void Collection::close_help() {
     if (attached_window() && help_focus_)
         static_cast<void>((*attached_window()).end_focus_scope(help_focus_));
     help_focus_ = {};
-    (*help_).set_visible(false);
+    (*help_).visible = false;
     invalidate(gf::Dirty::paint);
+}
+bool Collection::card_open() const {
+    const gf::Window* window = attached_window();
+    return window != nullptr && gf::business_card_shown(*window);
 }
 void Collection::show_card() {
-    if (card_open() || !help_open())
+    gf::Window* window = attached_window();
+    if (window == nullptr || card_open() || !help_open())
         return;
-    // The card is not inside the help book, so it takes the keyboard from help's scope rather
-    // than nesting in it, and gives it back when it is put away.
-    if (attached_window() && help_focus_)
-        static_cast<void>((*attached_window()).end_focus_scope(help_focus_));
+    // Help's scope contains focus inside the book; the card's layer lies outside it, so the
+    // scope ends while the card is out (restore_help_scope begins it again).
+    if (help_focus_)
+        static_cast<void>((*window).end_focus_scope(help_focus_));
     help_focus_ = {};
-    (*card_).set_visible(true);
-    (*card_).set_showing(true);
-    if (attached_window())
-        card_focus_ = (*attached_window()).begin_focus_scope(card_);
-    invalidate(gf::Dirty::layout | gf::Dirty::paint);
+    // The card opens its website itself, through the host's open-URL capability.
+    if (!gf::show_business_card(*window)) {
+        restore_help_scope();
+        return;
+    }
+    wake();
 }
 void Collection::close_card() {
-    if (!card_open())
+    gf::Window* window = attached_window();
+    if (window == nullptr || !card_open())
         return;
-    if (attached_window() && card_focus_)
-        static_cast<void>((*attached_window()).end_focus_scope(card_focus_));
-    card_focus_ = {};
-    (*card_).set_showing(false);
-    (*card_).set_visible(false);
-    if (attached_window() && help_open())
-        help_focus_ = (*attached_window()).begin_focus_scope(help_);
+    gf::hide_business_card(*window);
+    restore_help_scope();
     invalidate(gf::Dirty::paint);
+}
+void Collection::restore_help_scope() {
+    gf::Window* window = attached_window();
+    if (window == nullptr || help_focus_ || !help_open() || card_open())
+        return;
+    help_focus_ = (*window).begin_focus_scope(help_);
+}
+void Collection::write_remark(void* context, std::string& remark) {
+    Collection& shell = *static_cast<Collection*>(context);
+    remark = shell.remarks_.next();
 }
 } // namespace games

@@ -9,9 +9,12 @@
 #include "platform/render.hpp"
 
 #include "gui_forms/basic_controls.hpp"
-#include "gui_forms/controls/panel/text_box/text_box.hpp"
+
+#include <array>
+#include "gui_forms/controls/text_box.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
+#include "gui_forms/events/key_events/key_events.hpp"
 
 #include <chrono>
 #include <future>
@@ -35,9 +38,14 @@ public:
     void initialize_control_tree();
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& event) override;
-    void on_key(gf::KeyEvent& event) override;
-    void on_key_bubble(gf::KeyEvent& event) override { on_key(event); }
+    void on_mouse_down(gf::MouseEventArgs& e) override;
+    void on_mouse_up(gf::MouseEventArgs& e) override;
+    void on_mouse_move(gf::MouseEventArgs& e) override;
+    void on_mouse_wheel(gf::MouseEventArgs& e) override;
+    void on_mouse_click(gf::MouseEventArgs& e) override;
+    void on_key_down(gf::KeyEventArgs& e) override;
+    void on_key_up(gf::KeyEventArgs& e) override;
+    void on_key_bubble(gf::KeyEvent& e) override;
     void activate();
     // in the cabinet: whether this game is in front, and the master switches
     void set_cabinet(bool foreground, bool music, bool sound, bool reduced = false);
@@ -46,6 +54,7 @@ public:
     void on_focus_changed(bool focused) override;
 
 private:
+    void key_down(gf::KeyEventArgs& e);
     enum class Panel { none, new_site, sites, help };
     struct SavedSite {
         std::string text;   // the run's own save
@@ -77,10 +86,26 @@ private:
     double since_render_ = 1;
     bool want_render_ = true;
     // input
-    bool keys_[256] = {};
+    // The keys a development script holds (hold=up,1.5), by physical key; real keys are
+    // the window's (held()).
+    std::array<bool, 256> scripted_keys_{};
+    [[nodiscard]] bool held(std::uint32_t key) const;
     double mx_ = 0, my_ = 0;
     bool dragging_ = false, drag_moved_ = false;
     double drag_x_ = 0, drag_y_ = 0;
+    // The orbit on GUI.Forms' relative pointer (cp33): a press asks for the pointer confined to
+    // the view, visible, until its release, so the orbit goes on past the view's edge. While
+    // granted, the motion, the release and the wheel arrive as samples and no click is
+    // derived; a host or window that cannot confine leaves the ordinary raisers (the orbit
+    // then stops at the edge, as before). `orbit_travel_` adds up the sample deltas, which
+    // decide whether the release was a click on a rock.
+    bool orbit_relative_ = false;
+    double orbit_travel_ = 0;
+    void begin_orbit();
+    void orbit_by(double dx, double dy);
+    void fetch_hovered_rock();
+    void relative_sample(gf::RelativePointerEventArgs& sample);
+    void relative_ended(const gf::RelativePointerEnded& ended);
     int hover_rock_ = -1;
     bool hover_ok_ = false;
     double hold_reset_ = 0;             // seconds Start over has been held
@@ -156,7 +181,7 @@ private:
     std::vector<int> xmap_, ymap_;
 
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
     void tick();
     void publish();
     // sites

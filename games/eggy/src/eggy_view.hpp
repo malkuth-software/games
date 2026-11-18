@@ -9,6 +9,7 @@
 #include "gui_forms/basic_controls.hpp"
 #include "gui_forms/live_surface.hpp"
 #include "gui_forms/timer.hpp"
+#include "gui_forms/events/key_events/key_events.hpp"
 
 #include <chrono>
 #include <cmath>
@@ -38,10 +39,16 @@ public:
     void initialize_control_tree() {}
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& p, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& e) override;
-    void on_key(gf::KeyEvent& e) override;
-    void on_key_bubble(gf::KeyEvent& e) override { on_key(e); }
-    void on_text_input(gf::TextInputEvent& e) override;
+    void on_mouse_down(gf::MouseEventArgs& e) override;
+    void on_mouse_up(gf::MouseEventArgs& e) override;
+    void on_mouse_move(gf::MouseEventArgs& e) override;
+    void on_mouse_wheel(gf::MouseEventArgs& e) override;
+    void on_mouse_click(gf::MouseEventArgs& e) override;
+    void on_mouse_capture_changed() override;
+    void on_key_down(gf::KeyEventArgs& e) override;
+    void on_key_up(gf::KeyEventArgs& e) override;
+    void on_key_bubble(gf::KeyEvent& e) override;
+    void on_key_press(gf::KeyPressEventArgs& e) override;
     void activate();
     void set_cabinet_preferences(bool music, bool sound, bool reduced);
     // Ticks the game has run: the count advances whether or not the picture changes.
@@ -118,9 +125,21 @@ private:
     std::vector<Button> buttons_;
     std::string pressed_;
     double away_m_ = 0, away_s_ = 0;
-    bool keys_[5] = {};        // up down left right hop-held
+    // The walk keys held now: the arrows or WASD, read from the window each tick.
+    struct WalkKeys {
+        bool up{};
+        bool down{};
+        bool left{};
+        bool right{};
+    };
+    [[nodiscard]] WalkKeys held_walk_keys() const;
     bool hop_edge_ = false;
     bool mouse_down_ = false;
+    void track_pointer(gf::Point local);
+    std::string hit_button() const;
+    void key_input(gf::KeyEventArgs& e, bool down);
+    // The painted button a release ended, for the click that follows it.
+    std::string released_;
     double mouse_x_ = 0, mouse_y_ = 0;  // physical pixels
     double bs_ = 2;            // backing scale
     int pw_ = 0, ph_ = 0;      // framebuffer size in game pixels
@@ -134,7 +153,7 @@ private:
     bool direct_ = false;
     void register_surface();
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
     void tick();
     void handle(const Event& e);
     void say(const std::string& category, double chance = 1.0);

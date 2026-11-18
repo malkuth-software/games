@@ -21,7 +21,6 @@ class ShelfBox final : public gf::Button {
     // Returns true while still moving.
     bool step(double dt, bool reduced);
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& event) override;
     void on_focus_changed(bool focused) override;
     // Drops the pointer's hover: the window does not tell a box that is hidden while
     // hovered that the pointer went (docs/TOOLKIT_REQUESTS.md).
@@ -30,7 +29,17 @@ class ShelfBox final : public gf::Button {
     // Asks the shelf for frames: the box lifts or settles when the pointer comes or goes.
     std::function<void()> wake;
 
+  protected:
+    // The button's own pointer handling, then a wake when the box turned hot or cold.
+    void on_mouse_down(gf::MouseEventArgs& arguments) override;
+    void on_mouse_up(gf::MouseEventArgs& arguments) override;
+    void on_mouse_move(gf::MouseEventArgs& arguments) override;
+    void on_mouse_enter() override;
+    void on_mouse_leave() override;
+
   private:
+    // Asks for frames when the box's hot state differs from `was`.
+    void wake_if_changed(bool was);
     Entry entry_;
     TextSprites& sprites_;
     double lift_ = 0;
@@ -63,8 +72,10 @@ class ShelfRows final : public gf::Control {
     void add_arrows();
     void arrange(gf::Rect bounds) override;
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
-    void on_pointer(gf::PointerEvent& event) override;
     void on_pointer_bubble(gf::PointerEvent& event) override;
+    // A wheel turn over the shelves (the route's target phase and bubble, or a test):
+    // sets handled when the shelves moved or their glide's target did.
+    void wheel(gf::PointerEvent& event);
     void reveal(Entry entry);
     // The boxes in shelf order: where an entry stands, which stands at a place, and the
     // place a number of shelves up (negative) or down from one, nearest across.
@@ -84,6 +95,10 @@ class ShelfRows final : public gf::Control {
     const ShelfWood* wood = nullptr;
     // The lettering for the categories' tags, owned by the shelf.
     TextSprites* sprites = nullptr;
+
+  protected:
+    // A wheel at the target phase scrolls the shelves, then the event is raised.
+    void on_mouse_wheel(gf::MouseEventArgs& arguments) override;
 
   private:
     // A bookend standing on a shelf, and a category's tag under its first box.
@@ -107,7 +122,6 @@ class ShelfRows final : public gf::Control {
     void scroll_shelves(int shelves);
     void jump_to(double offset);
     void arrange_boxes();
-    void wheel(gf::PointerEvent& event);
 };
 
 // Paints the launch transition above the shelf: the chosen box's art grows to fill
@@ -115,7 +129,7 @@ class ShelfRows final : public gf::Control {
 class LaunchCurtain final : public gf::Control {
   public:
     explicit LaunchCurtain(gf::StableId id) : Control(std::move(id)) {
-        set_hit_test_transparent(true);
+        hit_test_transparent = true;
     }
     void on_paint(gf::Painter& painter, gf::Rect damage) override;
     gf::Rect from{};
@@ -168,7 +182,7 @@ class ShelfView final : public gf::Control {
     ShelfWood wood_;
     double wood_scale_ = 0;
     void on_attached_to_window() override;
-    void on_detaching_from_window(gf::Window& window) noexcept override;
+    void on_detaching_from_window(gf::SurfaceRoot& window) noexcept override;
     void tick();
     void request_animation();
     void focused_box(Entry entry);

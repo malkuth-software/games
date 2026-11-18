@@ -2,72 +2,124 @@
 #include "help_content.hpp"
 #include "game_module.hpp"
 #include "presentation.hpp"
+#include "suite.hpp"
 #include <algorithm>
+#include "stable_ids.hpp"
 namespace games {
 namespace {
 std::shared_ptr<gf::Label> front_line(const std::string& id, std::string_view text, std::uint16_t weight) {
     std::shared_ptr<gf::Label> label =
-        gf::make_control<gf::Label>(gf::StableId("help.front." + id), std::string(text));
-    (*label).set_font({gf::FontRole::content, 16, weight, false});
-    (*label).set_foreground(gf::Color::rgba(42, 38, 24));
-    (*label).set_text_wrapping(gf::TextWrapping::word);
+        gf::make_control<gf::Label>(games::stable_id("help.front." + id), std::string(text));
+    (*label).font = stxlib::Optional<gf::FontSpec>::of(gf::FontSpec{gf::FontRole::content, 16, weight, false});
+    (*label).classes = std::vector<std::string>{"help-text"};
+    (*label).text_wrapping = gf::TextWrapping::word;
     return label;
 }
 class TopicHeading final : public gf::Button {
   public:
     TopicHeading(gf::StableId id, std::string title) : Button(std::move(id), std::move(title)) {
-        set_font({gf::FontRole::content, 18, 600, false});
-        set_accessible_name(text());
+        font = gf::FontSpec{gf::FontRole::content, 18, 600, false};
+        classes = std::vector<std::string>{"topic-heading"};
+        accessible_name = text.read();
         // A disclosure: assistive technology hears whether its topic is open.
-        set_expanded_state(false);
+        expanded_state = stxlib::Optional<bool>::of(false);
     }
     [[nodiscard]] bool expanded() const {
-        return expanded_state().value_or(false);
+        return expanded_state.read().value_or(false);
     }
     void on_paint(gf::Painter& p, gf::Rect) override {
+        // themes/playsuite colours the parts (button.topic-heading): the face, the
+        // "+" or "-" as secondary text (muted-color) and the title.
         const gf::Rect r = client_rectangle();
-        p.fill_rect(r, hovered_visual() ? gf::Color::rgba(236, 226, 156)
-                                        : gf::Color::rgba(244, 235, 175));
-        p.draw_text_utf8({9, 25}, expanded() ? "−" : "+", font(), gf::Color::rgba(66, 58, 33));
-        p.draw_text_utf8({32, 25}, text(), font(), gf::Color::rgba(42, 38, 24));
+        const gf::AnatomyStateSet states = anatomy_states();
+        paint_skin_part(p, *this, gf::PartRole::face, r, states, std::nullopt);
+        const gf::FontSpec f = font.read();
+        paint_line(p, expanded() ? "−" : "+", gf::PartTextTone::secondary, {9, 25}, states, f);
+        paint_line(p, text.read(), gf::PartTextTone::ordinary, {32, 25}, states, f);
+        // The focus outline was a 1-point stroke centred on {1, 1, w - 2, h - 2}.
         if (focus_cue_visible())
-            p.stroke_rect({1, 1, r.width - 2, r.height - 2}, gf::Color::rgba(110, 91, 37), 1);
+            paint_skin_part(p, *this, gf::PartRole::focus, outset({1, 1, r.width - 2, r.height - 2}, .5), states,
+                            std::nullopt);
+    }
+
+  private:
+    void paint_line(gf::Painter& p, std::string_view words, gf::PartTextTone tone, gf::Point baseline,
+                    gf::AnatomyStateSet states, gf::FontSpec f) const {
+        const gf::Size size = p.measure_text_utf8(words, f);
+        gf::PartPaint line{};
+        line.role = gf::PartRole::label;
+        line.key = skin_part_key(gf::PartRole::label);
+        line.states = states;
+        line.family = gf::ControlVisualRole::button;
+        line.text = words;
+        line.font = f;
+        line.tone = tone;
+        line.measured_text.set(size);
+        gf::paint_text_part_at(p, *this, line, baseline, size.width);
     }
 };
 } // namespace
 HelpGlyph::HelpGlyph(gf::StableId id, std::string glyph) : Button(std::move(id), std::move(glyph)) {
-    set_font({gf::FontRole::content, 26, 600, false});
+    font = gf::FontSpec{gf::FontRole::content, 26, 600, false};
+    classes = std::vector<std::string>{"help-glyph"};
 }
-void HelpGlyph::set_ink(gf::Color ink) {
-    ink_ = ink;
-    invalidate(gf::Dirty::paint);
+void HelpGlyph::set_variant(HelpGlyphVariant variant) {
+    std::vector<std::string> names{"help-glyph"};
+    if (variant == HelpGlyphVariant::help_link)
+        names.push_back("help-link");
+    else if (variant == HelpGlyphVariant::card_mark)
+        names.push_back("card-mark");
+    classes = std::move(names);
 }
 void HelpGlyph::on_paint(gf::Painter& p, gf::Rect) {
+    // themes/playsuite colours the glyph (button.help-glyph and its variants): the
+    // label in its ink, lit when hovered, with a soft dark text-shadow that keeps it
+    // readable over bright game art, and the underline mark in the ink (glyph-color).
     const gf::Rect r = client_rectangle();
-    const gf::Size size = p.measure_text_utf8(text(), font());
+    const gf::FontSpec f = font.read();
+    const gf::Size size = p.measure_text_utf8(text.read(), f);
     const gf::Point at{(r.width - size.width) * .5, (r.height - size.height) * .5 + size.height * .8};
-    // A soft dark edge keeps the glyph readable over bright game art.
-    p.draw_text_utf8({at.x + 1, at.y + 1.5}, text(), font(), gf::Color::rgba(0, 0, 0, 110));
-    p.draw_text_utf8(at, text(), font(), hovered_visual() ? gf::Color::rgba(255, 224, 140) : ink_);
-    if (hovered_visual() || focus_cue_visible())
-        p.draw_line({8, r.height - 3}, {r.width - 8, r.height - 3}, ink_, 1);
+    const gf::AnatomyStateSet states = anatomy_states();
+    gf::PartPaint glyph{};
+    glyph.role = gf::PartRole::label;
+    glyph.key = skin_part_key(gf::PartRole::label);
+    glyph.states = states;
+    glyph.family = gf::ControlVisualRole::link;
+    glyph.text = text.read();
+    glyph.font = f;
+    glyph.measured_text.set(size);
+    gf::paint_text_part_at(p, *this, glyph, at, size.width);
+    // The underline was a 1-point line centred on y = h - 3 from x 8 to w - 8: the
+    // underline mark's rule lies along the bottom of its box.
+    if (hovered_visual() || focus_cue_visible()) {
+        gf::PartPaint rule{};
+        rule.role = gf::PartRole::glyph;
+        rule.key = skin_part_key(gf::PartRole::glyph);
+        rule.bounds = {8, 0, r.width - 16, r.height - 2.5};
+        rule.states = states;
+        rule.family = gf::ControlVisualRole::link;
+        rule.mark = gf::PartMark::underline;
+        gf::paint_part(p, *this, rule);
+    }
 }
 HelpPages::HelpPages(gf::StableId id) : ScrollableControl(std::move(id)) {
-    set_auto_scroll(true);
+    auto_scroll = true;
     set_paint_plane(gf::PaintPlane::overlay);
 }
 void HelpPages::add_topic(int entry, std::string topic, std::string title,
                           std::string_view body) {
     const int index = static_cast<int>(topics_.size());
-    const std::string key = std::to_string(entry) + "." + (topic.empty() ? "rules" : topic);
+    // The suite's own topics (entry -1) are "suite": a stable ID has no sign.
+    const std::string owner = entry < 0 ? std::string("suite") : std::to_string(entry);
+    const std::string key = owner + "." + (topic.empty() ? "rules" : topic);
     std::shared_ptr<TopicHeading> heading =
-        gf::make_control<TopicHeading>(gf::StableId("help.topic." + key), std::move(title));
+        gf::make_control<TopicHeading>(games::stable_id("help.topic." + key), std::move(title));
     std::shared_ptr<gf::Label> label = gf::make_control<gf::Label>(
-        gf::StableId("help.body." + key), std::string(body));
-    (*label).set_font({gf::FontRole::content, 17, 400, false});
-    (*label).set_foreground(gf::Color::rgba(42, 38, 24));
-    (*label).set_text_wrapping(gf::TextWrapping::word);
-    (*label).set_visible(false);
+        games::stable_id("help.body." + key), std::string(body));
+    (*label).font = stxlib::Optional<gf::FontSpec>::of(gf::FontSpec{gf::FontRole::content, 17, 400, false});
+    (*label).classes = std::vector<std::string>{"help-text"};
+    (*label).text_wrapping = gf::TextWrapping::word;
+    (*label).visible = false;
     (*heading).set_paint_plane(gf::PaintPlane::overlay);
     (*label).set_paint_plane(gf::PaintPlane::overlay);
     gf::on((*heading).clicked(), *this, &HelpPages::toggle, index);
@@ -114,10 +166,9 @@ void HelpPages::build(int scope) {
     add_topic(-1, "about", "About PlaySuite", help_about());
 }
 void HelpPages::report_card() {
-    const double room = 54;  // the book's heading band above the pages, less a margin
     const double scrolled = scroll_position().y;
     if (card_moved)
-        card_moved({card_centre_.x, card_centre_.y - scrolled}, card_width_, std::max(0.0, room - scrolled));
+        card_moved({card_centre_.x, card_centre_.y - scrolled}, card_width_);
 }
 void HelpPages::on_scroll_position_changed() {
     report_card();
@@ -146,8 +197,8 @@ void HelpPages::select(int entry, std::string_view topic) {
     order_.clear();
     order_.push_back(selected);
     for (int i = 0; i < static_cast<int>(bodies_.size()); ++i) {
-        (*bodies_[i]).set_visible(i == selected);
-        (*headings_[i]).set_expanded_state(i == selected);
+        (*bodies_[i]).visible = i == selected;
+        (*headings_[i]).expanded_state = stxlib::Optional<bool>::of(i == selected);
         (*headings_[i]).invalidate(gf::Dirty::paint);
         if (i != selected)
             order_.push_back(i);
@@ -157,9 +208,9 @@ void HelpPages::select(int entry, std::string_view topic) {
 }
 void HelpPages::toggle(int index) {
     const std::size_t i = static_cast<std::size_t>(index);
-    const bool expanded = !(*bodies_[i]).visible();
-    (*bodies_[i]).set_visible(expanded);
-    (*headings_[i]).set_expanded_state(expanded);
+    const bool expanded = !(*bodies_[i]).visible.read();
+    (*bodies_[i]).visible = expanded;
+    (*headings_[i]).expanded_state = stxlib::Optional<bool>::of(expanded);
     (*headings_[i]).invalidate(gf::Dirty::paint);
     invalidate(gf::Dirty::layout | gf::Dirty::paint);
 }
@@ -182,7 +233,7 @@ void HelpPages::arrange(gf::Rect bounds) {
     for (int index : order_) {
         layout.push_back({headings_[index], {0, y, width, 36}});
         y += 44;
-        if ((*bodies_[index]).visible()) {
+        if ((*bodies_[index]).visible.read()) {
             const double height =
                 std::max(24.0, (*bodies_[index]).measure({width - 16, 100000}).height);
             layout.push_back({bodies_[index], {8, y, width - 16, height}});
@@ -211,24 +262,32 @@ void HelpPages::on_key_bubble(gf::KeyEvent& e) {
         e.handled = true;
     }
 }
+void HelpPages::wheel_from_card(gf::PointerEvent& event) {
+    scroll_pointer(event);
+}
 HelpBook::HelpBook(gf::StableId id) : Control(std::move(id)) {
     set_paint_plane(gf::PaintPlane::overlay);
-    set_theme_override(games_theme(ButtonSkin::ivory));
+    set_skin_class(*this, ButtonSkin::ivory);
 }
 void HelpBook::initialize_control_tree() {
     pages_ = gf::make_control<HelpPages>(gf::StableId("help.pages"));
     (*pages_).card_moved = std::bind_front(&HelpBook::place_card, this);
-    card_ = gf::make_control<BusinessCard>(gf::StableId("help.business-card"), BusinessCard::Kind::page);
-    (*card_).scroll = std::bind_front(&HelpBook::wheel_over_card, this);
-    (*card_).open = std::bind_front(&HelpBook::card_clicked, this);
-    gf::on(visible_changed(), *this, &HelpBook::visibility);
+    card_ = gf::make_control<gf::BusinessCard>(gf::StableId("help.business-card"),
+                                                gf::BusinessCardPresentation::page);
+    // Shown once the pages have placed it.
+    (*card_).visible = false;
+    gf::on((*card_).open_requested(), *this, &HelpBook::card_clicked);
+    band_ = gf::make_control<HeadingBand>(gf::StableId("help.heading-band"));
     close_ = gf::make_control<HelpGlyph>(gf::StableId("help.close"), "×");
     (*close_).set_paint_plane(gf::PaintPlane::overlay);
-    (*close_).set_accessible_name("Close PlaySuite help (H or Escape)");
+    (*close_).accessible_name = "Close PlaySuite help (H or Escape)";
     gf::on((*close_).clicked(), *this, &HelpBook::clicked_close);
     add_child(pages_);
     add_child(card_);
+    add_child(band_);
     add_child(close_);
+    // The card is drawn, and takes the pointer, only below the band's lower edge.
+    (*card_).set_heading_band(band_);
 }
 void HelpBook::on_key_bubble(gf::KeyEvent& event) {
     (*pages_).on_key_bubble(event);
@@ -243,29 +302,43 @@ void HelpBook::select(int entry, std::string_view topic) {
     if (window != nullptr)
         sheet_.prepare(*window);
     (*pages_).select(entry, topic);
-    (*card_).set_showing(true);
 }
-void HelpBook::visibility(bool shown) {
-    if (!shown)
-        (*card_).set_showing(false);
+// The card's stock is `width` wide with its middle at `centre`, in the pages' visible points
+// (the pages sit at (20, 62) in the book). GUI.Forms' card keeps a fixed margin around its
+// stock for the shadow and the tilt and fits the stock in the rest, at the card's proportion
+// (3.5 by 2), so the margin is read from its measure: W = w + 2m and H = h + 2m with
+// w = 1.75 h give h = (W - H) / 0.75. Scrolled up, the card goes under the book's heading band
+// (set_heading_band), which GUI.Forms' card clips it to.
+void HelpBook::place_card(gf::Point centre, double width) {
+    const gf::Size wanted = (*card_).measure(gf::Size{});
+    const double stock_height_wanted = (wanted.width - wanted.height) / 0.75;
+    const double margin = std::max(0.0, (wanted.height - stock_height_wanted) / 2);
+    const double stock_height = width * 2 / 3.5;
+    const gf::Rect placed{20 + centre.x - width / 2 - margin, 62 + centre.y - stock_height / 2 - margin,
+                          width + 2 * margin, stock_height + 2 * margin};
+    set_child_layout(card_, placed);
+    if (!(*card_).visible.read())
+        (*card_).visible = true;
 }
-void HelpBook::place_card(gf::Point centre, double width, double top_room) {
-    (*card_).place(centre, width, top_room);
+void HelpBook::card_clicked(gf::BusinessCardRequest& request) {
+    if (!open_card)
+        return;
+    open_card();
+    request.handled = true;
 }
-void HelpBook::card_clicked() {
-    if (open_card)
-        open_card();
-}
-void HelpBook::wheel_over_card(gf::PointerEvent& event) {
-    (*pages_).on_pointer(event);
+void HelpBook::on_pointer_bubble(gf::PointerEvent& event) {
+    if (event.action == gf::PointerAction::wheel && !event.handled)
+        (*pages_).wheel_from_card(event);
+    gf::Control::on_pointer_bubble(event);
 }
 void HelpBook::arrange(gf::Rect bounds) {
     arrange_self(bounds);
     set_child_layout(close_, {bounds.width - 48, 9, 36, 36});
     set_child_layout(pages_, {20, 62, bounds.width - 36, bounds.height - 82});
-    set_child_layout(card_, {20, 62, bounds.width - 36, bounds.height - 82});
+    // The band is the book above the pages: its title and rule.
+    set_child_layout(band_, {0, 0, bounds.width, 62});
 }
-void HelpBook::on_detaching_from_window(gf::Window& window) noexcept {
+void HelpBook::on_detaching_from_window(gf::SurfaceRoot& window) noexcept {
     sheet_.release(window);
 }
 void HelpBook::on_paint(gf::Painter& p, gf::Rect) {

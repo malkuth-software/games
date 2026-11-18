@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -993,6 +994,106 @@ void test_robustness() {
                std::string(settled ? "; all asleep by 10 s" : "; NOT asleep by 10 s"));
 }
 
+// ---------------------------------------------------------------- degenerate hulls
+
+// Cooks one hull from `points`: either the hull is refused (std::runtime_error) or it
+// is well formed: every face loop indexes the hull's vertices and the face tables
+// agree. Under ASan/UBSan the hull builder must not read outside its tables either
+// way (the boundary-loop pass once followed next[-1] for a group with no boundary).
+bool cooks_or_refuses(const std::vector<Vec3>& points, std::string& outcome) {
+    std::vector<std::vector<Vec3>> hulls;
+    hulls.push_back(points);
+    try {
+        const Shape shape = cook_points(hulls, Material());
+        for (size_t h = 0; h < shape.hulls.size(); h += 1) {
+            const zc::phys::HullData& hull = shape.hulls[h];
+            if (hull.face_first.size() != hull.face_normals.size() + 1 ||
+                hull.face_offsets.size() != hull.face_normals.size() || hull.face_normals.size() < 4) {
+                outcome = "malformed face tables";
+                return false;
+            }
+            for (size_t k = 0; k < hull.face_loop.size(); k += 1) {
+                if (hull.face_loop[k] < 0 || static_cast<size_t>(hull.face_loop[k]) >= hull.vertices.size()) {
+                    outcome = "face loop outside the vertices";
+                    return false;
+                }
+            }
+        }
+        outcome = "cooked";
+        return true;
+    } catch (const std::runtime_error& refusal) {
+        outcome = std::string("refused (") + refusal.what() + ")";
+        return true;
+    }
+}
+
+void test_degenerate_hulls() {
+    // A revolved lattice with poles: every point of the first and last rings is the same
+    // point, and a ring just wider than the weld distance stands beside each pole.
+    std::vector<Vec3> pole;
+    for (int ring = 0; ring <= 4; ring += 1) {
+        const double radius = 0.1 * std::sin(kPi * ring / 4);
+        for (int k = 0; k < 16; k += 1) {
+            const double angle = 2 * kPi * k / 16;
+            pole.push_back(Vec3{radius * std::cos(angle), radius * std::sin(angle), 0.05 * ring});
+        }
+    }
+    for (int k = 0; k < 8; k += 1) {
+        const double angle = 2 * kPi * k / 8;
+        pole.push_back(Vec3{1.5e-4 * std::cos(angle), 1.5e-4 * std::sin(angle), 0});
+        pole.push_back(Vec3{1.5e-4 * std::cos(angle), 1.5e-4 * std::sin(angle), 0.2});
+    }
+    // Exactly flat rings of a revolved sheet: every point on z = 0.
+    std::vector<Vec3> flat;
+    for (int k = 0; k < 32; k += 1) {
+        const double angle = 2 * kPi * k / 32;
+        flat.push_back(Vec3{0.1 * std::cos(angle), 0.1 * std::sin(angle), 0});
+        flat.push_back(Vec3{0.05 * std::cos(angle), 0.05 * std::sin(angle), 0});
+    }
+    // The same sheet given a micron of thickness: two rings too close to enclose a volume.
+    std::vector<Vec3> sheet;
+    for (int k = 0; k < 32; k += 1) {
+        const double angle = 2 * kPi * k / 32;
+        sheet.push_back(Vec3{0.1 * std::cos(angle), 0.1 * std::sin(angle), 0});
+        sheet.push_back(Vec3{0.1 * std::cos(angle), 0.1 * std::sin(angle), 1.0e-6});
+    }
+    // A sliver: a square with one point barely above its plane (beyond the plane epsilon).
+    std::vector<Vec3> sliver;
+    sliver.push_back(Vec3{0, 0, 0});
+    sliver.push_back(Vec3{0.1, 0, 0});
+    sliver.push_back(Vec3{0.1, 0.1, 0});
+    sliver.push_back(Vec3{0, 0.1, 0});
+    sliver.push_back(Vec3{0.05, 0.05, 1.0e-8});
+    // Repeated points only: four distinct corners, each given eight times.
+    std::vector<Vec3> repeated;
+    const Vec3 corners[4] = {Vec3{0, 0, 0}, Vec3{0.1, 0, 0}, Vec3{0, 0.1, 0}, Vec3{0, 0, 0.1}};
+    for (int copy = 0; copy < 8; copy += 1) {
+        for (int c = 0; c < 4; c += 1) {
+            repeated.push_back(corners[c]);
+        }
+    }
+    const std::vector<Vec3>* const cases[5] = {&pole, &flat, &sheet, &sliver, &repeated};
+    const char* const names[5] = {"pole", "flat ring", "thin sheet", "sliver", "repeated"};
+    bool pass = true;
+    std::string detail;
+    for (int c = 0; c < 5; c += 1) {
+        std::string outcome;
+        pass = cooks_or_refuses(*cases[c], outcome) && pass;
+        detail += std::string(c == 0 ? "" : "; ") + names[c] + ": " + outcome;
+    }
+    // The repeated corners are a proper tetrahedron once welded.
+    std::string tetrahedron;
+    std::vector<std::vector<Vec3>> welded;
+    welded.push_back(repeated);
+    try {
+        const Shape shape = cook_points(welded, Material());
+        pass = pass && shape.hulls.size() == 1 && shape.hulls[0].face_normals.size() == 4;
+    } catch (const std::runtime_error&) {
+        pass = false;
+    }
+    report("degenerate hulls: refused or well formed, never read out of bounds", pass, detail);
+}
+
 // ---------------------------------------------------------------- 16. performance
 
 void test_performance() {
@@ -1142,6 +1243,7 @@ int main(int argc, char** argv) {
         {"static", test_static_body},
         {"restitution", test_restitution},
         {"stable", test_rest_and_stable},
+        {"degenerate", test_degenerate_hulls},
     };
     const int count = static_cast<int>(sizeof tests / sizeof tests[0]);
     const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();

@@ -55,17 +55,19 @@ void medal_icon(Canvas& c, double x, double y, double r, int medal) {
 }
 }  // namespace
 
-ThievesView::ThievesView(gf::StableId id, Options opt) : Control(std::move(id)), opt_(opt), show_(seed_now()) {
+ThievesView::ThievesView(gf::StableId id, Options opt) : gf::Control(std::move(id)), opt_(opt), show_(seed_now()) {
     cab_front_ = !opt_.hosted;
-    set_focusable(true);
-    set_style(gf::ControlStyles::opaque, true);
+    focusable = true;
+    // Every release over the view is a click: a quick second press is another click, not a
+    // double click. (The opaque style went in GUI.Forms 0.6, audit A17.)
+    set_style(gf::ControlStyles::standard_double_click, false);
     {
         gf::SurfaceMaterial none;
         none.fills = {gf::MaterialFillLayer::solid(gf::Color::rgba(0, 0, 0))};
         set_authored_surface_material(none);
     }
-    set_accessible_name("Catching Thieves. Raccoon bandits are raiding the bear's garden from their burrows. Push a pumpkin onto every burrow to trap them. "
-                        "Arrow keys or WASD walk; walking into a pumpkin pushes it. Click a square to walk there. Z undo, R restart, H or F1 help; Hint is in the command capsule and the difficulty in Settings.");
+    accessible_name = "Catching Thieves. Raccoon bandits are raiding the bear's garden from their burrows. Push a pumpkin onto every burrow to trap them. "
+                        "Arrow keys or WASD walk; walking into a pumpkin pushes it. Click a square to walk there. Z undo, R restart, H or F1 help; Hint is in the command capsule and the difficulty in Settings.";
     rng_ = seed_now() | 1;
     load_tables();
     if (load_save(save_path(opt_.dev), save_)) {
@@ -159,10 +161,10 @@ void ThievesView::on_attached_to_window() {
     timer_ = std::make_unique<gf::Timer>(*attached_window(), std::chrono::milliseconds(33));
     subs_.push_back((*timer_).tick().subscribe(*this, gf::Delegate<>::bind<ThievesView, &ThievesView::tick>(*this)));
     last_ = std::chrono::steady_clock::now();
-    if (cab_front_ && visible()) (*timer_).start();
+    if (cab_front_ && visible.read()) (*timer_).start();
 }
 
-void ThievesView::on_detaching_from_window(gf::Window&) noexcept {
+void ThievesView::on_detaching_from_window(gf::SurfaceRoot&) noexcept {
     try { persist(); } catch (...) {}
     if (timer_) (*timer_).stop();
     timer_.reset();
@@ -180,7 +182,7 @@ void ThievesView::activate() {
 
 void ThievesView::request_frame() {
     render_dirty_ = true;
-    if (timer_ && cab_front_ && visible()) {
+    if (timer_ && cab_front_ && visible.read()) {
         if (!(*timer_).enabled()) last_ = std::chrono::steady_clock::now();
         (*timer_).start();
     }
@@ -194,7 +196,7 @@ void ThievesView::set_cabinet(bool foreground, bool music, bool sound, bool redu
         if (timer_) (*timer_).stop();
         queue_.clear(); pressed_.clear(); hover_.clear(); mouse_in_ = false; hover_cell_ = -1;
         show_.state().hover_cell = -1; show_.state().path.clear();
-        set_cursor(gf::CursorKind::arrow);
+        cursor = stxlib::Optional<gf::CursorKind>::of(gf::CursorKind::arrow);
         if (hint_) (*hint_).cancellation.request_stop();
         if (gen_) (*gen_).cancellation.request_stop();
         if (field_) (*field_).cancel = true;
@@ -683,7 +685,7 @@ void ThievesView::next() {
 
 // ------------------------------------------------------------------ frame
 void ThievesView::play(const std::string& name, float gain, float rate) {
-    audio_sfx(name, gain, rate, (opt_.hosted || save_.settings.sound) && cab_sound_ && cab_front_ && visible());
+    audio_sfx(name, gain, rate, (opt_.hosted || save_.settings.sound) && cab_sound_ && cab_front_ && visible.read());
 }
 
 void ThievesView::say(const std::string& s, Col c) {
@@ -787,7 +789,7 @@ void ThievesView::commit_queued_moves() {
 
 void ThievesView::tick() {
     ++timer_callbacks_;
-    if (!cab_front_ || !visible()) { if (timer_) (*timer_).stop(); return; }
+    if (!cab_front_ || !visible.read()) { if (timer_) (*timer_).stop(); return; }
     const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
     const double dt = std::clamp(std::chrono::duration<double>(now - last_).count(), 0.0, .25);
     last_ = now; t_ += dt;
@@ -843,38 +845,99 @@ void ThievesView::publish() {
 }
 
 // ------------------------------------------------------------------ input
-void ThievesView::on_pointer(gf::PointerEvent& e) {
-    if (!cab_front_) return;
-    request_frame();
-    const gf::Point local = point_from_window(e.position);
+// The pointer, in GUI.Forms' raisers. The painted buttons fire on the derived
+// click (a release over the view after a press on the same button), so the
+// window's order rules apply; a press on the garden walks at once. Nothing
+// reacts while the cabinet is behind another.
+void ThievesView::track_pointer(gf::Point local) {
     mouse_x_ = local.x / pixel_;
     mouse_y_ = local.y / pixel_;
-    mouse_in_ = e.action != gf::PointerAction::leave;
-    if (e.action == gf::PointerAction::move || e.action == gf::PointerAction::leave) {
-        hover_ = hit_button();
-        hover_cell_ = mouse_in_ && hover_.empty() && panel_ == Panel::none && mouse_x_ < pw_ - hud_w_ ? garden_.pick_cell(mouse_x_, mouse_y_) : -1;
-        if (hover_cell_ >= 0 && !board_.level().floor(hover_cell_)) hover_cell_ = -1;
-        set_cursor(!hover_.empty() || hover_cell_ >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow);
+}
+
+void ThievesView::update_hover() {
+    hover_ = mouse_in_ ? hit_button() : std::string{};
+    hover_cell_ = mouse_in_ && hover_.empty() && panel_ == Panel::none && mouse_x_ < pw_ - hud_w_ ? garden_.pick_cell(mouse_x_, mouse_y_) : -1;
+    if (hover_cell_ >= 0 && !board_.level().floor(hover_cell_)) hover_cell_ = -1;
+    const gf::CursorKind pointer_shape = !hover_.empty() || hover_cell_ >= 0 ? gf::CursorKind::hand : gf::CursorKind::arrow;
+    cursor = stxlib::Optional<gf::CursorKind>::of(pointer_shape);
+}
+
+void ThievesView::on_mouse_move(gf::MouseEventArgs& e) {
+    if (cab_front_) {
+        request_frame();
+        track_pointer(e.location);
+        mouse_in_ = true;
+        update_hover();
     }
-    if (e.action == gf::PointerAction::down && e.button == gf::PointerButton::primary) {
-        activate();
-        const std::string h = hit_button();
-        if (!h.empty()) { pressed_ = h; e.handled = true; return; }
-        if (panel_ == Panel::none && !won_) walk_to(garden_.pick_cell(mouse_x_, mouse_y_));
-        e.handled = true;
-    } else if (e.action == gf::PointerAction::up) {
-        if (!pressed_.empty() && hit_button() == pressed_) action(pressed_);
+    gf::Control::on_mouse_move(e);
+}
+
+void ThievesView::on_mouse_leave() {
+    if (cab_front_) {
+        request_frame();
+        mouse_in_ = false;
+        update_hover();
+    }
+    gf::Control::on_mouse_leave();
+}
+
+void ThievesView::on_mouse_down(gf::MouseEventArgs& e) {
+    if (cab_front_) {
+        request_frame();
+        track_pointer(e.location);
+        mouse_in_ = true;
+        if (e.button == gf::PointerButton::primary) {
+            activate();
+            const std::string h = hit_button();
+            if (!h.empty()) pressed_ = h;
+            else if (panel_ == Panel::none && !won_) walk_to(garden_.pick_cell(mouse_x_, mouse_y_));
+            e.handled = true;
+        }
+    }
+    if (is_alive()) gf::Control::on_mouse_down(e);
+}
+
+void ThievesView::on_mouse_up(gf::MouseEventArgs& e) {
+    if (cab_front_) {
+        request_frame();
+        track_pointer(e.location);
+        released_ = pressed_;
         pressed_.clear();
         e.handled = true;
     }
+    gf::Control::on_mouse_up(e);
 }
 
-void ThievesView::on_key(gf::KeyEvent& e) {
+void ThievesView::on_mouse_click(gf::MouseEventArgs& e) {
+    const std::string released = released_;
+    released_.clear();
+    if (cab_front_) {
+        track_pointer(e.location);
+        if (!released.empty() && hit_button() == released) action(released);
+    }
+    if (is_alive()) gf::Control::on_mouse_click(e);
+}
+
+// The keys: the view's own handling runs after the base raised the event, on
+// a key its subscribers left unhandled; keys bubbling from a focused child
+// take the same handling.
+void ThievesView::on_key_down(gf::KeyEventArgs& e) {
+    gf::Control::on_key_down(e);
+    key_down(e);
+}
+
+void ThievesView::on_key_bubble(gf::KeyEvent& e) {
+    if (e.action != gf::KeyAction::down) return;
+    gf::KeyEventArgs arguments = gf::key_event_arguments(e);
+    key_down(arguments);
+    e.handled = arguments.handled;
+}
+
+void ThievesView::key_down(gf::KeyEventArgs& e) {
     if (e.handled || !cab_front_) return;
     request_frame();
     if (opt_.hosted && e.physical_key == gf::PhysicalKey::m) return;
     using K = gf::PhysicalKey;
-    if (e.action != gf::KeyAction::down) return;
     const std::uint32_t k = e.physical_key;
     if (panel_ != Panel::none) {
         if (k == K::escape || k == K::enter || (k == K::f1 && panel_ == Panel::help)) open(Panel::none);
@@ -901,6 +964,7 @@ void ThievesView::on_key(gf::KeyEvent& e) {
     if (k == K::m) { action("music"); e.handled = true; return; }
     if (k == K::escape) { e.handled = true; return; }
 }
+
 
 void ThievesView::action(const std::string& id) {
     request_frame();
